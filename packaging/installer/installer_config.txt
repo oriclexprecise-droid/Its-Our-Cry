@@ -1,5 +1,5 @@
 ;!@Install@!UTF-8!
 Title="It's Our Cry!!!!! 安装程序"
 BeginPrompt="It's Our Cry!!!!! 将安装到你的电脑"
-RunProgram="setup.cmd"
+RunProgram="powershell.exe -NoProfile -ExecutionPolicy Bypass -File setup.ps1"
 ;!@InstallEnd@!

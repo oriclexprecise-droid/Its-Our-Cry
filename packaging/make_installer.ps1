@@ -1,4 +1,4 @@
-﻿# 使用 7-Zip SFX 生成安装包
+# 使用 7-Zip SFX 生成安装包
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
@@ -16,7 +16,6 @@ New-Item -ItemType Directory -Force -Path (Join-Path $payloadDir 'app') | Out-Nu
 
 Write-Host '== 组装安装包载荷 =='
 Copy-Item (Join-Path $releaseApp '*') (Join-Path $payloadDir 'app') -Recurse -Force
-Copy-Item (Join-Path $installerDir 'setup.cmd') $payloadDir -Force
 Copy-Item (Join-Path $installerDir 'setup.ps1') $payloadDir -Force
 
 if (Test-Path $archive) { Remove-Item $archive -Force }
