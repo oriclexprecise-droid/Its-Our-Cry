@@ -425,8 +425,11 @@ async function pollProgress(btn, progressText, barFill) {
     }
     if (!p.generating && p.merged_path) {
       const failCount = Object.keys(p.failures || {}).length;
-      if (failCount > 0 || p.generated_count > 0) {
+      if (failCount > 0) {
         progressText.textContent = "生成完成：语音 " + p.generated_count + " 条，另有 " + failCount + " 条仅保留字幕";
+        progressText.className = "status-text success";
+      } else if (p.generated_count > 0) {
+        progressText.textContent = "生成完成：语音 " + p.generated_count + " 条";
         progressText.className = "status-text success";
       } else {
         progressText.textContent = "生成完成：全部为旁白字幕";
