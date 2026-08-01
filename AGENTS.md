@@ -1,4 +1,4 @@
-﻿# MyGO TTS 配音工作台
+# MyGO TTS 配音工作台
 
 剧本 -> DeepSeek 情绪分析 -> GPT-SoVITS 多角色 TTS -> 合并音频 + SRT 字幕。
 
@@ -19,3 +19,9 @@
 - 角色：千早爱音、要乐奈、高松灯、椎名立希、长崎素世。
 - 情绪：生气、告别、哭泣、感动、决心、悲伤、认真、害羞、微笑、惊讶、思考。
 - 参考音频目录：`reference_audio/<角色>/<情绪>/`，只有千早爱音和长崎素世的“微笑”目前有音频，其余目录待用户填充。
+
+## 打包边界（必须遵守）
+- 安装包只包含我们自己的内容：程序代码、前端页面、config、角色权重（GPT_weights_v2ProPlus / SoVITS_weights_v2ProPlus）、参考音频、图片背景等。
+- GPT-SoVITS 完整运行时、PyTorch/torchaudio、ffmpeg 等大型依赖一律不打包，全部由“部署”板块引导用户下载/安装。
+- 用户安装后得到的是独立可启动的 app（自带轻量运行环境或独立 exe），不应依赖用户机器上已有的 GPT-SoVITS。
+- TTS 推理时通过部署板块里用户确认的 GPT-SoVITS 路径调用其 runtime 的 python.exe。
