@@ -1051,8 +1051,6 @@ async function applyRandomBackground() {
     if (!list.length) return;
     const pick = list[Math.floor(Math.random() * list.length)];
     document.body.style.backgroundImage = "url(\"/picture/" + encodeURIComponent(pick) + "\")";
-    const shifted = "066435b980eaf8176f6b273325558d5e2027509884-4k-standard v2-2x.jpeg";
-    document.body.style.backgroundPosition = pick === shifted ? "58% 56%" : "center center";
   } catch (e) {}
 }
 
