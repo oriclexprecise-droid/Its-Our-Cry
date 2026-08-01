@@ -147,6 +147,82 @@ def _ffmpeg_info():
     return {"installed": True, "version": first, "path": exe}
 
 
+
+def _parse_cuda_number(cuda_version):
+    if not cuda_version:
+        return None
+    parts = cuda_version.split(".")
+    try:
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        return major + minor / 10.0
+    except Exception:
+        return None
+
+
+def _torch_index(gpus, cuda_version):
+    if not gpus:
+        return "https://download.pytorch.org/whl/cpu"
+    ver = _parse_cuda_number(cuda_version)
+    if ver is None:
+        return None
+    if ver >= 12.6:
+        return "https://download.pytorch.org/whl/cu126"
+    if ver >= 12.4:
+        return "https://download.pytorch.org/whl/cu124"
+    if ver >= 12.1:
+        return "https://download.pytorch.org/whl/cu121"
+    if ver >= 11.8:
+        return "https://download.pytorch.org/whl/cu118"
+    return None
+
+
+def build_install_plan(packages, gpus, cuda_version):
+    missing = [p["name"] for p in packages if not p["installed"]]
+    if not missing:
+        return {
+            "packages": [],
+            "torch_index": None,
+            "commands": [],
+            "note": "依赖已就绪，无需安装",
+            "gpu_mode": None,
+        }
+    torch_pkgs = [name for name in ("torch", "torchaudio") if name in missing]
+    other_pkgs = [name for name in missing if name not in ("torch", "torchaudio")]
+    index = _torch_index(gpus, cuda_version) if torch_pkgs else None
+
+    commands = []
+    if torch_pkgs:
+        cmd = [sys.executable, "-m", "pip", "install"] + torch_pkgs
+        if index:
+            cmd += ["--index-url", index]
+        commands.append(cmd)
+    if other_pkgs:
+        commands.append([sys.executable, "-m", "pip", "install"] + other_pkgs)
+
+    if torch_pkgs:
+        if gpus:
+            mode = "gpu"
+            if index:
+                note = "检测到 NVIDIA 显卡，PyTorch 将匹配 CUDA " + (cuda_version or "未知") + " 安装"
+            else:
+                note = "检测到 NVIDIA 显卡，但未识别到 CUDA 版本，将使用默认 PyTorch 源"
+        else:
+            mode = "cpu"
+            note = "未检测到 NVIDIA 显卡，将安装 CPU 版 PyTorch"
+    else:
+        mode = None
+        note = "PyTorch 已安装，其余依赖将通过 pip 安装"
+
+    return {
+        "packages": missing,
+        "torch_index": index,
+        "commands": commands,
+        "note": note,
+        "gpu_mode": mode,
+    }
+
+
 def scan_environment(config, project_root, gptsovits_path=None):
     gs_path = Path(gptsovits_path or config["gptsovits_path"])
     gs_exists = gs_path.exists()
@@ -165,6 +241,7 @@ def scan_environment(config, project_root, gptsovits_path=None):
     gpus = _gpus()
     cuda_version = _cuda_version()
     core_names = {name for name, _ in CORE_PACKAGES}
+    install_plan = build_install_plan(packages, gpus, cuda_version)
 
     issues = []
     if not gs_exists:
@@ -209,6 +286,7 @@ def scan_environment(config, project_root, gptsovits_path=None):
             "runtime_python": runtime_python,
             "checks": checks,
         },
+        "install_plan": install_plan,
         "issues": issues,
         "ready": not issues,
     }

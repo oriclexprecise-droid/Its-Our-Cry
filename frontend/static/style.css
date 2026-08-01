@@ -148,3 +148,15 @@ textarea { min-height: 240px; line-height: 1.6; }
 .scan-value.bad { color: #e94560; }
 .scan-row.wrap .scan-value { white-space: normal; overflow: visible; }
 .issue-list { margin: 0; padding-left: 16px; font-size: 12px; color: #e94560; line-height: 1.6; }
+
+.install-note { font-size: 12px; color: #e94560; margin-bottom: 6px; line-height: 1.5; }
+.install-note.ok { color: #4ecca3; }
+.install-list { margin-bottom: 10px; }
+#btn-deploy-install { margin-top: 0; }
+#deploy-install-status { display: block; margin-top: 6px; }
+.deploy-install-box { margin-top: 10px; }
+.deploy-install-log {
+  max-height: 180px; overflow-y: auto; background: #0f3460; border: 1px solid #1a4a7a;
+  border-radius: 6px; padding: 8px 10px; font-family: Consolas, "Courier New", monospace;
+  font-size: 11px; color: #b8d4f0; white-space: pre-wrap; word-break: break-all; line-height: 1.5;
+}

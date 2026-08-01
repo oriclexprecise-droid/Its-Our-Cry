@@ -52,6 +52,7 @@ def create_app(config_path="config.yaml"):
         "generating": False,
         "progress": {"current": 0, "total": 0},
         "time_info": [],
+        "deploy_install": {"running": False, "done": False, "success": None, "log": []},
     }
 
     @app.route("/")
@@ -535,4 +536,57 @@ def create_app(config_path="config.yaml"):
             traceback.print_exc()
             return jsonify({"error": "环境扫描失败: " + str(e)}), 500
 
+    @app.route("/api/deploy/install", methods=["POST"])
+    def deploy_install():
+        data = request.get_json(silent=True) or {}
+        user_path = str(data.get("gptsovits_path", "")).strip()
+        if state["deploy_install"]["running"]:
+            return jsonify({"error": "安装正在进行中"}), 409
+        try:
+            result = scan_environment(config, project_root, user_path or None)
+            commands = result["install_plan"]["commands"]
+            if not commands:
+                return jsonify({"status": "nothing_to_install", "install_plan": result["install_plan"]})
+            state["deploy_install"] = {"running": True, "done": False, "success": None, "log": []}
+
+            def worker():
+                try:
+                    for cmd in commands:
+                        proc = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                        )
+                        for line in proc.stdout:
+                            line = line.rstrip()
+                            log = state["deploy_install"]["log"]
+                            log.append(line)
+                            if len(log) > 300:
+                                del log[:len(log) - 300]
+                        proc.wait()
+                        if proc.returncode != 0:
+                            state["deploy_install"]["success"] = False
+                            return
+                    state["deploy_install"]["success"] = True
+                except Exception as e:
+                    log = state["deploy_install"]["log"]
+                    log.append("安装失败: " + str(e))
+                    state["deploy_install"]["success"] = False
+                finally:
+                    state["deploy_install"]["running"] = False
+                    state["deploy_install"]["done"] = True
+
+            threading.Thread(target=worker, daemon=True).start()
+            return jsonify({"status": "started", "commands": commands})
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "启动安装失败: " + str(e)}), 500
+
+    @app.route("/api/deploy/install_status", methods=["GET"])
+    def deploy_install_status():
+        return jsonify(state["deploy_install"])
     return app

@@ -409,7 +409,7 @@ function loadDeployPath(cfg) {
   });
 }
 
-document.getElementById("btn-deploy-scan").addEventListener("click", async () => {
+async function scanDeploy() {
   const btn = document.getElementById("btn-deploy-scan");
   const status = document.getElementById("deploy-scan-status");
   const result = document.getElementById("deploy-scan-result");
@@ -431,7 +431,10 @@ document.getElementById("btn-deploy-scan").addEventListener("click", async () =>
   } finally {
     btn.disabled = false;
   }
-});
+}
+
+document.getElementById("btn-deploy-scan").addEventListener("click", scanDeploy);
+
 
 function scanGroup(title, items, okMode) {
   return '<div class="scan-group"><h4>' + esc(title) + "</h4>" +
@@ -488,10 +491,85 @@ function renderDeployScan(d) {
     ["版本", d.ffmpeg.version || "-"]
   ], true));
 
+  const plan = d.install_plan || { packages: [] };
+  if (plan.packages && plan.packages.length) {
+    rows.push('<div class="scan-group"><h4>需要安装</h4><p class="install-note">' + esc(plan.note || "") + '</p><ul class="issue-list install-list">' + plan.packages.map(p => "<li>" + esc(p) + "</li>").join("") + '</ul><button id="btn-deploy-install" class="btn-secondary btn-small">一键 pip 安装</button><span id="deploy-install-status" class="status-text"></span></div>');
+  } else {
+    rows.push('<div class="scan-group"><h4>需要安装</h4><p class="install-note ok">' + esc(plan.note || "依赖已就绪，无需安装") + "</p></div>");
+  }
+
   if (d.issues && d.issues.length) {
     rows.push('<div class="scan-group"><h4>需要处理</h4><ul class="issue-list">' + d.issues.map(i => "<li>" + esc(i) + "</li>").join("") + "</ul></div>");
   }
 
   host.innerHTML = rows.join("");
+  const installBtn = host.querySelector("#btn-deploy-install");
+  if (installBtn) installBtn.addEventListener("click", startDeployInstall);
+}
+
+
+let deployInstalling = false;
+
+async function startDeployInstall() {
+  if (deployInstalling) return;
+  const input = document.getElementById("deploy-gs-path");
+  const btn = document.getElementById("btn-deploy-install");
+  const statusEl = document.getElementById("deploy-install-status");
+  const logBox = document.getElementById("deploy-install-box");
+  const logEl = document.getElementById("deploy-install-log");
+  if (!btn || !statusEl) return;
+  deployInstalling = true;
+  btn.disabled = true;
+  statusEl.textContent = "正在准备安装...";
+  statusEl.className = "status-text";
+  if (logBox) logBox.classList.remove("hidden");
+  if (logEl) logEl.textContent = "";
+  try {
+    const data = await api("/api/deploy/install", { method: "POST", body: JSON.stringify({ gptsovits_path: input.value.trim() }) });
+    if (data.status === "nothing_to_install") {
+      statusEl.textContent = "无需安装";
+      statusEl.className = "status-text success";
+      deployInstalling = false;
+      btn.disabled = false;
+      return;
+    }
+    pollDeployInstall(btn, statusEl, logEl);
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+    deployInstalling = false;
+    btn.disabled = false;
+  }
+}
+
+async function pollDeployInstall(btn, statusEl, logEl) {
+  try {
+    const st = await api("/api/deploy/install_status");
+    if (logEl) {
+      logEl.textContent = (st.log || []).join("\n");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    if (st.running) {
+      statusEl.textContent = "安装中，请勿关闭窗口...";
+      statusEl.className = "status-text";
+      setTimeout(() => pollDeployInstall(btn, statusEl, logEl), 1200);
+      return;
+    }
+    deployInstalling = false;
+    btn.disabled = false;
+    if (st.success) {
+      statusEl.textContent = "安装完成，正在重新扫描...";
+      statusEl.className = "status-text success";
+      await scanDeploy();
+    } else {
+      statusEl.textContent = "安装失败，请查看日志";
+      statusEl.className = "status-text error";
+    }
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+    deployInstalling = false;
+    btn.disabled = false;
+  }
 }
 loadConfig();
