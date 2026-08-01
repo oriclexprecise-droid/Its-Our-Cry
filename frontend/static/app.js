@@ -16,7 +16,6 @@ async function loadConfig() {
   const cfg = await api("/api/config");
   state.chars = cfg.characters;
   state.emotions = cfg.emotions;
-  state.emotionPrompt = cfg.emotion_prompt || "";
   loadDeployPath(cfg);
   const savedAi = loadAIConfigFromStorage();
   if (savedAi) {
@@ -1064,17 +1063,6 @@ function initPanelCollapse() {
 }
 initPanelCollapse();
 
-const promptModalEl = document.getElementById("prompt-modal");
-if (promptModalEl) {
-  document.getElementById("btn-view-prompt").addEventListener("click", () => {
-    const content = document.getElementById("prompt-content");
-    if (content) content.textContent = state.emotionPrompt || "暂无指令内容";
-    promptModalEl.classList.remove("hidden");
-  });
-  document.getElementById("btn-prompt-close").addEventListener("click", () => {
-    promptModalEl.classList.add("hidden");
-  });
-}
 const DEEPSEEK_PRESET = { name: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-v4-pro" };
 const AI_CONFIG_KEY = "mygo_ai_config";
 

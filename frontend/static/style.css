@@ -255,22 +255,7 @@ textarea { min-height: 240px; line-height: 1.6; }
   background: rgba(5, 10, 20, 0.7);
   padding: 16px;
 }
-.modal-box-wide { width: min(720px, 100%); }
-.prompt-content {
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: #0f3460;
-  border: 1px solid #1a4a7a;
-  border-radius: 6px;
-  padding: 14px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #cfe0ff;
-  max-height: 55vh;
-  overflow-y: auto;
-  margin-bottom: 16px;
-  font-family: Consolas, "Microsoft YaHei", monospace;
-}
+
 .modal-box {
   width: min(560px, 100%);
   background: #16213e;
