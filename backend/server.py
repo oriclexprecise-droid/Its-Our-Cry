@@ -10,6 +10,7 @@ import sys
 import threading
 import traceback
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -63,6 +64,7 @@ def create_app(config_path="config.yaml"):
         "deploy_model_copy": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total": 0, "current": ""},
         "deploy_clone": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target_dir": ""},
         "deploy_download": {"running": False, "done": False, "success": None, "cancelled": False, "cancel_requested": False, "log": [], "progress": 0, "target_dir": "", "extracted_path": ""},
+        "deploy_ffmpeg": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target": ""}
     }
 
     @app.route("/")
@@ -859,4 +861,98 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/deploy/download_status", methods=["GET"])
     def deploy_download_status():
         return jsonify(state["deploy_download"])
+    @app.route("/api/deploy/install_ffmpeg", methods=["POST"])
+    def deploy_install_ffmpeg():
+        data = request.get_json(silent=True) or {}
+        gs_path = str(data.get("gptsovits_path", "")).strip()
+        if not gs_path:
+            return jsonify({"error": "请填写 GPT-SoVITS 目录"}), 400
+        if state["deploy_ffmpeg"]["running"]:
+            return jsonify({"error": "ffmpeg 下载正在进行中"}), 409
+        target_root = Path(gs_path).resolve()
+        if not target_root.exists():
+            return jsonify({"error": "GPT-SoVITS 目录不存在: " + str(target_root)}), 400
+        target = target_root / "runtime" / "ffmpeg.exe"
+        if target.exists():
+            return jsonify({"status": "nothing_to_do"})
+
+        state["deploy_ffmpeg"] = {
+            "running": True, "done": False, "success": None, "log": [],
+            "progress": 0, "target": str(target),
+        }
+
+        urls = [
+            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+        ]
+
+        def worker():
+            tmp_file = None
+            try:
+                log = state["deploy_ffmpeg"]["log"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                tmp_file = target.parent / "ffmpeg_download.zip"
+                last_err = None
+                for url in urls:
+                    log.append("正在下载 ffmpeg: " + url)
+                    try:
+                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, timeout=120) as resp, open(tmp_file, "wb") as out:
+                            total = int(resp.headers.get("Content-Length") or 0)
+                            downloaded = 0
+                            while True:
+                                chunk = resp.read(1024 * 256)
+                                if not chunk:
+                                    break
+                                out.write(chunk)
+                                downloaded += len(chunk)
+                                if total > 0:
+                                    state["deploy_ffmpeg"]["progress"] = min(80, round(downloaded * 70 / total))
+                        break
+                    except Exception as e:
+                        last_err = e
+                        log.append("下载源不可用，尝试下一个: " + str(e))
+                else:
+                    raise RuntimeError("所有下载源均失败: " + str(last_err))
+                log.append("下载完成，正在解压...")
+                state["deploy_ffmpeg"]["progress"] = 85
+                extract_dir = target.parent / "ffmpeg_extract"
+                if extract_dir.exists():
+                    shutil.rmtree(extract_dir)
+                with zipfile.ZipFile(str(tmp_file), "r") as zf:
+                    zf.extractall(str(extract_dir))
+                found = None
+                for root, _, files in os.walk(extract_dir):
+                    for name in files:
+                        if name.lower() == "ffmpeg.exe":
+                            found = Path(root) / name
+                            break
+                    if found:
+                        break
+                if not found:
+                    raise RuntimeError("压缩包内未找到 ffmpeg.exe")
+                shutil.copy2(str(found), str(target))
+                shutil.rmtree(extract_dir)
+                state["deploy_ffmpeg"]["progress"] = 100
+                state["deploy_ffmpeg"]["success"] = True
+                log.append("ffmpeg 已安装: " + str(target))
+            except Exception as e:
+                state["deploy_ffmpeg"]["log"].append("ffmpeg 下载失败: " + str(e))
+                state["deploy_ffmpeg"]["success"] = False
+            finally:
+                if tmp_file and tmp_file.exists():
+                    try:
+                        tmp_file.unlink()
+                    except Exception:
+                        pass
+                state["deploy_ffmpeg"]["running"] = False
+                state["deploy_ffmpeg"]["done"] = True
+
+        threading.Thread(target=worker, daemon=True).start()
+        return jsonify({"status": "started"})
+
+    @app.route("/api/deploy/install_ffmpeg_status", methods=["GET"])
+    def deploy_install_ffmpeg_status():
+        return jsonify(state["deploy_ffmpeg"])
+
     return app

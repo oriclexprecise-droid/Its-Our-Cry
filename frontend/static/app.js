@@ -501,10 +501,15 @@ function renderDeployScan(d) {
     modelHtml = modelHtml.replace(/<\/div>$/, '<div class="deploy-model-actions"><button id="btn-deploy-copy-models" class="btn-secondary btn-small">复制缺失模型</button><span id="deploy-model-status" class="status-text"></span></div></div>');
   }
   rows.push(modelHtml);
-  rows.push(scanGroup("FFmpeg", [
+  let ffmpegRows = [
     ["状态", d.ffmpeg.installed ? "已安装" : "未安装"],
     ["版本", d.ffmpeg.version || "-"]
-  ], true));
+  ];
+  let ffmpegHtml = scanGroup("FFmpeg", ffmpegRows, true);
+  if (!d.ffmpeg.installed && d.gptsovits && d.gptsovits.exists) {
+    ffmpegHtml = ffmpegHtml.replace(/<\/div>$/, '<div class="deploy-model-actions"><button id="btn-deploy-ffmpeg" class="btn-secondary btn-small">一键下载 ffmpeg</button><span id="deploy-ffmpeg-status" class="status-text"></span></div></div>');
+  }
+  rows.push(ffmpegHtml);
 
   const plan = d.install_plan || { packages: [] };
   if (plan.packages && plan.packages.length) {
@@ -522,6 +527,8 @@ function renderDeployScan(d) {
   if (installBtn) installBtn.addEventListener("click", startDeployInstall);
   const copyBtn = host.querySelector("#btn-deploy-copy-models");
   if (copyBtn) copyBtn.addEventListener("click", startDeployCopyModels);
+  const ffmpegBtn = host.querySelector("#btn-deploy-ffmpeg");
+  if (ffmpegBtn) ffmpegBtn.addEventListener("click", startDeployFfmpeg);
 }
 
 
@@ -664,6 +671,77 @@ async function pollDeployCopyModels(btn, statusEl, logEl) {
     statusEl.textContent = e.message;
     statusEl.className = "status-text error";
     deployCopying = false;
+    btn.disabled = false;
+  }
+}
+
+let deployFfmpeg = false;
+
+async function startDeployFfmpeg() {
+  if (deployFfmpeg) return;
+  const input = document.getElementById("deploy-gs-path");
+  const btn = document.getElementById("btn-deploy-ffmpeg");
+  const statusEl = document.getElementById("deploy-ffmpeg-status");
+  if (!btn || !statusEl) return;
+  deployFfmpeg = true;
+  btn.disabled = true;
+  statusEl.textContent = "正在准备下载...";
+  statusEl.className = "status-text";
+  const logBox = document.getElementById("deploy-install-box");
+  const logEl = document.getElementById("deploy-install-log");
+  if (logBox) logBox.classList.remove("hidden");
+  const progressFill = document.getElementById("deploy-progress-fill");
+  if (progressFill) progressFill.style.width = "0%";
+  if (logEl) logEl.textContent = "";
+  try {
+    const data = await api("/api/deploy/install_ffmpeg", { method: "POST", body: JSON.stringify({ gptsovits_path: input.value.trim() }) });
+    if (data.status === "nothing_to_do") {
+      statusEl.textContent = "已存在，无需下载";
+      statusEl.className = "status-text success";
+      deployFfmpeg = false;
+      btn.disabled = false;
+      return;
+    }
+    pollDeployFfmpeg(btn, statusEl, logEl);
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+    deployFfmpeg = false;
+    btn.disabled = false;
+  }
+}
+
+async function pollDeployFfmpeg(btn, statusEl, logEl) {
+  try {
+    const st = await api("/api/deploy/install_ffmpeg_status");
+    if (logEl) {
+      logEl.textContent = (st.log || []).join("\n");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    const progressFill = document.getElementById("deploy-progress-fill");
+    const pct = Math.min(100, Math.max(0, st.progress || 0));
+    if (progressFill) progressFill.style.width = pct + "%";
+    if (st.running) {
+      statusEl.textContent = "下载中 " + pct + "%";
+      statusEl.className = "status-text";
+      setTimeout(() => pollDeployFfmpeg(btn, statusEl, logEl), 1200);
+      return;
+    }
+    deployFfmpeg = false;
+    btn.disabled = false;
+    if (st.success) {
+      if (progressFill) progressFill.style.width = "100%";
+      statusEl.textContent = "ffmpeg 安装完成，正在重新扫描...";
+      statusEl.className = "status-text success";
+      await scanDeploy();
+    } else {
+      statusEl.textContent = "ffmpeg 下载失败，请查看日志";
+      statusEl.className = "status-text error";
+    }
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+    deployFfmpeg = false;
     btn.disabled = false;
   }
 }
