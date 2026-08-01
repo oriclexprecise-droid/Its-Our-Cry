@@ -980,10 +980,12 @@ function initPanelCollapse() {
     { btn: "btn-collapse-settings", key: "mygo_panel_settings_collapsed" },
     { btn: "btn-collapse-deploy", key: "mygo_panel_deploy_collapsed" }
   ];
+  const registry = {};
   specs.forEach(spec => {
     const btn = document.getElementById(spec.btn);
     const panel = btn ? btn.closest(".panel") : null;
     if (!btn || !panel) return;
+    registry[spec.btn] = { btn, panel };
     const apply = (collapsed) => {
       panel.classList.toggle("collapsed", collapsed);
       btn.textContent = collapsed ? "▴" : "▾";
@@ -994,6 +996,15 @@ function initPanelCollapse() {
       const next = !panel.classList.contains("collapsed");
       apply(next);
       localStorage.setItem(spec.key, next ? "1" : "0");
+      if (spec.btn === "btn-collapse-deploy" && !next) {
+        const settings = registry["btn-collapse-settings"];
+        if (settings && !settings.panel.classList.contains("collapsed")) {
+          settings.panel.classList.add("collapsed");
+          settings.btn.textContent = "▴";
+          settings.btn.title = "展开面板";
+          localStorage.setItem("mygo_panel_settings_collapsed", "1");
+        }
+      }
     });
   });
 }

@@ -13,7 +13,9 @@ body::before {
   z-index: -1;
   background: rgba(8, 12, 22, 0.55);
 }
-#app { max-width: 1200px; margin: 0 auto; padding: 104px 16px 48px; }
+#app { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; min-height: 100vh; display: flex; flex-direction: column; }
+#app > header { margin-top: auto; }
+#app > .layout { margin-bottom: auto; }
 .layout { display: flex; gap: 20px; align-items: flex-start; }
 main { flex: 1; min-width: 0; }
 .side-panels { width: 260px; flex: none; display: flex; flex-direction: column; gap: 16px; position: sticky; top: 20px; }
@@ -220,7 +222,7 @@ textarea { min-height: 240px; line-height: 1.6; }
 ::-webkit-scrollbar-thumb { background: #1a4a7a; border-radius: 5px; }
 ::-webkit-scrollbar-track { background: #0f3460; }
 @media (max-width: 560px) {
-  #app { padding-top: 64px; }
+  #app { padding-top: 28px; }
   header h1 { font-size: 30px; }
   .panel-body { padding: 14px; }
 }
