@@ -495,6 +495,12 @@ function renderDeployScan(d) {
     ["磁盘剩余", d.gptsovits_disk ? d.gptsovits_disk.free_gb + " GB" : "未知"]
   ], true));
 
+  const modelRows = (d.models || []).map(m => [m.character + " / " + m.kind, m.installed ? "已安装" : (m.bundled ? "未安装" : "未随程序提供")]);
+  let modelHtml = scanGroup("角色模型", modelRows, true);
+  if (modelRows.some(r => r[1] === "未安装")) {
+    modelHtml = modelHtml.replace(/<\/div>$/, '<div class="deploy-model-actions"><button id="btn-deploy-copy-models" class="btn-secondary btn-small">复制缺失模型</button><span id="deploy-model-status" class="status-text"></span></div></div>');
+  }
+  rows.push(modelHtml);
   rows.push(scanGroup("FFmpeg", [
     ["状态", d.ffmpeg.installed ? "已安装" : "未安装"],
     ["版本", d.ffmpeg.version || "-"]
@@ -514,6 +520,8 @@ function renderDeployScan(d) {
   host.innerHTML = rows.join("");
   const installBtn = host.querySelector("#btn-deploy-install");
   if (installBtn) installBtn.addEventListener("click", startDeployInstall);
+  const copyBtn = host.querySelector("#btn-deploy-copy-models");
+  if (copyBtn) copyBtn.addEventListener("click", startDeployCopyModels);
 }
 
 
@@ -585,6 +593,77 @@ async function pollDeployInstall(btn, statusEl, logEl) {
     statusEl.textContent = e.message;
     statusEl.className = "status-text error";
     deployInstalling = false;
+    btn.disabled = false;
+  }
+}
+
+let deployCopying = false;
+
+async function startDeployCopyModels() {
+  if (deployCopying) return;
+  const input = document.getElementById("deploy-gs-path");
+  const btn = document.getElementById("btn-deploy-copy-models");
+  const statusEl = document.getElementById("deploy-model-status");
+  if (!btn || !statusEl) return;
+  deployCopying = true;
+  btn.disabled = true;
+  statusEl.textContent = "正在准备复制...";
+  statusEl.className = "status-text";
+  const logBox = document.getElementById("deploy-install-box");
+  const logEl = document.getElementById("deploy-install-log");
+  if (logBox) logBox.classList.remove("hidden");
+  const progressFill = document.getElementById("deploy-progress-fill");
+  if (progressFill) progressFill.style.width = "0%";
+  if (logEl) logEl.textContent = "";
+  try {
+    const data = await api("/api/deploy/copy_models", { method: "POST", body: JSON.stringify({ gptsovits_path: input.value.trim() }) });
+    if (data.status === "nothing_to_copy") {
+      statusEl.textContent = "无需复制";
+      statusEl.className = "status-text success";
+      deployCopying = false;
+      btn.disabled = false;
+      return;
+    }
+    pollDeployCopyModels(btn, statusEl, logEl);
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+    deployCopying = false;
+    btn.disabled = false;
+  }
+}
+
+async function pollDeployCopyModels(btn, statusEl, logEl) {
+  try {
+    const st = await api("/api/deploy/copy_models_status");
+    if (logEl) {
+      logEl.textContent = (st.log || []).join("\n");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    const progressFill = document.getElementById("deploy-progress-fill");
+    const pct = Math.min(100, Math.max(0, st.progress || 0));
+    if (progressFill) progressFill.style.width = pct + "%";
+    if (st.running) {
+      statusEl.textContent = "复制中 " + pct + "% " + (st.current || "");
+      statusEl.className = "status-text";
+      setTimeout(() => pollDeployCopyModels(btn, statusEl, logEl), 1200);
+      return;
+    }
+    deployCopying = false;
+    btn.disabled = false;
+    if (st.success) {
+      if (progressFill) progressFill.style.width = "100%";
+      statusEl.textContent = "模型复制完成 100%，正在重新扫描...";
+      statusEl.className = "status-text success";
+      await scanDeploy();
+    } else {
+      statusEl.textContent = "模型复制失败，请查看日志";
+      statusEl.className = "status-text error";
+    }
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+    deployCopying = false;
     btn.disabled = false;
   }
 }

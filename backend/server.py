@@ -43,7 +43,11 @@ def create_app(config_path="config.yaml"):
     config["gptsovits_path"] = str(Path(config["gptsovits_path"]))
     for char_name, char_cfg in config["characters"].items():
         char_cfg["ref_audio_dir"] = str(project_root / char_cfg["ref_audio_dir"])
+        char_cfg["model_rel"] = str(char_cfg["model"]).replace("\\", "/")
         char_cfg["model"] = str(Path(config["gptsovits_path"]) / char_cfg["model"])
+        char_cfg["gpt_model_rel"] = str(char_cfg.get("gpt_model") or "").replace("\\", "/")
+        if char_cfg.get("gpt_model"):
+            char_cfg["gpt_model"] = str(Path(config["gptsovits_path"]) / char_cfg["gpt_model"])
 
     state = {
         "lines": [],
@@ -56,6 +60,7 @@ def create_app(config_path="config.yaml"):
         "progress": {"current": 0, "total": 0},
         "time_info": [],
         "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
+        "deploy_model_copy": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total": 0, "current": ""},
         "deploy_clone": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target_dir": ""},
         "deploy_download": {"running": False, "done": False, "success": None, "cancelled": False, "cancel_requested": False, "log": [], "progress": 0, "target_dir": "", "extracted_path": ""},
     }
@@ -307,7 +312,7 @@ def create_app(config_path="config.yaml"):
                     if char not in config["characters"]:
                         continue
                     char_config = config["characters"][char]
-                    engine.switch_character(char_config["model"])
+                    engine.switch_character(char_config["model"], char_config.get("gpt_model"))
 
                     for idx in idx_list:
                         line = state["lines"][idx]
@@ -690,6 +695,63 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/deploy/clone_status", methods=["GET"])
     def deploy_clone_status():
         return jsonify(state["deploy_clone"])
+    @app.route("/api/deploy/copy_models", methods=["POST"])
+    def deploy_copy_models():
+        data = request.get_json(silent=True) or {}
+        gs_path = str(data.get("gptsovits_path", "")).strip()
+        if not gs_path:
+            return jsonify({"error": "请填写 GPT-SoVITS 目录"}), 400
+        if state["deploy_model_copy"]["running"]:
+            return jsonify({"error": "模型复制正在进行中"}), 409
+        target_root = Path(gs_path).resolve()
+        source_root = project_root
+        missing = []
+        for char, char_cfg in config.get("characters", {}).items():
+            entries = [("SoVITS", char_cfg.get("model_rel") or ""), ("GPT", char_cfg.get("gpt_model_rel") or "")]
+            for kind, rel in entries:
+                rel = str(rel).replace("\\", "/")
+            if not rel:
+                continue
+            source = source_root / rel
+            target = target_root / rel
+            if source.exists() and not target.exists():
+                    missing.append({"character": char, "kind": kind, "rel": rel, "source": source, "target": target})
+        if not missing:
+            return jsonify({"status": "nothing_to_copy"})
+
+        state["deploy_model_copy"] = {
+            "running": True, "done": False, "success": None, "log": [],
+            "progress": 0, "total": len(missing), "current": "",
+        }
+
+        def worker():
+            try:
+                log = state["deploy_model_copy"]["log"]
+                for idx, item in enumerate(missing, start=1):
+                    state["deploy_model_copy"]["current"] = item["character"] + " [" + item["kind"] + "]"
+                    log.append("正在复制 " + item["character"] + " [" + item["kind"] + "] ...")
+                    item["target"].parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(item["source"]), str(item["target"]))
+                    log.append("已复制 " + item["character"] + " [" + item["kind"] + "]: " + item["rel"])
+                    state["deploy_model_copy"]["progress"] = round(idx * 100 / len(missing))
+                state["deploy_model_copy"]["success"] = True
+                state["deploy_model_copy"]["progress"] = 100
+                log.append("角色模型补齐完成")
+            except Exception as e:
+                log = state["deploy_model_copy"]["log"]
+                log.append("复制失败: " + str(e))
+                state["deploy_model_copy"]["success"] = False
+            finally:
+                state["deploy_model_copy"]["running"] = False
+                state["deploy_model_copy"]["done"] = True
+
+        threading.Thread(target=worker, daemon=True).start()
+        return jsonify({"status": "started", "count": len(missing)})
+
+    @app.route("/api/deploy/copy_models_status", methods=["GET"])
+    def deploy_copy_models_status():
+        return jsonify(state["deploy_model_copy"])
+
     @app.route("/api/deploy/download_options", methods=["GET"])
     def deploy_download_options():
         return jsonify(get_download_options())

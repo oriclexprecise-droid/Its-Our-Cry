@@ -56,7 +56,7 @@ class TTSEngine:
             self._loaded = True
             print("[TTSEngine] 模型加载完成")
 
-    def switch_character(self, model_path: str):
+    def switch_character(self, model_path: str, gpt_model_path: Optional[str] = None):
         """切换当前角色的 SoVITS 模型权重。
 
         Args:
@@ -70,6 +70,12 @@ class TTSEngine:
 
         with self._lock:
             self._tts_pipeline.init_vits_weights(str(model_full_path))
+            if gpt_model_path:
+                gpt_full_path = self.gptsovits_path / gpt_model_path
+                if not gpt_full_path.exists():
+                    raise FileNotFoundError(f"GPT 模型文件不存在: {gpt_full_path}")
+                self._tts_pipeline.init_t2s_weights(str(gpt_full_path))
+                print(f"[TTSEngine] 已切换到 GPT 模型: {gpt_model_path}")
             print(f"[TTSEngine] 已切换到模型: {model_path}")
 
     def synthesize(

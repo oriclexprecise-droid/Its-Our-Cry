@@ -5,18 +5,23 @@ gptsovits_path: "E:/GPT-SoVITS-v2pro-20250604-nvidia50/GPT-SoVITS-v2pro-20250604
 characters:
   千早爱音:
     model: "SoVITS_weights_v2ProPlus/MyGO_千早爱音_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_千早爱音_v2pp.ckpt"
     ref_audio_dir: "reference_audio/千早爱音"
   要乐奈:
     model: "SoVITS_weights_v2ProPlus/MyGO_要乐奈_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_要乐奈_v2pp.ckpt"
     ref_audio_dir: "reference_audio/要乐奈"
   高松灯:
     model: "SoVITS_weights_v2ProPlus/MyGO_高松灯_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_高松灯_v2pp.ckpt"
     ref_audio_dir: "reference_audio/高松灯"
   椎名立希:
     model: "SoVITS_weights_v2ProPlus/MyGO_椎名立希_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_椎名立希_v2pp.ckpt"
     ref_audio_dir: "reference_audio/椎名立希"
   长崎素世:
     model: "SoVITS_weights_v2ProPlus/MyGO_长崎素世_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_长崎素世_v2pp.ckpt"
     ref_audio_dir: "reference_audio/长崎素世"
 
 # 情绪分类

@@ -271,6 +271,32 @@ def scan_environment(config, project_root, gptsovits_path=None):
     install_plan = build_install_plan(packages, gpus, cuda_version)
 
     issues = []
+
+    model_entries = []
+    for char, char_cfg in config.get("characters", {}).items():
+        rels = [
+            ("SoVITS", char_cfg.get("model_rel") or char_cfg.get("model") or ""),
+            ("GPT", char_cfg.get("gpt_model_rel") or char_cfg.get("gpt_model") or ""),
+        ]
+        for kind, rel in rels:
+            rel = str(rel).replace("\\", "/")
+            if not rel:
+                continue
+            source = project_root / rel
+            dest = gs_path / rel
+            bundled = source.exists()
+            installed = gs_exists and dest.exists()
+            model_entries.append({
+                "character": char,
+                "kind": kind,
+                "rel": rel,
+                "bundled": bundled,
+                "installed": installed,
+            })
+            if not bundled:
+                issues.append("角色模型未随程序提供: " + char + " " + kind)
+            elif not installed:
+                issues.append("角色模型未安装: " + char + " " + kind)
     if not gs_exists:
         issues.append("GPT-SoVITS directory not found: " + str(gs_path))
     else:
@@ -306,6 +332,7 @@ def scan_environment(config, project_root, gptsovits_path=None):
         "gpu": gpus,
         "cuda_version": cuda_version,
         "packages": packages,
+        "models": model_entries,
         "ffmpeg": ffmpeg,
         "gptsovits": {
             "path": str(gs_path),
