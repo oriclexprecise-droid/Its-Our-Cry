@@ -664,6 +664,7 @@ function initDeployDownload() {
   dirInput.addEventListener("input", updateBtn);
   updateBtn();
   btn.addEventListener("click", startDeployDownload);
+  syncDeployDownloadState();
   cancelBtn.addEventListener("click", async () => {
     try {
       await api("/api/deploy/download_cancel", { method: "POST" });
@@ -672,6 +673,58 @@ function initDeployDownload() {
       document.getElementById("deploy-download-status").textContent = e.message;
     }
   });
+}
+
+async function syncDeployDownloadState() {
+  const btn = document.getElementById("btn-deploy-download");
+  const cancelBtn = document.getElementById("btn-deploy-download-cancel");
+  const statusEl = document.getElementById("deploy-download-status");
+  const box = document.getElementById("deploy-download-box");
+  const logEl = document.getElementById("deploy-download-log");
+  const fill = document.getElementById("deploy-download-fill");
+  try {
+    const st = await api("/api/deploy/download_status");
+    if (st.running) {
+      deployDownloading = true;
+      btn.disabled = true;
+      cancelBtn.classList.remove("hidden");
+      box.classList.remove("hidden");
+      logEl.textContent = (st.log || []).join("\n");
+      logEl.scrollTop = logEl.scrollHeight;
+      const pct = Math.min(100, Math.max(0, st.progress || 0));
+      fill.style.width = pct + "%";
+      statusEl.textContent = st.cancel_requested ? "正在取消..." : "下载并解压中 " + pct + "%";
+      statusEl.className = "status-text";
+      pollDeployDownload();
+      return;
+    }
+    deployDownloading = false;
+    cancelBtn.classList.add("hidden");
+    btn.disabled = false;
+    if (!st.done) return;
+    box.classList.remove("hidden");
+    logEl.textContent = (st.log || []).join("\n");
+    logEl.scrollTop = logEl.scrollHeight;
+    if (st.success) {
+      fill.style.width = "100%";
+      statusEl.textContent = "下载并解压完成";
+      statusEl.className = "status-text success";
+      const gsPath = st.extracted_path || st.target_dir || "";
+      document.getElementById("deploy-gs-path").value = gsPath;
+      localStorage.setItem("mygo_deploy_gs_path", gsPath);
+      localStorage.setItem("mygo_deploy_installed", "yes");
+      showDeployFlow("has");
+    } else if (st.cancelled) {
+      statusEl.textContent = "已取消下载";
+      statusEl.className = "status-text";
+    } else {
+      statusEl.textContent = "下载失败，请查看日志";
+      statusEl.className = "status-text error";
+    }
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+  }
 }
 
 async function startDeployDownload() {
@@ -702,6 +755,7 @@ async function startDeployDownload() {
     deployDownloading = false;
     cancelBtn.classList.add("hidden");
     btn.disabled = false;
+    syncDeployDownloadState();
   }
 }
 
