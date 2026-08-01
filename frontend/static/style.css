@@ -2,6 +2,16 @@
 body {
   font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
   background: #1a1a2e; color: #e0e0e0; min-height: 100vh;
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgba(8, 12, 22, 0.55);
 }
 #app { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
 .layout { display: flex; gap: 20px; align-items: flex-start; }

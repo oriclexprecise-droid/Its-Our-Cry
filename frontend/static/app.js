@@ -974,6 +974,7 @@ async function pollDeployDownload() {
 }
 initDeployFlow();
 loadConfig();
+applyRandomBackground();
 function initPanelCollapse() {
   const specs = [
     { btn: "btn-collapse-settings", key: "mygo_panel_settings_collapsed" },
@@ -1043,4 +1044,14 @@ function initAIConfig() {
     status.className = "status-text success";
   });
 }
+async function applyRandomBackground() {
+  try {
+    const data = await api("/api/backgrounds");
+    const list = data.backgrounds || [];
+    if (!list.length) return;
+    const pick = list[Math.floor(Math.random() * list.length)];
+    document.body.style.backgroundImage = "url(\"/picture/" + encodeURIComponent(pick) + "\")";
+  } catch (e) {}
+}
+
 initAIConfig();

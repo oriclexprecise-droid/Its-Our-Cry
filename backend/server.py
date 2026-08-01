@@ -955,4 +955,22 @@ def create_app(config_path="config.yaml"):
     def deploy_install_ffmpeg_status():
         return jsonify(state["deploy_ffmpeg"])
 
+    @app.route("/picture/<path:filename>")
+    def picture_file(filename):
+        pic_dir = (project_root / "picture").resolve()
+        target = (pic_dir / filename).resolve()
+        if str(target).lower().startswith(str(pic_dir).lower()) and target.is_file():
+            return send_file(str(target))
+        return "not found", 404
+
+    @app.route("/api/backgrounds", methods=["GET"])
+    def backgrounds():
+        pic_dir = project_root / "picture"
+        exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        try:
+            files = sorted(p.name for p in pic_dir.iterdir() if p.is_file() and p.suffix.lower() in exts)
+        except OSError:
+            files = []
+        return jsonify({"backgrounds": files})
+
     return app
