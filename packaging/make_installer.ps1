@@ -24,12 +24,23 @@ Write-Host '== 压缩载荷 =='
 Set-Location $payloadDir
 & $sevenZip a -t7z -mx=1 $archive '*'
 if ($LASTEXITCODE -ne 0) { throw '7z 压缩失败' }
+Set-Location $PSScriptRoot
 
 Write-Host '== 生成 SFX 安装程序 =='
 if (Test-Path $output) { Remove-Item $output -Force }
 Copy-Item $sfxModule $output -Force
 [System.IO.File]::AppendAllText($output, [System.IO.File]::ReadAllText((Join-Path $installerDir 'installer_config.txt')))
-[System.IO.File]::AppendAllBytes($output, [System.IO.File]::ReadAllBytes($archive))
+$outStream = [System.IO.File]::Open($output, [System.IO.FileMode]::Append)
+$inStream = [System.IO.File]::OpenRead($archive)
+$buffer = New-Object byte[] 1048576
+try {
+  while (($read = $inStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+    $outStream.Write($buffer, 0, $read)
+  }
+} finally {
+  $inStream.Close()
+  $outStream.Close()
+}
 
 $size = (Get-Item $output).Length / 1MB
 Write-Host ("== 安装包完成: {0:N1} MB ==" -f $size)
