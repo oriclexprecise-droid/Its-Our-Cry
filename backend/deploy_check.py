@@ -160,8 +160,12 @@ def _disk_gb(path):
         return None
 
 
-def _ffmpeg_info():
+def _ffmpeg_info(gs_path=None):
     exe = shutil.which("ffmpeg")
+    if not exe and gs_path:
+        bundled = Path(gs_path) / "runtime" / "ffmpeg.exe"
+        if bundled.exists():
+            exe = str(bundled)
     if not exe:
         return {"installed": False, "version": "", "path": ""}
     out = _run([exe, "-version"], timeout=5)
@@ -264,7 +268,7 @@ def scan_environment(config, project_root, gptsovits_path=None):
         version = _pkg_version(display, meta)
         packages.append({"name": display, "version": version, "installed": bool(version)})
 
-    ffmpeg = _ffmpeg_info()
+    ffmpeg = _ffmpeg_info(gs_path)
     gpus = _gpus()
     cuda_version = _cuda_version()
     core_names = {name for name, _ in CORE_PACKAGES}
