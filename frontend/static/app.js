@@ -523,6 +523,8 @@ async function startDeployInstall() {
   statusEl.textContent = "正在准备安装...";
   statusEl.className = "status-text";
   if (logBox) logBox.classList.remove("hidden");
+  const progressFill = document.getElementById("deploy-progress-fill");
+  if (progressFill) progressFill.style.width = "0%";
   if (logEl) logEl.textContent = "";
   try {
     const data = await api("/api/deploy/install", { method: "POST", body: JSON.stringify({ gptsovits_path: input.value.trim() }) });
@@ -549,8 +551,12 @@ async function pollDeployInstall(btn, statusEl, logEl) {
       logEl.textContent = (st.log || []).join("\n");
       logEl.scrollTop = logEl.scrollHeight;
     }
+    const progressFill = document.getElementById("deploy-progress-fill");
+    const pct = Math.min(100, Math.max(0, st.progress || 0));
+    if (progressFill) progressFill.style.width = pct + "%";
     if (st.running) {
-      statusEl.textContent = "安装中，请勿关闭窗口...";
+      const pkgText = (st.current_packages && st.current_packages.length) ? "（" + st.current_packages.join(", ") + "）" : "";
+      statusEl.textContent = "安装中 " + pct + "%" + pkgText;
       statusEl.className = "status-text";
       setTimeout(() => pollDeployInstall(btn, statusEl, logEl), 1200);
       return;
@@ -558,7 +564,8 @@ async function pollDeployInstall(btn, statusEl, logEl) {
     deployInstalling = false;
     btn.disabled = false;
     if (st.success) {
-      statusEl.textContent = "安装完成，正在重新扫描...";
+      if (progressFill) progressFill.style.width = "100%";
+      statusEl.textContent = "安装完成 100%，正在重新扫描...";
       statusEl.className = "status-text success";
       await scanDeploy();
     } else {

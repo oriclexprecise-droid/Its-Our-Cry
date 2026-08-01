@@ -54,7 +54,7 @@ def create_app(config_path="config.yaml"):
         "generating": False,
         "progress": {"current": 0, "total": 0},
         "time_info": [],
-        "deploy_install": {"running": False, "done": False, "success": None, "log": []},
+        "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
     }
 
     @app.route("/")
@@ -549,11 +549,25 @@ def create_app(config_path="config.yaml"):
             commands = result["install_plan"]["commands"]
             if not commands:
                 return jsonify({"status": "nothing_to_install", "install_plan": result["install_plan"]})
-            state["deploy_install"] = {"running": True, "done": False, "success": None, "log": []}
+            state["deploy_install"] = {
+                "running": True, "done": False, "success": None, "log": [],
+                "progress": 0, "total_commands": len(commands), "command_index": 0, "current_packages": [],
+            }
 
             def worker():
                 try:
-                    for cmd in commands:
+                    total_cmds = len(commands)
+                    for cmd_index, cmd in enumerate(commands, start=1):
+                        pkgs = []
+                        in_install = False
+                        for arg in cmd:
+                            if arg == "install":
+                                in_install = True
+                            elif in_install and not arg.startswith("-"):
+                                pkgs.append(arg)
+                        state["deploy_install"]["command_index"] = cmd_index
+                        state["deploy_install"]["current_packages"] = pkgs
+                        state["deploy_install"]["progress"] = round((cmd_index - 1) * 100 / total_cmds)
                         proc = subprocess.Popen(
                             cmd,
                             stdout=subprocess.PIPE,
@@ -569,11 +583,19 @@ def create_app(config_path="config.yaml"):
                             log.append(line)
                             if len(log) > 300:
                                 del log[:len(log) - 300]
+                            m = re.search(r"(\d+)%", line)
+                            if m:
+                                line_pct = min(100, int(m.group(1)))
+                                base = (cmd_index - 1) * 100 / total_cmds
+                                state["deploy_install"]["progress"] = min(99, round(base + line_pct / total_cmds))
                         proc.wait()
                         if proc.returncode != 0:
                             state["deploy_install"]["success"] = False
+                            state["deploy_install"]["progress"] = round((cmd_index - 1) * 100 / total_cmds)
                             return
+                        state["deploy_install"]["progress"] = round(cmd_index * 100 / total_cmds)
                     state["deploy_install"]["success"] = True
+                    state["deploy_install"]["progress"] = 100
                 except Exception as e:
                     log = state["deploy_install"]["log"]
                     log.append("安装失败: " + str(e))

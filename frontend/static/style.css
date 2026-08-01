@@ -160,3 +160,6 @@ textarea { min-height: 240px; line-height: 1.6; }
   border-radius: 6px; padding: 8px 10px; font-family: Consolas, "Courier New", monospace;
   font-size: 11px; color: #b8d4f0; white-space: pre-wrap; word-break: break-all; line-height: 1.5;
 }
+
+.deploy-progress-wrap { height: 8px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+.deploy-progress-fill { height: 100%; width: 0%; background: #4ecca3; transition: width 0.3s; border-radius: 4px; }
