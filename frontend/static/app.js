@@ -808,3 +808,26 @@ async function pollDeployDownload() {
 }
 initDeployFlow();
 loadConfig();
+function initPanelCollapse() {
+  const specs = [
+    { btn: "btn-collapse-settings", key: "mygo_panel_settings_collapsed" },
+    { btn: "btn-collapse-deploy", key: "mygo_panel_deploy_collapsed" }
+  ];
+  specs.forEach(spec => {
+    const btn = document.getElementById(spec.btn);
+    const panel = btn ? btn.closest(".panel") : null;
+    if (!btn || !panel) return;
+    const apply = (collapsed) => {
+      panel.classList.toggle("collapsed", collapsed);
+      btn.textContent = collapsed ? "▴" : "▾";
+      btn.title = collapsed ? "展开面板" : "收起面板";
+    };
+    apply(localStorage.getItem(spec.key) === "1");
+    btn.addEventListener("click", () => {
+      const next = !panel.classList.contains("collapsed");
+      apply(next);
+      localStorage.setItem(spec.key, next ? "1" : "0");
+    });
+  });
+}
+initPanelCollapse();
