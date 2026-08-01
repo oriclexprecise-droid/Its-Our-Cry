@@ -257,6 +257,14 @@ def get_download_options():
 def scan_environment(config, project_root, gptsovits_path=None):
     gs_path = Path(gptsovits_path or config["gptsovits_path"])
     gs_exists = gs_path.exists()
+    os_name = platform.system()
+    os_release = platform.release()
+    if sys.platform == "win32":
+        try:
+            if sys.getwindowsversion().build >= 22000:
+                os_release = "11"
+        except Exception:
+            pass
 
     checks = {}
     for sub in ["GPT_SoVITS", "tools", "pretrained_models", "runtime", "configs"]:
@@ -318,8 +326,8 @@ def scan_environment(config, project_root, gptsovits_path=None):
 
     return {
         "os": {
-            "system": platform.system(),
-            "release": platform.release(),
+            "system": os_name,
+            "release": os_release,
             "version": platform.version(),
             "arch": platform.machine(),
         },
