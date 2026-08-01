@@ -87,16 +87,40 @@
         <section class="panel side-panel">
       <div class="panel-header"><h2>部署</h2></div>
       <div class="panel-body deploy-body">
-        <label class="deploy-label" for="deploy-gs-path">GPT-SoVITS 目录</label>
-        <input type="text" id="deploy-gs-path" placeholder="例如 D:\GPT-SoVITS-v2pro" autocomplete="off">
-        <div class="deploy-actions">
-          <button id="btn-deploy-scan" class="btn-secondary btn-small">扫描环境</button>
+        <div id="deploy-question">
+          <p class="deploy-question-text">是否已安装 GPT-SoVITS？</p>
+          <div class="deploy-choice-row">
+            <button id="btn-deploy-has" class="btn-secondary btn-small">已安装</button>
+            <button id="btn-deploy-no" class="btn-secondary btn-small">未安装</button>
+          </div>
         </div>
-        <span id="deploy-scan-status" class="status-text"></span>
-        <div id="deploy-scan-result" class="deploy-scan-result"></div>
-        <div id="deploy-install-box" class="deploy-install-box hidden">
-          <div class="deploy-progress-wrap"><div class="deploy-progress-fill" id="deploy-progress-fill"></div></div>
-          <pre id="deploy-install-log" class="deploy-install-log"></pre>
+        <div id="deploy-has-flow" class="hidden">
+          <label class="deploy-label" for="deploy-gs-path">GPT-SoVITS 目录</label>
+          <input type="text" id="deploy-gs-path" placeholder="例如 D:\GPT-SoVITS-v2pro" autocomplete="off">
+          <div class="deploy-actions">
+            <button id="btn-deploy-scan" class="btn-secondary btn-small">扫描环境</button>
+          </div>
+          <span id="deploy-scan-status" class="status-text"></span>
+          <div id="deploy-scan-result" class="deploy-scan-result"></div>
+          <div id="deploy-install-box" class="deploy-install-box hidden">
+            <div class="deploy-progress-wrap"><div class="deploy-progress-fill" id="deploy-progress-fill"></div></div>
+            <pre id="deploy-install-log" class="deploy-install-log"></pre>
+          </div>
+        </div>
+        <div id="deploy-no-flow" class="hidden">
+          <p class="deploy-question-text">未安装时先克隆 GPT-SoVITS</p>
+          <label class="deploy-label" for="deploy-git-url">Git 仓库地址</label>
+          <input type="text" id="deploy-git-url" value="https://github.com/RVC-Boss/GPT-SoVITS.git" autocomplete="off">
+          <label class="deploy-label" for="deploy-clone-dir">克隆到目录</label>
+          <input type="text" id="deploy-clone-dir" placeholder="例如 D:\GPT-SoVITS" autocomplete="off">
+          <div class="deploy-actions">
+            <button id="btn-deploy-clone" class="btn-secondary btn-small" disabled>从 GitHub 克隆</button>
+          </div>
+          <span id="deploy-clone-status" class="status-text"></span>
+          <div id="deploy-clone-box" class="deploy-install-box hidden">
+            <div class="deploy-progress-wrap"><div class="deploy-progress-fill" id="deploy-clone-fill"></div></div>
+            <pre id="deploy-clone-log" class="deploy-install-log"></pre>
+          </div>
         </div>
       </div>
     </section>

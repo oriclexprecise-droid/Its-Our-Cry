@@ -163,3 +163,8 @@ textarea { min-height: 240px; line-height: 1.6; }
 
 .deploy-progress-wrap { height: 8px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
 .deploy-progress-fill { height: 100%; width: 0%; background: #4ecca3; transition: width 0.3s; border-radius: 4px; }
+
+.deploy-question-text { font-size: 13px; color: #ccc; margin-bottom: 10px; line-height: 1.5; }
+.deploy-choice-row { display: flex; gap: 8px; }
+.deploy-choice-row .btn-secondary { margin-top: 0; flex: 1; text-align: center; }
+#deploy-has-flow, #deploy-no-flow { margin-top: 12px; }

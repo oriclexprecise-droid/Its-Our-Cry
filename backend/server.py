@@ -55,6 +55,7 @@ def create_app(config_path="config.yaml"):
         "progress": {"current": 0, "total": 0},
         "time_info": [],
         "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
+        "deploy_clone": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target_dir": ""},
     }
 
     @app.route("/")
@@ -613,4 +614,71 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/deploy/install_status", methods=["GET"])
     def deploy_install_status():
         return jsonify(state["deploy_install"])
+    @app.route("/api/deploy/clone", methods=["POST"])
+    def deploy_clone():
+        data = request.get_json(silent=True) or {}
+        repo = str(data.get("repo", "")).strip() or "https://github.com/RVC-Boss/GPT-SoVITS.git"
+        target = str(data.get("target_dir", "")).strip()
+        if not target:
+            return jsonify({"error": "请填写克隆目录"}), 400
+        if state["deploy_clone"]["running"]:
+            return jsonify({"error": "克隆正在进行中"}), 409
+        git = shutil.which("git")
+        if not git:
+            return jsonify({"error": "未检测到 Git，请先安装 Git for Windows"}), 400
+        target_path = Path(target).resolve()
+        if target_path.exists() and any(target_path.iterdir()):
+            return jsonify({"error": "目标目录已存在且不为空"}), 400
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return jsonify({"error": "目录无效: " + str(e)}), 400
+
+        state["deploy_clone"] = {
+            "running": True, "done": False, "success": None, "log": [],
+            "progress": 0, "target_dir": str(target_path),
+        }
+
+        def worker():
+            cmd = [git, "clone", "--depth", "1", repo, str(target_path)]
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    log = state["deploy_clone"]["log"]
+                    log.append(line)
+                    if len(log) > 300:
+                        del log[:len(log) - 300]
+                    m = re.search(r"(\d+)%", line)
+                    if m:
+                        state["deploy_clone"]["progress"] = min(99, int(m.group(1)))
+                proc.wait()
+                if proc.returncode != 0:
+                    state["deploy_clone"]["success"] = False
+                    return
+                state["deploy_clone"]["progress"] = 100
+                state["deploy_clone"]["success"] = True
+                state["deploy_clone"]["log"].append("克隆完成: " + str(target_path))
+            except Exception as e:
+                log = state["deploy_clone"]["log"]
+                log.append("克隆失败: " + str(e))
+                state["deploy_clone"]["success"] = False
+            finally:
+                state["deploy_clone"]["running"] = False
+                state["deploy_clone"]["done"] = True
+
+        threading.Thread(target=worker, daemon=True).start()
+        return jsonify({"status": "started", "target_dir": str(target_path)})
+
+    @app.route("/api/deploy/clone_status", methods=["GET"])
+    def deploy_clone_status():
+        return jsonify(state["deploy_clone"])
     return app

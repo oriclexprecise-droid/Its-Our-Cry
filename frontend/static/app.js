@@ -579,4 +579,102 @@ async function pollDeployInstall(btn, statusEl, logEl) {
     btn.disabled = false;
   }
 }
+
+function showDeployFlow(kind) {
+  const question = document.getElementById("deploy-question");
+  const hasFlow = document.getElementById("deploy-has-flow");
+  const noFlow = document.getElementById("deploy-no-flow");
+  if (!question || !hasFlow || !noFlow) return;
+  if (kind === "has") {
+    question.classList.add("hidden");
+    hasFlow.classList.remove("hidden");
+    noFlow.classList.add("hidden");
+  } else if (kind === "no") {
+    question.classList.add("hidden");
+    hasFlow.classList.add("hidden");
+    noFlow.classList.remove("hidden");
+  } else {
+    question.classList.remove("hidden");
+    hasFlow.classList.add("hidden");
+    noFlow.classList.add("hidden");
+  }
+}
+
+function initDeployFlow() {
+  const saved = localStorage.getItem("mygo_deploy_installed");
+  if (saved === "yes" || saved === "no") showDeployFlow(saved);
+  document.getElementById("btn-deploy-has").addEventListener("click", () => {
+    localStorage.setItem("mygo_deploy_installed", "yes");
+    showDeployFlow("has");
+  });
+  document.getElementById("btn-deploy-no").addEventListener("click", () => {
+    localStorage.setItem("mygo_deploy_installed", "no");
+    showDeployFlow("no");
+  });
+  const cloneDir = document.getElementById("deploy-clone-dir");
+  const cloneBtn = document.getElementById("btn-deploy-clone");
+  const updateCloneBtn = () => { cloneBtn.disabled = !cloneDir.value.trim(); };
+  cloneDir.addEventListener("input", updateCloneBtn);
+  updateCloneBtn();
+  cloneBtn.addEventListener("click", startDeployClone);
+}
+
+async function startDeployClone() {
+  const btn = document.getElementById("btn-deploy-clone");
+  const statusEl = document.getElementById("deploy-clone-status");
+  const box = document.getElementById("deploy-clone-box");
+  const logEl = document.getElementById("deploy-clone-log");
+  const fill = document.getElementById("deploy-clone-fill");
+  const repo = document.getElementById("deploy-git-url").value.trim();
+  const target = document.getElementById("deploy-clone-dir").value.trim();
+  btn.disabled = true;
+  statusEl.textContent = "正在克隆 GPT-SoVITS...";
+  statusEl.className = "status-text";
+  if (box) box.classList.remove("hidden");
+  if (logEl) logEl.textContent = "";
+  if (fill) fill.style.width = "0%";
+  try {
+    await api("/api/deploy/clone", { method: "POST", body: JSON.stringify({ repo, target_dir: target }) });
+    pollDeployClone(btn, statusEl, logEl, fill);
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+    btn.disabled = false;
+  }
+}
+
+async function pollDeployClone(btn, statusEl, logEl, fill) {
+  try {
+    const st = await api("/api/deploy/clone_status");
+    if (logEl) {
+      logEl.textContent = (st.log || []).join("\n");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    const pct = Math.min(100, Math.max(0, st.progress || 0));
+    if (fill) fill.style.width = pct + "%";
+    if (st.running) {
+      statusEl.textContent = "克隆中 " + pct + "%";
+      statusEl.className = "status-text";
+      setTimeout(() => pollDeployClone(btn, statusEl, logEl, fill), 1000);
+      return;
+    }
+    btn.disabled = false;
+    if (st.success) {
+      statusEl.textContent = "克隆完成，请扫描环境";
+      statusEl.className = "status-text success";
+      document.getElementById("deploy-gs-path").value = st.target_dir || "";
+      localStorage.setItem("mygo_deploy_gs_path", st.target_dir || "");
+      localStorage.setItem("mygo_deploy_installed", "yes");
+      showDeployFlow("has");
+    } else {
+      statusEl.textContent = "克隆失败，请查看日志";
+      statusEl.className = "status-text error";
+    }
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+    btn.disabled = false;
+  }
+}
+initDeployFlow();
 loadConfig();
