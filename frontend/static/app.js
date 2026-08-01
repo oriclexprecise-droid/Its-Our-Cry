@@ -1473,3 +1473,20 @@ function initModelConfig() {
 initAIConfig();
 initNarrationConfig();
 initModelConfig();
+const refreshBtn = document.getElementById("btn-refresh");
+const refreshModal = document.getElementById("refresh-modal");
+if (refreshBtn && refreshModal) {
+  refreshBtn.addEventListener("click", () => {
+    refreshModal.classList.remove("hidden");
+  });
+  document.getElementById("btn-refresh-confirm").addEventListener("click", () => {
+    refreshModal.classList.add("hidden");
+    window.location.reload();
+  });
+  document.getElementById("btn-refresh-cancel").addEventListener("click", () => {
+    refreshModal.classList.add("hidden");
+  });
+  refreshModal.addEventListener("click", (e) => {
+    if (e.target === refreshModal) refreshModal.classList.add("hidden");
+  });
+}
