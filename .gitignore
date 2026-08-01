@@ -11,6 +11,7 @@ dist/
 exports/
 feedback/
 user_settings.json
+model_aliases.json
 release/
 packaging/installer/payload/
 packaging/installer/*.7z
