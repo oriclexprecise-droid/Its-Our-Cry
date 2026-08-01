@@ -73,6 +73,10 @@ def create_app(config_path="config.yaml"):
             "has_api_key": has_key,
             "default_interval": DEFAULT_INTERVAL,
             "gptsovits_path": config["gptsovits_path"],
+            "deepseek": {
+                "base_url": config["deepseek"].get("base_url", "https://api.deepseek.com"),
+                "model": config["deepseek"].get("model", "deepseek-v4-pro"),
+            },
         })
 
     @app.route("/api/config/api_key", methods=["GET"])
@@ -96,6 +100,8 @@ def create_app(config_path="config.yaml"):
         script_text = data.get("text", "")
         api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
         lang = data.get("lang", "zh")
+        base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-pro")
 
         if not script_text.strip():
             return jsonify({"error": "script is empty"}), 400
@@ -112,8 +118,8 @@ def create_app(config_path="config.yaml"):
             emotions = analyze_emotions(
                 lines=lines,
                 api_key=api_key,
-                base_url=config["deepseek"]["base_url"],
-                model=config["deepseek"]["model"],
+                base_url=base_url,
+                model=model,
                 lang=lang,
             )
         except Exception as e:

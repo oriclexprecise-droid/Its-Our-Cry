@@ -17,14 +17,24 @@ async function loadConfig() {
   state.chars = cfg.characters;
   state.emotions = cfg.emotions;
   loadDeployPath(cfg);
-  if (cfg.has_api_key) {
-    try {
-      const keyData = await api("/api/config/api_key");
-      if (keyData.api_key) {
-        document.getElementById("api-key").value = keyData.api_key;
-        document.getElementById("api-key").placeholder = "已自动填入";
-      }
-    } catch (e) {}
+  const savedAi = loadAIConfigFromStorage();
+  if (savedAi) {
+    applyAIConfig(savedAi);
+  } else {
+    if (cfg.deepseek) {
+      document.getElementById("ai-name").value = "DeepSeek";
+      document.getElementById("ai-base-url").value = cfg.deepseek.base_url || "";
+      document.getElementById("ai-model").value = cfg.deepseek.model || "";
+    }
+    if (cfg.has_api_key) {
+      try {
+        const keyData = await api("/api/config/api_key");
+        if (keyData.api_key) {
+          document.getElementById("api-key").value = keyData.api_key;
+          document.getElementById("api-key").placeholder = "已自动填入";
+        }
+      } catch (e) {}
+    }
   }
 }
 
@@ -38,7 +48,7 @@ document.getElementById("btn-analyze").addEventListener("click", async () => {
   status.className = "status-text";
   document.getElementById("btn-analyze").disabled = true;
   try {
-    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang }) });
+    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }) });
     state.lines = data.lines;
     state.hasGenerated = false;
     state.selectMode = false;
@@ -831,3 +841,50 @@ function initPanelCollapse() {
   });
 }
 initPanelCollapse();
+const DEEPSEEK_PRESET = { name: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-v4-pro" };
+const AI_CONFIG_KEY = "mygo_ai_config";
+
+function loadAIConfigFromStorage() {
+  try {
+    const raw = localStorage.getItem(AI_CONFIG_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function applyAIConfig(cfg) {
+  document.getElementById("ai-name").value = cfg.name || "";
+  document.getElementById("ai-base-url").value = cfg.base_url || "";
+  document.getElementById("ai-model").value = cfg.model || "";
+  if (cfg.api_key) document.getElementById("api-key").value = cfg.api_key;
+}
+
+function saveAIConfigToStorage() {
+  const cfg = {
+    name: document.getElementById("ai-name").value.trim(),
+    base_url: document.getElementById("ai-base-url").value.trim(),
+    model: document.getElementById("ai-model").value.trim(),
+    api_key: document.getElementById("api-key").value.trim()
+  };
+  localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(cfg));
+  return cfg;
+}
+
+function initAIConfig() {
+  const saved = loadAIConfigFromStorage();
+  if (saved) applyAIConfig(saved);
+  document.getElementById("btn-deepseek-preset").addEventListener("click", () => {
+    applyAIConfig(DEEPSEEK_PRESET);
+    const status = document.getElementById("ai-config-status");
+    status.textContent = "已填入 DeepSeek 预设";
+    status.className = "status-text success";
+  });
+  document.getElementById("btn-save-ai-config").addEventListener("click", () => {
+    saveAIConfigToStorage();
+    const status = document.getElementById("ai-config-status");
+    status.textContent = "配置已保存";
+    status.className = "status-text success";
+  });
+}
+initAIConfig();

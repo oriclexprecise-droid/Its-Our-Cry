@@ -81,10 +81,27 @@
       <div class="panel-body">
         <div class="side-section">
           <h3 class="side-section-title">API 设置</h3>
-          <div class="api-key-row">
-            <label for="api-key">DeepSeek API Key</label>
+          <div class="ai-preset-row">
+            <button type="button" id="btn-deepseek-preset" class="btn-secondary btn-small">DeepSeek 预设</button>
+            <span id="ai-config-status" class="status-text"></span>
+          </div>
+          <div class="api-field">
+            <label for="ai-name">AI 名称</label>
+            <input type="text" id="ai-name" placeholder="例如 DeepSeek" autocomplete="off">
+          </div>
+          <div class="api-field">
+            <label for="ai-base-url">API 地址</label>
+            <input type="text" id="ai-base-url" placeholder="https://api.deepseek.com" autocomplete="off">
+          </div>
+          <div class="api-field">
+            <label for="ai-model">模型名称</label>
+            <input type="text" id="ai-model" placeholder="deepseek-v4-pro" autocomplete="off">
+          </div>
+          <div class="api-field">
+            <label for="api-key">API Key</label>
             <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
           </div>
+          <button type="button" id="btn-save-ai-config" class="btn-secondary btn-small">保存配置</button>
         </div>
       </div>
     </section>
