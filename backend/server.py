@@ -448,7 +448,8 @@ def create_app(config_path="config.yaml"):
             if state["generated"].get(all_indices[idx]) and Path(wav_path).exists():
                 continue
             text = merged_lines[idx].get("translated_text") or merged_lines[idx]["text"]
-            if merged_lines[idx].get("character") == "旁白" or state.get("srt_only"):
+            char_name = merged_lines[idx].get("character")
+            if char_name == "旁白" or (state.get("srt_only") and char_name not in config["characters"]):
                 seconds = narration_seconds(text)
             else:
                 seconds = max(1.2, min(6.0, len(text or "") * 0.32 + 0.6))
@@ -506,10 +507,6 @@ def create_app(config_path="config.yaml"):
 
         def generate_worker():
             try:
-                if srt_only:
-                    state["progress"]["current"] = state["progress"]["total"]
-                    finalize_output()
-                    return
                 engine = get_engine(
                     config["gptsovits_path"],
                     project_root=project_root,
@@ -535,7 +532,7 @@ def create_app(config_path="config.yaml"):
 
                 for char, idx_list in char_groups.items():
                     if char not in config["characters"]:
-                        if char == "旁白":
+                        if char == "旁白" or srt_only:
                             for idx in idx_list:
                                 state["progress"]["current"] += 1
                             continue

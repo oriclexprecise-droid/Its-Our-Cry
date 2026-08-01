@@ -437,10 +437,7 @@ async function pollProgress(btn, progressText, barFill) {
     }
     if (!p.generating && p.merged_path) {
       const failCount = Object.keys(p.failures || {}).length;
-      if (p.srt_only) {
-        progressText.textContent = "生成完成：仅生成 SRT 字幕";
-        progressText.className = "status-text success";
-      } else if (failCount > 0) {
+      if (failCount > 0) {
         progressText.textContent = "生成完成：语音 " + p.generated_count + " 条，另有 " + failCount + " 条仅保留字幕";
         progressText.className = "status-text success";
       } else if (p.generated_count > 0) {
