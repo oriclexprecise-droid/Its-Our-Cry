@@ -134,6 +134,6 @@ def generate_srt(
                 f"{format_srt_time(info['start'])} --> "
                 f"{format_srt_time(info['end'])}\n"
             )
-            f.write(f"{line['character']}：{line['text']}\n\n")
+            f.write(f"{line['text']}\n\n")
 
     return output_path
