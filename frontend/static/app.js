@@ -1447,6 +1447,7 @@ async function addModelAlias(key, input, btn) {
     await api("/api/models/" + encodeURIComponent(key) + "/aliases", { method: "POST", body: JSON.stringify({ alias }) });
     input.value = "";
     await loadModels();
+    await loadConfig();
   } catch (e) {
     alert("添加激活词失败: " + e.message);
   } finally {
@@ -1459,6 +1460,7 @@ async function deleteModelAlias(key, alias) {
   try {
     await api("/api/models/" + encodeURIComponent(key) + "/aliases/" + encodeURIComponent(alias), { method: "DELETE" });
     await loadModels();
+    await loadConfig();
   } catch (e) {
     alert("删除激活词失败: " + e.message);
   }
