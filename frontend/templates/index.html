@@ -68,7 +68,10 @@
     <section id="step-download" class="panel hidden">
       <div class="panel-header"><h2>3. 下载结果</h2></div>
       <div class="panel-body download-links">
-        <button id="btn-export-tracks" class="btn-secondary">导出分音轨</button>
+        <div class="export-form">
+          <input type="text" id="export-folder-input" placeholder="导出文件夹名称" autocomplete="off">
+          <button id="btn-export-tracks" class="btn-secondary">导出</button>
+        </div>
         <button id="btn-open-export" class="btn-secondary hidden">打开导出文件夹</button>
         <span id="export-status" class="status-text"></span>
       </div>

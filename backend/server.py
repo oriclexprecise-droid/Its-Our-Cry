@@ -408,7 +408,10 @@ def create_app(config_path="config.yaml"):
         export_root.mkdir(parents=True, exist_ok=True)
         export_dir = export_root / folder_name
         if export_dir.exists():
-            return jsonify({"error": f"文件夹「{folder_name}」已存在，请换一个名字"}), 400
+            return jsonify({
+                "error": f"文件夹「{folder_name}」已存在，请换一个名称或手动删除旧文件夹",
+                "code": "folder_exists",
+            }), 409
         export_dir.mkdir(parents=True)
 
         try:

@@ -5,7 +5,9 @@ async function api(url, opts = {}) {
   const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "HTTP " + res.status);
+    const error = new Error(err.error || "HTTP " + res.status);
+    if (err.code) error.code = err.code;
+    throw error;
   }
   return res.json();
 }
@@ -340,30 +342,46 @@ async function pollProgress(btn, progressText, barFill) {
 
 let lastExportFolder = "";
 
-document.getElementById("btn-export-tracks").addEventListener("click", async () => {
+async function runExport(folderName) {
   const status = document.getElementById("export-status");
   const btn = document.getElementById("btn-export-tracks");
   btn.disabled = true;
+  status.textContent = "正在导出...";
+  status.className = "status-text";
   try {
-    while (true) {
-      const name = prompt("请输入导出文件夹名称：", "");
-      if (name === null) { status.textContent = ""; break; }
-      const folderName = name.trim();
-      if (!folderName) { alert("名称不能为空"); continue; }
-      try {
-        const result = await api("/api/export_tracks", { method: "POST", body: JSON.stringify({ folder_name: folderName }) });
-        lastExportFolder = result.folder;
-        status.textContent = "导出完成：" + result.folder;
-        status.className = "status-text success";
-        document.getElementById("btn-open-export").classList.remove("hidden");
-        break;
-      } catch (e) {
-        if (!confirm("导出失败：" + e.message + "\n是否重新输入名称？")) break;
-      }
+    const result = await api("/api/export_tracks", { method: "POST", body: JSON.stringify({ folder_name: folderName }) });
+    lastExportFolder = result.folder;
+    status.textContent = "导出完成：" + result.folder;
+    status.className = "status-text success";
+    document.getElementById("btn-open-export").classList.remove("hidden");
+    document.getElementById("export-folder-input").value = "";
+  } catch (e) {
+    if (e.code === "folder_exists") {
+      status.textContent = e.message;
+      status.className = "status-text error";
+    } else {
+      status.textContent = "导出失败：" + e.message;
+      status.className = "status-text error";
     }
   } finally {
     btn.disabled = false;
   }
+}
+
+document.getElementById("btn-export-tracks").addEventListener("click", async () => {
+  const input = document.getElementById("export-folder-input");
+  const status = document.getElementById("export-status");
+  const folderName = input.value.trim();
+  if (!folderName) {
+    status.textContent = "请输入导出文件夹名称";
+    status.className = "status-text error";
+    return;
+  }
+  await runExport(folderName);
+});
+
+document.getElementById("export-folder-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("btn-export-tracks").click();
 });
 
 document.getElementById("btn-open-export").addEventListener("click", async () => {
