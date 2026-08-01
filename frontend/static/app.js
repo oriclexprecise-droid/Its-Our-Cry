@@ -1,4 +1,4 @@
-const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false };
+const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set() };
 let audioPlayer = null;
 
 async function api(url, opts = {}) {
@@ -38,6 +38,11 @@ document.getElementById("btn-analyze").addEventListener("click", async () => {
     const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang }) });
     state.lines = data.lines;
     state.hasGenerated = false;
+    state.selectMode = false;
+    state.selected = new Set();
+    document.getElementById("btn-select-mode").textContent = "选择模式";
+    document.getElementById("btn-select-mode").classList.remove("active");
+    document.getElementById("selection-toolbar").classList.add("hidden");
     renderLines();
     status.textContent = "已分析 " + data.lines.length + " 条台词";
     status.className = "status-text success";
@@ -61,8 +66,12 @@ function renderLines() {
   document.getElementById("line-count").textContent = "共 " + state.lines.length + " 条台词";
   container.innerHTML = state.lines.map((line, i) => {
     const opts = state.emotions.map(e => '<option value="' + e + '"' + (e === line.emotion ? " selected" : "") + '>' + e + '</option>').join("");
+    const checked = state.selected.has(i) ? " checked" : "";
+    const idxCell = state.selectMode
+      ? '<label class="idx-check"><input type="checkbox" class="line-check" data-index="' + i + '"' + checked + '>#' + (i + 1) + '</label>'
+      : '<span class="idx">#' + (i + 1) + '</span>';
     return '<div class="line-item">'
-      + '<span class="idx">#' + (i + 1) + '</span>'
+      + idxCell
       + '<span class="char">' + esc(line.character) + '</span>'
       + '<span class="line-texts">'
       + '<span class="text" title="' + esc(line.text) + '">' + esc(line.text) + '</span>'
@@ -81,6 +90,17 @@ function renderLines() {
       const idx = parseInt(e.target.dataset.index);
       state.lines[idx].emotion = e.target.value;
       try { await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ emotion: e.target.value }) }); } catch (err) {}
+    });
+  });
+  container.querySelectorAll(".line-check").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const idx = parseInt(cb.dataset.index);
+      if (cb.checked) {
+        state.selected.add(idx);
+      } else {
+        state.selected.delete(idx);
+      }
+      updateSelectionUI();
     });
   });
   container.querySelectorAll(".interval-input").forEach(inp => {
@@ -136,9 +156,24 @@ function renderLines() {
   });
 }
 
+function updateSelectionUI() {
+  const total = state.lines.length;
+  const count = state.selected.size;
+  const allBox = document.getElementById("select-all");
+  if (allBox) {
+    allBox.checked = total > 0 && count === total;
+    allBox.indeterminate = count > 0 && count < total;
+  }
+  const countEl = document.getElementById("selected-count");
+  if (countEl) countEl.textContent = "已选 " + count + " 条";
+  const applyBtn = document.getElementById("btn-apply-interval");
+  if (applyBtn) applyBtn.disabled = count === 0;
+}
+
 function setLineButtonsDisabled(disabled) {
   document.querySelectorAll(".btn-line-action").forEach(b => { b.disabled = disabled; });
   document.querySelectorAll(".interval-input").forEach(inp => { inp.disabled = disabled; });
+  document.querySelectorAll(".line-check, #select-all, #btn-apply-interval, #batch-interval, #btn-select-mode").forEach(el => { el.disabled = disabled; });
 }
 
 function refreshGenerated(p) {
@@ -180,6 +215,64 @@ document.getElementById("btn-merge").addEventListener("click", async () => {
     progressText.className = "status-text error";
     btn.disabled = false;
     btn.textContent = "合并音频并生成字幕";
+  }
+});
+
+document.getElementById("btn-select-mode").addEventListener("click", () => {
+  state.selectMode = !state.selectMode;
+  const btn = document.getElementById("btn-select-mode");
+  btn.textContent = state.selectMode ? "退出选择" : "选择模式";
+  btn.classList.toggle("active", state.selectMode);
+  document.getElementById("selection-toolbar").classList.toggle("hidden", !state.selectMode);
+  if (!state.selectMode) {
+    state.selected.clear();
+    const allBox = document.getElementById("select-all");
+    allBox.checked = false;
+    allBox.indeterminate = false;
+    document.getElementById("selection-status").textContent = "";
+  }
+  renderLines();
+  updateSelectionUI();
+});
+
+document.getElementById("select-all").addEventListener("change", (e) => {
+  state.selected = e.target.checked ? new Set(state.lines.map((_, i) => i)) : new Set();
+  renderLines();
+  updateSelectionUI();
+});
+
+document.getElementById("btn-apply-interval").addEventListener("click", async () => {
+  const indices = [...state.selected];
+  const statusEl = document.getElementById("selection-status");
+  if (!indices.length) {
+    statusEl.textContent = "请先勾选台词";
+    statusEl.className = "status-text error";
+    return;
+  }
+  const raw = parseFloat(document.getElementById("batch-interval").value);
+  if (isNaN(raw) || raw < 0 || raw > 10) {
+    statusEl.textContent = "请输入 0-10 秒的间隔";
+    statusEl.className = "status-text error";
+    return;
+  }
+  const interval = Math.round(raw * 1000) / 1000;
+  statusEl.textContent = "正在应用间隔...";
+  statusEl.className = "status-text";
+  try {
+    const res = await api("/api/lines/interval", { method: "POST", body: JSON.stringify({ indices, interval }) });
+    for (const idx of res.indices) state.lines[idx].interval = interval;
+    if (state.hasGenerated && !state.generating) {
+      await api("/api/merge", { method: "POST" });
+      statusEl.textContent = "已更新 " + res.updated + " 条，字幕已同步";
+    } else {
+      statusEl.textContent = "已更新 " + res.updated + " 条";
+    }
+    statusEl.className = "status-text success";
+    renderLines();
+    updateSelectionUI();
+  } catch (err) {
+    statusEl.textContent = "应用失败: " + err.message;
+    statusEl.className = "status-text error";
   }
 });
 
@@ -235,7 +328,7 @@ async function pollProgress(btn, progressText, barFill) {
       progressText.textContent = "生成完成!";
       progressText.className = "status-text success";
       btn.textContent = "重新生成"; btn.disabled = false; state.generating = false;
-      refreshGenerated(p);
+      setLineButtonsDisabled(false); refreshGenerated(p);
       document.getElementById("step-download").classList.remove("hidden");
       return;
     }

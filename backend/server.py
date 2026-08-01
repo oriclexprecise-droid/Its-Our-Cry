@@ -166,6 +166,30 @@ def create_app(config_path="config.yaml"):
             state["lines"][index]["interval"] = round(interval, 3)
         return jsonify({"status": "ok", "line": state["lines"][index]})
 
+    @app.route("/api/lines/interval", methods=["POST"])
+    def update_lines_interval():
+        data = request.get_json() or {}
+        indices = data.get("indices", [])
+        try:
+            interval = float(data.get("interval"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "间隔时间必须是数字"}), 400
+        if not 0 <= interval <= 10:
+            return jsonify({"error": "间隔时间需在 0-10 秒之间"}), 400
+        if not isinstance(indices, list) or not indices:
+            return jsonify({"error": "请选择至少一条台词"}), 400
+        valid = [
+            idx for idx in indices
+            if isinstance(idx, int) and not isinstance(idx, bool)
+            and 0 <= idx < len(state["lines"])
+        ]
+        if not valid:
+            return jsonify({"error": "没有有效的台词索引"}), 400
+        interval = round(interval, 3)
+        for idx in valid:
+            state["lines"][idx]["interval"] = interval
+        return jsonify({"status": "ok", "updated": len(valid), "indices": valid})
+
     @app.route("/api/ref_audio/<character>/<emotion>", methods=["GET"])
     def list_ref_audio(character, emotion):
         if character not in config["characters"]:
