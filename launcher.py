@@ -44,6 +44,12 @@ def _write_log(root, text):
 
 
 def main():
+    # 无控制台模式下 sys.stdout/stderr 是 None，Flask/click 打印 banner 会崩
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
     root = app_root()
     _write_log(root, "launcher start: " + str(root))
     os.chdir(str(root))
