@@ -58,6 +58,23 @@ header h1 {
   font-weight: 700;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
+.bili-float {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 90;
+  padding: 8px 14px;
+  background: rgba(15, 52, 96, 0.75);
+  border: 1px solid rgba(138, 180, 248, 0.45);
+  border-radius: 999px;
+  color: #8ab4f8;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+.bili-float:hover { background: #e94560; color: #fff; border-color: #e94560; }
 .panel { background: #16213e; border-radius: 8px; margin-bottom: 20px; overflow: hidden; }
 .panel-header { background: #0f3460; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
 .panel-header h2 { font-size: 15px; font-weight: 600; color: #e0e0e0; }
