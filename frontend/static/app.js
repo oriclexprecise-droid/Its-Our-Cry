@@ -178,4 +178,41 @@ async function pollProgress(btn, progressText, barFill) {
   }
 }
 
+let lastExportFolder = "";
+
+document.getElementById("btn-export-tracks").addEventListener("click", async () => {
+  const status = document.getElementById("export-status");
+  const btn = document.getElementById("btn-export-tracks");
+  btn.disabled = true;
+  try {
+    while (true) {
+      const name = prompt("请输入导出文件夹名称：", "");
+      if (name === null) { status.textContent = ""; break; }
+      const folderName = name.trim();
+      if (!folderName) { alert("名称不能为空"); continue; }
+      try {
+        const result = await api("/api/export_tracks", { method: "POST", body: JSON.stringify({ folder_name: folderName }) });
+        lastExportFolder = result.folder;
+        status.textContent = "导出完成：" + result.folder;
+        status.className = "status-text success";
+        document.getElementById("btn-open-export").classList.remove("hidden");
+        break;
+      } catch (e) {
+        if (!confirm("导出失败：" + e.message + "\n是否重新输入名称？")) break;
+      }
+    }
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("btn-open-export").addEventListener("click", async () => {
+  if (!lastExportFolder) return;
+  try {
+    await api("/api/open_folder", { method: "POST", body: JSON.stringify({ path: lastExportFolder }) });
+  } catch (e) {
+    alert("打开失败: " + e.message);
+  }
+});
+
 loadConfig();

@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 *.log
 output/
@@ -8,3 +8,4 @@ _snapshot_20260801/
 build/
 dist/
 *.spec
+exports/

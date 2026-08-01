@@ -3,6 +3,8 @@
 import json
 import os
 import random
+import re
+import shutil
 import threading
 import traceback
 from pathlib import Path
@@ -331,5 +333,96 @@ def create_app(config_path="config.yaml"):
         if not filename:
             return jsonify({"error": "unknown"}), 400
         return send_from_directory(OUT, filename, as_attachment=True)
+
+    @app.route("/api/export_tracks", methods=["POST"])
+    def export_tracks():
+        if state["generating"]:
+            return jsonify({"error": "生成中，请稍后再导出"}), 409
+        if not state["generated"]:
+            return jsonify({"error": "没有已生成的音频"}), 400
+
+        data = request.get_json() or {}
+        folder_name = str(data.get("folder_name", "")).strip()
+        if not folder_name:
+            return jsonify({"error": "请输入导出文件夹名称"}), 400
+        if re.search(r'[\\/:*?"<>|\r\n]', folder_name) or folder_name in (".", ".."):
+            return jsonify({"error": "文件夹名称包含非法字符"}), 400
+        if len(folder_name) > 64:
+            return jsonify({"error": "文件夹名称过长"}), 400
+
+        export_root = project_root / "exports"
+        export_root.mkdir(parents=True, exist_ok=True)
+        export_dir = export_root / folder_name
+        if export_dir.exists():
+            return jsonify({"error": f"文件夹「{folder_name}」已存在，请换一个名字"}), 400
+        export_dir.mkdir(parents=True)
+
+        try:
+            finalize_output()
+
+            tracks_dir = export_dir / "tracks"
+            tracks_dir.mkdir(parents=True, exist_ok=True)
+            segments_dir = export_dir / "segments"
+            segments_dir.mkdir(parents=True, exist_ok=True)
+
+            char_indices = {}
+            for idx in sorted(state["generated"].keys()):
+                char = state["lines"][idx]["character"]
+                char_indices.setdefault(char, []).append(idx)
+
+            created_files = []
+            for char, idx_list in char_indices.items():
+                wav_paths = []
+                for idx in idx_list:
+                    gen_path = state["generated"][idx]["path"]
+                    if Path(gen_path).exists():
+                        wav_paths.append(gen_path)
+                if not wav_paths:
+                    continue
+                track_path = tracks_dir / f"{char}.wav"
+                merge_wav_files(
+                    wav_paths=wav_paths,
+                    output_path=str(track_path),
+                    silence_between=0.3,
+                )
+                created_files.append(str(track_path))
+
+                for wav_path in wav_paths:
+                    shutil.copy2(wav_path, segments_dir / Path(wav_path).name)
+                    created_files.append(str(segments_dir / Path(wav_path).name))
+
+            merged_path = Path(config["output_dir"]) / "merged_output.wav"
+            srt_path = Path(config["output_dir"]) / "subtitles.srt"
+            if merged_path.exists():
+                shutil.copy2(str(merged_path), str(export_dir / "merged_output.wav"))
+                created_files.append(str(export_dir / "merged_output.wav"))
+            if srt_path.exists():
+                shutil.copy2(str(srt_path), str(export_dir / "subtitles.srt"))
+                created_files.append(str(export_dir / "subtitles.srt"))
+
+            if not created_files:
+                raise RuntimeError("没有可导出的音频文件")
+            return jsonify({"status": "ok", "folder": str(export_dir), "files": created_files})
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "导出失败: " + str(e)}), 500
+
+    @app.route("/api/open_folder", methods=["POST"])
+    def open_folder():
+        data = request.get_json() or {}
+        folder = str(data.get("path", "")).strip()
+        if not folder:
+            return jsonify({"error": "缺少文件夹路径"}), 400
+        try:
+            resolved = Path(folder).resolve()
+            project_resolved = project_root.resolve()
+            if not str(resolved).startswith(str(project_resolved)):
+                return jsonify({"error": "只能打开项目内的文件夹"}), 400
+            if not resolved.exists() or not resolved.is_dir():
+                return jsonify({"error": "文件夹不存在"}), 400
+            os.startfile(str(resolved))
+            return jsonify({"status": "ok"})
+        except Exception as e:
+            return jsonify({"error": "打开失败: " + str(e)}), 500
 
     return app
