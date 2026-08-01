@@ -17,10 +17,6 @@
     <section id="step-input" class="panel">
       <div class="panel-header"><h2>1. 输入剧本</h2></div>
       <div class="panel-body">
-        <div class="api-key-row">
-          <label>DeepSeek API Key</label>
-          <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
-        </div>
         <textarea id="script-input" placeholder="粘贴剧本内容...&#10;&#10;格式示例：&#10;千早爱音：大家好！今天也要加油！&#10;高松灯：嗯...我会努力的。"></textarea>
         <div class="input-row">
           <div class="lang-select-row">
@@ -82,7 +78,15 @@
   <aside class="side-panels">
     <section class="panel side-panel">
       <div class="panel-header"><h2>设置</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-settings" title="收起面板">▾</button></div>
-      <div class="panel-body side-empty"></div>
+      <div class="panel-body">
+        <div class="side-section">
+          <h3 class="side-section-title">API 设置</h3>
+          <div class="api-key-row">
+            <label for="api-key">DeepSeek API Key</label>
+            <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
+          </div>
+        </div>
+      </div>
     </section>
         <section class="panel side-panel">
       <div class="panel-header"><h2>部署</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-deploy" title="收起面板">▾</button></div>

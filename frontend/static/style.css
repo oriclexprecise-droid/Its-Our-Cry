@@ -183,3 +183,6 @@ textarea { min-height: 240px; line-height: 1.6; }
 .panel-collapse-btn { background: none; border: none; color: #8ab4f8; font-size: 14px; line-height: 1; cursor: pointer; padding: 3px 6px; border-radius: 4px; }
 .panel-collapse-btn:hover { background: rgba(138,180,248,0.15); color: #e0e0e0; }
 .panel.collapsed .panel-body { display: none; }
+.side-section-title { font-size: 12px; font-weight: 600; color: #ff6b9d; margin-bottom: 10px; text-transform: none; }
+.side-panel .api-key-row { flex-direction: column; align-items: stretch; gap: 6px; margin-bottom: 0; }
+.side-panel .api-key-row label { white-space: normal; }
