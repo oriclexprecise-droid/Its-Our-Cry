@@ -1173,6 +1173,18 @@ function saveAIConfigToStorage() {
   return cfg;
 }
 
+function setNarrationMode(mode) {
+  const autoBtn = document.getElementById("narration-mode-auto");
+  const fixedBtn = document.getElementById("narration-mode-fixed");
+  const autoFields = document.getElementById("narration-auto-fields");
+  const fixedField = document.getElementById("narration-fixed-field");
+  if (!autoBtn || !fixedBtn || !autoFields || !fixedField) return;
+  autoBtn.classList.toggle("active", mode === "auto");
+  fixedBtn.classList.toggle("active", mode === "fixed");
+  autoFields.classList.toggle("hidden", mode !== "auto");
+  fixedField.classList.toggle("hidden", mode !== "fixed");
+}
+
 function setNarrationInputs(nr) {
   const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   setVal("narration-base", nr.base_duration != null ? nr.base_duration : 2.0);
@@ -1180,11 +1192,16 @@ function setNarrationInputs(nr) {
   setVal("narration-min", nr.min_duration != null ? nr.min_duration : 1.5);
   setVal("narration-max", nr.max_duration != null ? nr.max_duration : 8.0);
   setVal("narration-fixed", nr.fixed_duration != null ? nr.fixed_duration : 0.0);
+  setNarrationMode((nr.fixed_duration != null && nr.fixed_duration > 0) ? "fixed" : "auto");
 }
 
 function initNarrationConfig() {
   const btn = document.getElementById("btn-save-narration");
   if (!btn) return;
+  const autoModeBtn = document.getElementById("narration-mode-auto");
+  const fixedModeBtn = document.getElementById("narration-mode-fixed");
+  if (autoModeBtn) autoModeBtn.addEventListener("click", () => setNarrationMode("auto"));
+  if (fixedModeBtn) fixedModeBtn.addEventListener("click", () => setNarrationMode("fixed"));
   btn.addEventListener("click", async () => {
     const status = document.getElementById("narration-config-status");
     const data = {
@@ -1192,7 +1209,9 @@ function initNarrationConfig() {
       per_char: parseFloat(document.getElementById("narration-per").value),
       min_duration: parseFloat(document.getElementById("narration-min").value),
       max_duration: parseFloat(document.getElementById("narration-max").value),
-      fixed_duration: parseFloat(document.getElementById("narration-fixed").value)
+      fixed_duration: document.getElementById("narration-mode-fixed").classList.contains("active")
+        ? parseFloat(document.getElementById("narration-fixed").value)
+        : 0
     };
     for (const k of Object.keys(data)) {
       if (isNaN(data[k]) || data[k] < 0) {

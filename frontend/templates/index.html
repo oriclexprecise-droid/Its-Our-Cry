@@ -109,25 +109,33 @@
         </div>
         <div class="side-section">
           <h3 class="side-section-title">旁白字幕时长</h3>
-          <div class="api-field">
-            <label for="narration-base">基础时长（秒）</label>
-            <input type="number" id="narration-base" min="0" step="0.1" value="2.0">
+          <div class="narration-mode-row">
+            <button type="button" class="mode-btn active" id="narration-mode-auto">自动估算</button>
+            <button type="button" class="mode-btn" id="narration-mode-fixed">固定时长</button>
           </div>
-          <div class="api-field">
-            <label for="narration-per">每字时长（秒）</label>
-            <input type="number" id="narration-per" min="0" step="0.01" value="0.32">
+          <div id="narration-auto-fields">
+            <div class="api-field">
+              <label for="narration-base">基础时长（秒）</label>
+              <input type="number" id="narration-base" min="0" step="0.1" value="2.0">
+            </div>
+            <div class="api-field">
+              <label for="narration-per">每字时长（秒）</label>
+              <input type="number" id="narration-per" min="0" step="0.01" value="0.32">
+            </div>
+            <div class="api-field">
+              <label for="narration-min">最短时长（秒）</label>
+              <input type="number" id="narration-min" min="0" step="0.1" value="1.5">
+            </div>
+            <div class="api-field">
+              <label for="narration-max">最长时长（秒）</label>
+              <input type="number" id="narration-max" min="0" step="0.1" value="8.0">
+            </div>
           </div>
-          <div class="api-field">
-            <label for="narration-min">最短时长（秒）</label>
-            <input type="number" id="narration-min" min="0" step="0.1" value="1.5">
-          </div>
-          <div class="api-field">
-            <label for="narration-max">最长时长（秒）</label>
-            <input type="number" id="narration-max" min="0" step="0.1" value="8.0">
-          </div>
-          <div class="api-field">
-            <label for="narration-fixed">固定持续时长（秒）</label>
-            <input type="number" id="narration-fixed" min="0" step="0.1" value="0.0">
+          <div id="narration-fixed-field" class="hidden">
+            <div class="api-field">
+              <label for="narration-fixed">固定持续时长（秒）</label>
+              <input type="number" id="narration-fixed" min="0" step="0.1" value="0.0">
+            </div>
           </div>
           <button type="button" id="btn-save-narration" class="btn-secondary btn-small">保存旁白时长</button>
           <span id="narration-config-status" class="status-text"></span>
