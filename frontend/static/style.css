@@ -14,8 +14,14 @@ main { flex: 1; min-width: 0; }
   .side-panels { width: 100%; position: static; }
 }
 header { text-align: center; margin-bottom: 32px; }
-header h1 { font-size: 28px; color: #ff6b9d; margin-bottom: 4px; }
-header .subtitle { font-size: 13px; color: #888; }
+header h1 {
+  font-size: 46px;
+  color: #ff6b9d;
+  margin-bottom: 0;
+  font-family: Impact, "Arial Black", "Microsoft YaHei", sans-serif;
+  font-weight: 700;
+  text-shadow: 0 0 22px rgba(255,107,157,0.35);
+}
 .panel { background: #16213e; border-radius: 8px; margin-bottom: 20px; overflow: hidden; }
 .panel-header { background: #0f3460; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
 .panel-header h2 { font-size: 15px; font-weight: 600; color: #e0e0e0; }
@@ -204,7 +210,6 @@ textarea { min-height: 240px; line-height: 1.6; }
 ::-webkit-scrollbar-thumb { background: #1a4a7a; border-radius: 5px; }
 ::-webkit-scrollbar-track { background: #0f3460; }
 @media (max-width: 560px) {
-  header h1 { font-size: 22px; }
-  header .subtitle { font-size: 12px; }
+  header h1 { font-size: 30px; }
   .panel-body { padding: 14px; }
 }
