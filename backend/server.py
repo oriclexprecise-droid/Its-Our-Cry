@@ -10,6 +10,7 @@ import sys
 import threading
 import traceback
 import urllib.request
+import wave
 import zipfile
 from pathlib import Path
 from typing import Optional
