@@ -58,6 +58,23 @@ header h1 {
   font-weight: 700;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
+.creator-tip {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 60;
+  max-width: min(430px, calc(100vw - 240px));
+  color: rgba(222, 233, 255, 0.92);
+  font-size: 14px;
+  line-height: 1.6;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+.creator-tip.tip-fade {
+  opacity: 0;
+  transform: translateY(5px);
+}
 .bili-float {
   position: fixed;
   right: 18px;
@@ -357,6 +374,12 @@ textarea { min-height: 240px; line-height: 1.6; }
     position: static;
     width: fit-content;
     margin: 0 auto 6px;
+  }
+  .creator-tip {
+    position: static;
+    text-align: center;
+    margin: 0 auto 8px;
+    max-width: 100%;
   }
   header h1 { font-size: 40px; }
   .panel-body { padding: 14px; }

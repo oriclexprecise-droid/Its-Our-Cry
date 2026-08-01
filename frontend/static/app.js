@@ -1083,6 +1083,7 @@ async function pollDeployDownload() {
 initDeployFlow();
 loadConfig();
 initBackgroundSettings();
+initCreatorTip();
 function initPanelCollapse() {
   const specs = [
     { btn: "btn-collapse-settings", key: "mygo_panel_settings_collapsed" },
@@ -1282,6 +1283,35 @@ function initAIConfig() {
   });
 }
 const BG_PREF_KEY = "mygo_bg_pref";
+
+const CREATOR_TIPS = [
+  "为什么要演奏春日影？",
+  "享受创作的过程，不要因为一时的困难而泄气👍",
+  "别想到每个点都做到最好，量力而行才是正解😁",
+  "这程序可是我花了近80才搞出来的，算上后期的更新，给我一个三连不过分吧💕",
+  "可悲的是，戴上面具后，我才是真的‘我’",
+  "Mujica将出的电影和27年的第三季大家期望如何？（oh不不不，想到高考前吃石我无疑是难绷的）",
+  "能陪我组一辈子的乐队吗？",
+  "Tip位招租，私信up下次版本更新挂上你的tips😎",
+  "Tip里没有使用注意....吗？",
+  "6767676767676767",
+  "我说过了吧？请你们将剩余的人生交给我"
+];
+
+function initCreatorTip() {
+  const el = document.getElementById("creator-tip");
+  if (!el || !CREATOR_TIPS.length) return;
+  let index = Math.floor(Math.random() * CREATOR_TIPS.length);
+  el.textContent = CREATOR_TIPS[index];
+  setInterval(() => {
+    el.classList.add("tip-fade");
+    setTimeout(() => {
+      index = (index + 1) % CREATOR_TIPS.length;
+      el.textContent = CREATOR_TIPS[index];
+      el.classList.remove("tip-fade");
+    }, 450);
+  }, 6500);
+}
 
 function applyBgImage(filename) {
   if (!filename) return;
