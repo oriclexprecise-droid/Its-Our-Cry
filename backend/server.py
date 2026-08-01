@@ -47,6 +47,7 @@ def create_app(config_path="config.yaml"):
         "srt_path": None,
         "generating": False,
         "progress": {"current": 0, "total": 0},
+        "time_info": [],
     }
 
     @app.route("/")
@@ -207,6 +208,7 @@ def create_app(config_path="config.yaml"):
             output_path=str(merged_path),
             silence_between=0.3,
         )
+        state["time_info"] = time_info
         generate_srt(
             time_info=time_info,
             lines=merged_lines,
@@ -228,6 +230,7 @@ def create_app(config_path="config.yaml"):
         state["generating"] = True
         state["progress"] = {"current": 0, "total": len(indices)}
         state["generated"] = {}
+        state["time_info"] = []
 
         def generate_worker():
             try:
@@ -359,46 +362,85 @@ def create_app(config_path="config.yaml"):
 
         try:
             finalize_output()
+            if not state.get("time_info"):
+                raise RuntimeError("缺少时间轴信息，请先重新生成")
 
             tracks_dir = export_dir / "tracks"
             tracks_dir.mkdir(parents=True, exist_ok=True)
             segments_dir = export_dir / "segments"
             segments_dir.mkdir(parents=True, exist_ok=True)
 
+            ordered_idx = sorted(state["generated"].keys())
+            wav_paths = []
+            merged_lines = []
+            for idx in ordered_idx:
+                gen_path = state["generated"][idx]["path"]
+                if Path(gen_path).exists():
+                    wav_paths.append(gen_path)
+                    merged_lines.append(state["lines"][idx])
+            if not wav_paths:
+                raise RuntimeError("没有可导出的音频文件")
+
+            time_map = dict(zip(ordered_idx, state["time_info"]))
+
+            import numpy as np
+            import soundfile as sf
+
+            first_info = sf.info(wav_paths[0])
+            sample_rate = first_info.samplerate
+            channels = first_info.channels
+            total_duration = state["time_info"][-1]["end"]
+            total_samples = max(1, int(round(total_duration * sample_rate)))
+
             char_indices = {}
-            for idx in sorted(state["generated"].keys()):
+            for idx in ordered_idx:
                 char = state["lines"][idx]["character"]
                 char_indices.setdefault(char, []).append(idx)
 
             created_files = []
             for char, idx_list in char_indices.items():
-                wav_paths = []
+                track = np.zeros((total_samples, channels), dtype=np.float32)
+                has_audio = False
                 for idx in idx_list:
+                    info = time_map.get(idx)
                     gen_path = state["generated"][idx]["path"]
-                    if Path(gen_path).exists():
-                        wav_paths.append(gen_path)
-                if not wav_paths:
-                    continue
-                track_path = tracks_dir / f"{char}.wav"
-                merge_wav_files(
-                    wav_paths=wav_paths,
-                    output_path=str(track_path),
-                    silence_between=0.3,
-                )
-                created_files.append(str(track_path))
+                    if info is None or not Path(gen_path).exists():
+                        continue
+                    data, seg_sr = sf.read(gen_path, dtype="float32", always_2d=True)
+                    start_sample = int(round(info["start"] * sample_rate))
+                    length = min(len(data), max(0, total_samples - start_sample))
+                    if length > 0:
+                        seg = data[:length]
+                        if seg.shape[1] != channels:
+                            if seg.shape[1] == 1:
+                                seg = np.repeat(seg, channels, axis=1)
+                            elif channels == 1:
+                                seg = seg[:, :1]
+                        track[start_sample:start_sample + length] = seg
+                        has_audio = True
 
-                for wav_path in wav_paths:
-                    shutil.copy2(wav_path, segments_dir / Path(wav_path).name)
-                    created_files.append(str(segments_dir / Path(wav_path).name))
+                    shutil.copy2(gen_path, segments_dir / Path(gen_path).name)
+                    created_files.append(str(segments_dir / Path(gen_path).name))
 
-            merged_path = Path(config["output_dir"]) / "merged_output.wav"
-            srt_path = Path(config["output_dir"]) / "subtitles.srt"
-            if merged_path.exists():
-                shutil.copy2(str(merged_path), str(export_dir / "merged_output.wav"))
-                created_files.append(str(export_dir / "merged_output.wav"))
-            if srt_path.exists():
-                shutil.copy2(str(srt_path), str(export_dir / "subtitles.srt"))
-                created_files.append(str(export_dir / "subtitles.srt"))
+                if has_audio:
+                    track_path = tracks_dir / f"{char}.wav"
+                    sf.write(str(track_path), track, sample_rate)
+                    created_files.append(str(track_path))
+
+            export_merged = export_dir / "merged_output.wav"
+            time_info = merge_wav_files(
+                wav_paths=wav_paths,
+                output_path=str(export_merged),
+                silence_between=0.3,
+            )
+            export_srt = export_dir / "subtitles.srt"
+            generate_srt(
+                time_info=time_info,
+                lines=merged_lines,
+                output_path=str(export_srt),
+            )
+            created_files.append(str(export_merged))
+            created_files.append(str(export_srt))
 
             if not created_files:
                 raise RuntimeError("没有可导出的音频文件")
