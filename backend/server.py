@@ -71,6 +71,7 @@ def create_app(config_path="config.yaml"):
         "per_char": 0.32,
         "min_duration": 1.5,
         "max_duration": 8.0,
+        "fixed_duration": 0.0,
     })
 
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
@@ -175,6 +176,7 @@ def create_app(config_path="config.yaml"):
             "per_char": _num(data.get("per_char"), 0.32),
             "min_duration": _num(data.get("min_duration"), 1.5),
             "max_duration": _num(data.get("max_duration"), 8.0),
+            "fixed_duration": _num(data.get("fixed_duration"), 0.0),
         }
         if narration["min_duration"] > narration["max_duration"]:
             narration["min_duration"], narration["max_duration"] = narration["max_duration"], narration["min_duration"]
@@ -400,15 +402,22 @@ def create_app(config_path="config.yaml"):
             return None
         return random.choice(files)
 
-    def finalize_output():
-        if not state["lines"]:
-            return
-        output_dir = Path(config["output_dir"])
-        segments_dir = output_dir / "segments"
-        segments_dir.mkdir(parents=True, exist_ok=True)
-        merged_path = output_dir / "merged_output.wav"
-        srt_path = output_dir / "subtitles.srt"
+    def narration_seconds(text):
+        nr = config.get("narration", {})
+        fixed = float(nr.get("fixed_duration", 0.0) or 0.0)
+        if fixed > 0:
+            return fixed
+        base = float(nr.get("base_duration", 2.0))
+        per = float(nr.get("per_char", 0.32))
+        lo = float(nr.get("min_duration", 1.5))
+        hi = float(nr.get("max_duration", 8.0))
+        return max(lo, min(hi, base + len(text or "") * per))
 
+    def build_full_timeline(merged_path, srt_path, segments_dir):
+        if not state["lines"]:
+            return []
+        segments_dir = Path(segments_dir)
+        segments_dir.mkdir(parents=True, exist_ok=True)
         all_indices = list(range(len(state["lines"])))
         wav_paths = []
         merged_lines = []
@@ -440,12 +449,7 @@ def create_app(config_path="config.yaml"):
                 continue
             text = merged_lines[idx].get("translated_text") or merged_lines[idx]["text"]
             if merged_lines[idx].get("character") == "旁白":
-                nr = config.get("narration", {})
-                base = float(nr.get("base_duration", 2.0))
-                per = float(nr.get("per_char", 0.32))
-                lo = float(nr.get("min_duration", 1.5))
-                hi = float(nr.get("max_duration", 8.0))
-                seconds = max(lo, min(hi, base + len(text or "") * per))
+                seconds = narration_seconds(text)
             else:
                 seconds = max(1.2, min(6.0, len(text or "") * 0.32 + 0.6))
             with wave.open(wav_path, "w") as out:
@@ -459,12 +463,21 @@ def create_app(config_path="config.yaml"):
             output_path=str(merged_path),
             leading_gaps=gaps,
         )
-        state["time_info"] = time_info
         generate_srt(
             time_info=time_info,
             lines=merged_lines,
             output_path=str(srt_path),
         )
+        return time_info
+
+    def finalize_output():
+        if not state["lines"]:
+            return
+        output_dir = Path(config["output_dir"])
+        segments_dir = output_dir / "segments"
+        merged_path = output_dir / "merged_output.wav"
+        srt_path = output_dir / "subtitles.srt"
+        state["time_info"] = build_full_timeline(str(merged_path), str(srt_path), segments_dir)
         state["merged_path"] = str(merged_path)
         state["srt_path"] = str(srt_path)
 
@@ -730,17 +743,8 @@ def create_app(config_path="config.yaml"):
                     created_files.append(str(track_path))
 
             export_merged = export_dir / "merged_output.wav"
-            time_info = merge_wav_files(
-                wav_paths=wav_paths,
-                output_path=str(export_merged),
-                leading_gaps=gaps,
-            )
             export_srt = export_dir / "subtitles.srt"
-            generate_srt(
-                time_info=time_info,
-                lines=merged_lines,
-                output_path=str(export_srt),
-            )
+            build_full_timeline(str(export_merged), str(export_srt), segments_dir)
             created_files.append(str(export_merged))
             created_files.append(str(export_srt))
 

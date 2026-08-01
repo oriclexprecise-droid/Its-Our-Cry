@@ -63,6 +63,7 @@ narration:
   per_char: 0.32
   min_duration: 1.5
   max_duration: 8.0
+  fixed_duration: 0.0
 
 # 输出目录
 output_dir: "output"

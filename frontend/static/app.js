@@ -1179,6 +1179,7 @@ function setNarrationInputs(nr) {
   setVal("narration-per", nr.per_char != null ? nr.per_char : 0.32);
   setVal("narration-min", nr.min_duration != null ? nr.min_duration : 1.5);
   setVal("narration-max", nr.max_duration != null ? nr.max_duration : 8.0);
+  setVal("narration-fixed", nr.fixed_duration != null ? nr.fixed_duration : 0.0);
 }
 
 function initNarrationConfig() {
@@ -1190,7 +1191,8 @@ function initNarrationConfig() {
       base_duration: parseFloat(document.getElementById("narration-base").value),
       per_char: parseFloat(document.getElementById("narration-per").value),
       min_duration: parseFloat(document.getElementById("narration-min").value),
-      max_duration: parseFloat(document.getElementById("narration-max").value)
+      max_duration: parseFloat(document.getElementById("narration-max").value),
+      fixed_duration: parseFloat(document.getElementById("narration-fixed").value)
     };
     for (const k of Object.keys(data)) {
       if (isNaN(data[k]) || data[k] < 0) {
