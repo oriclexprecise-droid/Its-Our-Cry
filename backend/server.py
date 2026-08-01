@@ -15,6 +15,7 @@ from .script_parser import parse_script
 from .emotion_analyzer import analyze_emotions
 from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt
+from .translator import translate_lines
 
 
 def create_app(config_path="config.yaml"):
@@ -107,6 +108,27 @@ def create_app(config_path="config.yaml"):
             emotion_map[e["index"]] = e["emotion"]
         for line in lines:
             line["emotion"] = emotion_map.get(line["index"], "thinking")
+
+        if lang == "ja":
+            try:
+                translations = translate_lines(
+                    lines=lines,
+                    api_key=api_key,
+                    base_url=config["deepseek"]["base_url"],
+                    model=config["deepseek"]["model"],
+                )
+            except Exception as e:
+                traceback.print_exc()
+                return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+            translation_map = {}
+            for t in translations:
+                idx = t.get("index")
+                if idx is not None:
+                    translation_map[idx] = t.get("translation", "")
+            for line in lines:
+                line["translated_text"] = (
+                    translation_map.get(line["index"], "").strip() or line["text"]
+                )
 
         state["lines"] = lines
         state["emotions"] = emotions
@@ -237,10 +259,10 @@ def create_app(config_path="config.yaml"):
 
                         tts_cfg = config["tts"]
                         tts_lang = state.get("lang", "zh")
-                        if tts_lang == "auto":
-                            tts_lang = "zh"  # default to Chinese for auto
+                        if tts_lang not in ("zh", "ja"):
+                            tts_lang = "zh"
                         duration = engine.synthesize_to_file(
-                            text=line["text"],
+                            text=line.get("translated_text") or line["text"],
                             ref_audio_path=ref_audio,
                             output_path=str(output_path),
                             text_lang=tts_lang,

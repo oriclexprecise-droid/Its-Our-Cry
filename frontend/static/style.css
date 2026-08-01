@@ -68,3 +68,6 @@ textarea { min-height: 240px; line-height: 1.6; }
   border-radius: 6px; color: #e0e0e0; font-size: 13px; cursor: pointer;
 }
 .lang-select-row select:focus { border-color: #ff6b9d; outline: none; }
+
+.line-texts { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.line-item .translated { color: #8ab4f8; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

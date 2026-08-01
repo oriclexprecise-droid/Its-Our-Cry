@@ -1,4 +1,4 @@
-﻿const state = { lines: [], chars: [], emotions: [], generating: false };
+const state = { lines: [], chars: [], emotions: [], generating: false };
 
 async function api(url, opts = {}) {
   const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -61,7 +61,10 @@ function renderLines() {
     return '<div class="line-item">'
       + '<span class="idx">#' + (i + 1) + '</span>'
       + '<span class="char">' + esc(line.character) + '</span>'
+      + '<span class="line-texts">'
       + '<span class="text" title="' + esc(line.text) + '">' + esc(line.text) + '</span>'
+      + (line.translated_text ? '<span class="translated" title="' + esc(line.translated_text) + '">日语：' + esc(line.translated_text) + '</span>' : '')
+      + '</span>'
       + '<select data-index="' + i + '" class="emotion-select">' + opts + '</select>'
       + '</div>';
   }).join("");
