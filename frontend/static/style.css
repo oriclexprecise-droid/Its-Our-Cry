@@ -34,6 +34,30 @@ header h1 {
   font-weight: 700;
   text-shadow: 0 0 22px rgba(138,180,248,0.4);
 }
+.version-tag {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 4px 16px;
+  border: 1px solid rgba(138, 180, 248, 0.5);
+  border-radius: 999px;
+  background: rgba(15, 52, 96, 0.55);
+  color: #a9c9ff;
+  font-size: 13px;
+}
+.developer-badge {
+  position: fixed;
+  top: 16px;
+  right: 18px;
+  z-index: 60;
+  padding: 8px 16px;
+  background: #0f3460;
+  border: 1px solid rgba(138, 180, 248, 0.6);
+  border-radius: 6px;
+  color: #8ab4f8;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
 .panel { background: #16213e; border-radius: 8px; margin-bottom: 20px; overflow: hidden; }
 .panel-header { background: #0f3460; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
 .panel-header h2 { font-size: 15px; font-weight: 600; color: #e0e0e0; }
@@ -223,6 +247,11 @@ textarea { min-height: 240px; line-height: 1.6; }
 ::-webkit-scrollbar-track { background: #0f3460; }
 @media (max-width: 560px) {
   #app { padding-top: 28px; }
+  .developer-badge {
+    position: static;
+    width: fit-content;
+    margin: 0 auto 6px;
+  }
   header h1 { font-size: 40px; }
   .panel-body { padding: 14px; }
 }
