@@ -40,7 +40,7 @@ emotions:
 
 # DeepSeek API 配置
 deepseek:
-  api_key: "sk-8d1d4a28d7a54013ac4ed8b0b9bbefda"
+  api_key: ""
   base_url: "https://api.deepseek.com"
   model: "deepseek-v4-flash"
 

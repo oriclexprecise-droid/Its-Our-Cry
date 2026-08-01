@@ -1,4 +1,4 @@
-# 构建自包含 exe 并整理发布目录
+﻿# 构建自包含 exe 并整理发布目录
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $runtime = 'E:\GPT-SoVITS-v2pro-20250604-nvidia50\GPT-SoVITS-v2pro-20250604-nvidia50\runtime'

@@ -1157,6 +1157,21 @@ function initAIConfig() {
     status.textContent = "配置已保存";
     status.className = "status-text success";
   });
+  document.getElementById("btn-clear-ai-key").addEventListener("click", async () => {
+    document.getElementById("api-key").value = "";
+    document.getElementById("api-key").placeholder = "sk-...";
+    const saved = loadAIConfigFromStorage();
+    if (saved) {
+      delete saved.api_key;
+      localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(saved));
+    }
+    const status = document.getElementById("ai-config-status");
+    status.textContent = "API Key 已清除";
+    status.className = "status-text success";
+    try {
+      await api("/api/config", { method: "POST", body: JSON.stringify({ deepseek_api_key: "" }) });
+    } catch (e) {}
+  });
 }
 async function applyRandomBackground() {
   try {

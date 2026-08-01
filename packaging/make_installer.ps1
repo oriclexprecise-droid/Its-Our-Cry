@@ -1,4 +1,4 @@
-# 使用 7-Zip SFX 生成安装包
+﻿# 使用 7-Zip SFX 生成安装包
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $sevenZip = 'C:\Program Files\7-Zip\7z.exe'

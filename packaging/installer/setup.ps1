@@ -1,4 +1,4 @@
-param([string]$InstallDir = "")
+﻿param([string]$InstallDir = "")
 $ErrorActionPreference = 'Stop'
 $silent = $env:MYGO_SILENT_INSTALL -eq '1'
 
