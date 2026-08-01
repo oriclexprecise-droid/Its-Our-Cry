@@ -317,6 +317,7 @@ def scan_environment(config, project_root, gptsovits_path=None):
     issues = []
 
     model_entries = []
+    seen_model = set()
     for char, char_cfg in config.get("characters", {}).items():
         rels = [
             ("SoVITS", char_cfg.get("model_rel") or char_cfg.get("model") or ""),
@@ -324,8 +325,9 @@ def scan_environment(config, project_root, gptsovits_path=None):
         ]
         for kind, rel in rels:
             rel = str(rel).replace("\\", "/")
-            if not rel:
+            if not rel or (kind, rel) in seen_model:
                 continue
+            seen_model.add((kind, rel))
             source = project_root / rel
             dest = gs_path / rel
             bundled = source.exists()

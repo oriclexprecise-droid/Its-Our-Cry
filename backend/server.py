@@ -237,8 +237,8 @@ def create_app(config_path="config.yaml"):
                 config["characters"][alias] = {
                     "model": m["sovits"],
                     "gpt_model": m["gpt"],
-                    "model_rel": Path(m["sovits"]).name,
-                    "gpt_model_rel": Path(m["gpt"]).name,
+                    "model_rel": "SoVITS_weights_v2ProPlus/" + Path(m["sovits"]).name,
+                    "gpt_model_rel": "GPT_weights_v2ProPlus/" + Path(m["gpt"]).name,
                     "ref_audio_dir": str(project_root / ref_rel),
                 }
 
@@ -1173,12 +1173,14 @@ def create_app(config_path="config.yaml"):
         target_root = Path(gs_path).resolve()
         source_root = project_root
         missing = []
+        seen = set()
         for char, char_cfg in config.get("characters", {}).items():
             entries = [("SoVITS", char_cfg.get("model_rel") or ""), ("GPT", char_cfg.get("gpt_model_rel") or "")]
             for kind, rel in entries:
                 rel = str(rel).replace("\\", "/")
-                if not rel:
+                if not rel or (kind, rel) in seen:
                     continue
+                seen.add((kind, rel))
                 source = source_root / rel
                 target = target_root / rel
                 if source.exists() and not target.exists():
