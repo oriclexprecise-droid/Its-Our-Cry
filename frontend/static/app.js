@@ -29,9 +29,8 @@ async function loadConfig() {
     if (cfg.has_api_key) {
       try {
         const keyData = await api("/api/config/api_key");
-        if (keyData.api_key) {
-          document.getElementById("api-key").value = keyData.api_key;
-          document.getElementById("api-key").placeholder = "已自动填入";
+        if (keyData.api_key_preview) {
+          document.getElementById("api-key").placeholder = "已保存 " + keyData.api_key_preview;
         }
       } catch (e) {}
     }

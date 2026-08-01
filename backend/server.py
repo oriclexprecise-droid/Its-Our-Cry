@@ -81,11 +81,12 @@ def create_app(config_path="config.yaml"):
 
     @app.route("/api/config/api_key", methods=["GET"])
     def get_api_key():
-        """Return the saved API key (masked except last 4 chars)."""
+        """Return only a masked preview of the saved API key."""
         key = config["deepseek"].get("api_key", "")
         if key:
-            return jsonify({"api_key": key})
-        return jsonify({"api_key": ""})
+            masked = (key[:6] + "****" + key[-4:]) if len(key) > 10 else "****"
+            return jsonify({"api_key": "", "api_key_preview": masked, "has_api_key": True})
+        return jsonify({"api_key": "", "api_key_preview": "", "has_api_key": False})
 
     @app.route("/api/config", methods=["POST"])
     def save_config():
