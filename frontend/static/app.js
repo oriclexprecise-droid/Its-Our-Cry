@@ -1,4 +1,4 @@
-const state = { lines: [], chars: [], emotions: [], generating: false };
+const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false };
 let audioPlayer = null;
 
 async function api(url, opts = {}) {
@@ -37,6 +37,7 @@ document.getElementById("btn-analyze").addEventListener("click", async () => {
   try {
     const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang }) });
     state.lines = data.lines;
+    state.hasGenerated = false;
     renderLines();
     status.textContent = "已分析 " + data.lines.length + " 条台词";
     status.className = "status-text success";
@@ -67,6 +68,7 @@ function renderLines() {
       + '<span class="text" title="' + esc(line.text) + '">' + esc(line.text) + '</span>'
       + (line.translated_text ? '<span class="translated" title="' + esc(line.translated_text) + '">日语：' + esc(line.translated_text) + '</span>' : '')
       + '</span>'
+      + '<input type="number" class="interval-input" data-index="' + i + '" min="0" max="10" step="0.1" value="' + (typeof line.interval === "number" ? line.interval : 0.5) + '" title="每句前间隔（秒）">'
       + '<select data-index="' + i + '" class="emotion-select">' + opts + '</select>'
       + '<span class="line-actions">'
       + '<button type="button" class="btn-line-action btn-play" data-index="' + i + '" disabled>试听</button>'
@@ -79,6 +81,36 @@ function renderLines() {
       const idx = parseInt(e.target.dataset.index);
       state.lines[idx].emotion = e.target.value;
       try { await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ emotion: e.target.value }) }); } catch (err) {}
+    });
+  });
+  container.querySelectorAll(".interval-input").forEach(inp => {
+    inp.addEventListener("change", async (e) => {
+      const idx = parseInt(e.target.dataset.index);
+      const raw = parseFloat(e.target.value);
+      if (isNaN(raw) || raw < 0 || raw > 10) {
+        e.target.value = state.lines[idx].interval;
+        return;
+      }
+      const interval = Math.round(raw * 1000) / 1000;
+      state.lines[idx].interval = interval;
+      e.target.value = interval;
+      const progressText = document.getElementById("progress-text");
+      progressText.classList.remove("hidden");
+      progressText.textContent = "正在保存间隔...";
+      progressText.className = "status-text";
+      try {
+        await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ interval }) });
+        if (state.hasGenerated && !state.generating) {
+          await api("/api/merge", { method: "POST" });
+          progressText.textContent = "间隔已更新，字幕已同步";
+        } else {
+          progressText.textContent = "间隔已保存";
+        }
+        progressText.className = "status-text success";
+      } catch (err) {
+        progressText.textContent = "间隔保存失败: " + err.message;
+        progressText.className = "status-text error";
+      }
     });
   });
   container.querySelectorAll(".btn-play").forEach(btn => {
@@ -106,10 +138,12 @@ function renderLines() {
 
 function setLineButtonsDisabled(disabled) {
   document.querySelectorAll(".btn-line-action").forEach(b => { b.disabled = disabled; });
+  document.querySelectorAll(".interval-input").forEach(inp => { inp.disabled = disabled; });
 }
 
 function refreshGenerated(p) {
   const generated = p.generated_indices || [];
+  state.hasGenerated = generated.length > 0;
   const set = new Set(generated.map(String));
   document.querySelectorAll(".btn-line-action").forEach(btn => {
     const idx = btn.dataset.index;

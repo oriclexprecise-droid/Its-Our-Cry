@@ -38,9 +38,15 @@ textarea { min-height: 240px; line-height: 1.6; }
 .status-text.error { color: #e94560; }
 .status-text.success { color: #4ecca3; }
 .hidden { display: none !important; }
+.lines-header {
+  display: grid; grid-template-columns: 48px 110px minmax(0, 1fr) 80px 104px 150px;
+  gap: 8px; align-items: center; padding: 8px 12px;
+  border-bottom: 1px solid #1a3350; font-size: 12px; color: #888;
+  background: rgba(255,255,255,0.03);
+}
 .line-item {
-  display: grid; grid-template-columns: 48px 120px 1fr 110px auto;
-  gap: 10px; align-items: center; padding: 10px 12px;
+  display: grid; grid-template-columns: 48px 110px minmax(0, 1fr) 80px 104px 150px;
+  gap: 8px; align-items: center; padding: 10px 12px;
   border-bottom: 1px solid #1a3350; font-size: 13px;
 }
 .line-item:nth-child(odd) { background: rgba(255,255,255,0.02); }
@@ -52,6 +58,12 @@ textarea { min-height: 240px; line-height: 1.6; }
   border-radius: 4px; color: #e0e0e0; font-size: 12px; cursor: pointer;
 }
 .line-item select:focus { border-color: #ff6b9d; outline: none; }
+.interval-input {
+  width: 70px; padding: 6px 8px; background: #0f3460; border: 1px solid #1a4a7a;
+  border-radius: 4px; color: #e0e0e0; font-size: 12px; text-align: center;
+}
+.interval-input:focus { border-color: #ff6b9d; outline: none; }
+.interval-input:disabled { opacity: 0.45; cursor: not-allowed; }
 .progress-bar-wrap { margin: 12px 0; background: #0f3460; border-radius: 4px; height: 6px; overflow: hidden; }
 .progress-bar-fill { height: 100%; background: #4ecca3; transition: width 0.3s; border-radius: 4px; }
 .download-links { display: flex; gap: 12px; flex-wrap: wrap; }

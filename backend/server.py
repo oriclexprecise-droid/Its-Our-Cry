@@ -20,6 +20,9 @@ from .audio_merger import merge_wav_files, generate_srt
 from .translator import translate_lines
 
 
+DEFAULT_INTERVAL = 0.5
+
+
 def create_app(config_path="config.yaml"):
     app = Flask(
         __name__,
@@ -61,6 +64,7 @@ def create_app(config_path="config.yaml"):
             "characters": list(config["characters"].keys()),
             "emotions": config["emotions"],
             "has_api_key": has_key,
+            "default_interval": DEFAULT_INTERVAL,
         })
 
     @app.route("/api/config/api_key", methods=["GET"])
@@ -93,6 +97,8 @@ def create_app(config_path="config.yaml"):
         lines = parse_script(script_text)
         if not lines:
             return jsonify({"error": "no valid lines found"}), 400
+        for line in lines:
+            line.setdefault("interval", DEFAULT_INTERVAL)
 
         try:
             emotions = analyze_emotions(
@@ -150,6 +156,14 @@ def create_app(config_path="config.yaml"):
             state["lines"][index]["emotion"] = data["emotion"]
         if "text" in data:
             state["lines"][index]["text"] = data["text"]
+        if "interval" in data:
+            try:
+                interval = float(data["interval"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "间隔时间必须是数字"}), 400
+            if not 0 <= interval <= 10:
+                return jsonify({"error": "间隔时间需在 0-10 秒之间"}), 400
+            state["lines"][index]["interval"] = round(interval, 3)
         return jsonify({"status": "ok", "line": state["lines"][index]})
 
     @app.route("/api/ref_audio/<character>/<emotion>", methods=["GET"])
@@ -203,10 +217,11 @@ def create_app(config_path="config.yaml"):
         output_dir = Path(config["output_dir"])
         merged_path = output_dir / "merged_output.wav"
         srt_path = output_dir / "subtitles.srt"
+        gaps = [line.get("interval", DEFAULT_INTERVAL) for line in merged_lines]
         time_info = merge_wav_files(
             wav_paths=wav_paths,
             output_path=str(merged_path),
-            silence_between=0.3,
+            leading_gaps=gaps,
         )
         state["time_info"] = time_info
         generate_srt(
@@ -327,9 +342,6 @@ def create_app(config_path="config.yaml"):
             traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
-        threading.Thread(target=generate_worker, daemon=True).start()
-        return jsonify({"status": "started", "total": len(indices)})
-
     @app.route("/api/progress", methods=["GET"])
     def get_progress():
         return jsonify({
@@ -388,11 +400,13 @@ def create_app(config_path="config.yaml"):
             ordered_idx = sorted(state["generated"].keys())
             wav_paths = []
             merged_lines = []
+            gaps = []
             for idx in ordered_idx:
                 gen_path = state["generated"][idx]["path"]
                 if Path(gen_path).exists():
                     wav_paths.append(gen_path)
                     merged_lines.append(state["lines"][idx])
+                    gaps.append(state["lines"][idx].get("interval", DEFAULT_INTERVAL))
             if not wav_paths:
                 raise RuntimeError("没有可导出的音频文件")
 
@@ -446,7 +460,7 @@ def create_app(config_path="config.yaml"):
             time_info = merge_wav_files(
                 wav_paths=wav_paths,
                 output_path=str(export_merged),
-                silence_between=0.3,
+                leading_gaps=gaps,
             )
             export_srt = export_dir / "subtitles.srt"
             generate_srt(
