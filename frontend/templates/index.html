@@ -110,18 +110,18 @@
         </div>
         <div id="deploy-no-flow" class="hidden">
           <div class="deploy-back-row"><button id="btn-deploy-back-no" class="btn-secondary btn-small">返回</button></div>
-          <p class="deploy-question-text">未安装时先克隆 GPT-SoVITS</p>
-          <label class="deploy-label" for="deploy-git-url">Git 仓库地址</label>
-          <input type="text" id="deploy-git-url" value="https://github.com/RVC-Boss/GPT-SoVITS.git" autocomplete="off">
-          <label class="deploy-label" for="deploy-clone-dir">克隆到目录</label>
-          <input type="text" id="deploy-clone-dir" placeholder="例如 D:\GPT-SoVITS" autocomplete="off">
+          <p class="deploy-question-text">选择适合你显卡的整合包，下载后会自动解压到指定目录</p>
+          <div id="deploy-download-options" class="deploy-download-options"></div>
+          <label class="deploy-label" for="deploy-download-dir">解压到目录</label>
+          <input type="text" id="deploy-download-dir" placeholder="例如 D:\GPT-SoVITS（新目录或空目录）" autocomplete="off">
           <div class="deploy-actions">
-            <button id="btn-deploy-clone" class="btn-secondary btn-small" disabled>从 GitHub 克隆</button>
+            <button id="btn-deploy-download" class="btn-secondary btn-small" disabled>开始下载</button>
+            <button id="btn-deploy-download-cancel" class="btn-secondary btn-small hidden">取消下载</button>
           </div>
-          <span id="deploy-clone-status" class="status-text"></span>
-          <div id="deploy-clone-box" class="deploy-install-box hidden">
-            <div class="deploy-progress-wrap"><div class="deploy-progress-fill" id="deploy-clone-fill"></div></div>
-            <pre id="deploy-clone-log" class="deploy-install-log"></pre>
+          <span id="deploy-download-status" class="status-text"></span>
+          <div id="deploy-download-box" class="deploy-install-box hidden">
+            <div class="deploy-progress-wrap"><div class="deploy-progress-fill" id="deploy-download-fill"></div></div>
+            <pre id="deploy-download-log" class="deploy-install-log"></pre>
           </div>
         </div>
       </div>

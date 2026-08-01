@@ -32,6 +32,28 @@ OPTIONAL_PACKAGES = [
 ]
 
 
+
+GPT_SOVITS_DOWNLOADS = [
+    {
+        "id": "legacy",
+        "label": "50 以下显卡",
+        "url": "https://us.aws.cdn.hf.co/xet-bridge-us/65a6a250b3c1a539e0260480/cdb751ef40f106a59c3bcc6bc5fd2078580448ef71da1b01a1bec22ee6e88dcc?X-Xet-Cas-Uid=public&user_id=public&response-content-disposition=attachment%3B+filename*%3DUTF-8%27%27GPT-SoVITS-v2pro-20250604.7z%3B+filename%3D%22GPT-SoVITS-v2pro-20250604.7z%22%3B&response-content-type=application%2Fx-7z-compressed&Expires=1785590021&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly91cy5hd3MuY2RuLmhmLmNvL3hldC1icmlkZ2UtdXMvNjVhNmEyNTBiM2MxYTUzOWUwMjYwNDgwL2NkYjc1MWVmNDBmMTA2YTU5YzNiY2M2YmM1ZmQyMDc4NTgwNDQ4ZWY3MWRhMWIwMWExYmVjMjJlZTZlODhkY2NcXD9YLVhldC1DYXMtVWlkPXB1YmxpYyZ1c2VyX2lkPXB1YmxpYyZyZXNwb25zZS1jb250ZW50LWRpc3Bvc2l0aW9uPWF0dGFjaG1lbnQlM0IrZmlsZW5hbWUlMkElM0RVVEYtOCUyNyUyN0dQVC1Tb1ZJVFMtdjJwcm8tMjAyNTA2MDQuN3olM0IrZmlsZW5hbWUlM0QlMjJHUFQtU29WSVRTLXYycHJvLTIwMjUwNjA0Ljd6JTIyJTNCJnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1hcHBsaWNhdGlvbiUyRngtN3otY29tcHJlc3NlZCIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiRXBvY2hUaW1lIjoxNzg1NTkwMDIxfX19XX0_&Signature=MEYCIQCcZIzeS7fKaPiWuRevi1WSXQ2F9mkX%7EhxzZBK64LZ8jwIhAJUzD85aoBwNFf4CgaILqwRK5tH68TCexWeNgoM319FK&Key-Pair-Id=01KXEF4KZ1B6FV465MAWR4M21F",
+    },
+    {
+        "id": "nvidia50",
+        "label": "RTX 50 系列",
+        "url": "https://cdn-lfs-cn-1.modelscope.cn/prod/lfs-objects/97/b4/edcd451c42357db7e26e6c1c877ca5d85144fe97beaff6d7005d35bee008?filename=GPT-SoVITS-v2pro-20250604-nvidia50.7z&namespace=FlowerCry&repository=gpt-sovits-7z-pacakges&revision=master&tag=model&auth_key=1785586470-fa2b43da278a47519982abffa31910b0-0-11244f2ef4f8d7b8a9d8aeac9280db06",
+    },
+]
+
+
+def recommend_download(gpus):
+    for gpu in gpus:
+        name = gpu.get("name", "")
+        if re.search(r"\b50\d{2}\b", name) or "RTX 50" in name:
+            return dict(GPT_SOVITS_DOWNLOADS[1])
+    return dict(GPT_SOVITS_DOWNLOADS[0])
+
 def _run(cmd, timeout=10):
     kwargs = {"capture_output": True, "text": True, "timeout": timeout}
     if sys.platform == "win32":
@@ -223,6 +245,11 @@ def build_install_plan(packages, gpus, cuda_version):
     }
 
 
+
+
+def get_download_options():
+    return {"options": GPT_SOVITS_DOWNLOADS, "recommended": recommend_download(_gpus())}
+
 def scan_environment(config, project_root, gptsovits_path=None):
     gs_path = Path(gptsovits_path or config["gptsovits_path"])
     gs_exists = gs_path.exists()
@@ -287,6 +314,8 @@ def scan_environment(config, project_root, gptsovits_path=None):
             "checks": checks,
         },
         "install_plan": install_plan,
+        "download_options": GPT_SOVITS_DOWNLOADS,
+        "recommended_download": recommend_download(gpus),
         "issues": issues,
         "ready": not issues,
     }

@@ -619,41 +619,100 @@ function initDeployFlow() {
     localStorage.removeItem("mygo_deploy_installed");
     showDeployFlow(null);
   });
-  const cloneDir = document.getElementById("deploy-clone-dir");
-  const cloneBtn = document.getElementById("btn-deploy-clone");
-  const updateCloneBtn = () => { cloneBtn.disabled = !cloneDir.value.trim(); };
-  cloneDir.addEventListener("input", updateCloneBtn);
-  updateCloneBtn();
-  cloneBtn.addEventListener("click", startDeployClone);
+  initDeployDownload();
 }
 
-async function startDeployClone() {
-  const btn = document.getElementById("btn-deploy-clone");
-  const statusEl = document.getElementById("deploy-clone-status");
-  const box = document.getElementById("deploy-clone-box");
-  const logEl = document.getElementById("deploy-clone-log");
-  const fill = document.getElementById("deploy-clone-fill");
-  const repo = document.getElementById("deploy-git-url").value.trim();
-  const target = document.getElementById("deploy-clone-dir").value.trim();
-  btn.disabled = true;
-  statusEl.textContent = "正在克隆 GPT-SoVITS...";
-  statusEl.className = "status-text";
-  if (box) box.classList.remove("hidden");
-  if (logEl) logEl.textContent = "";
-  if (fill) fill.style.width = "0%";
+let deployDownloadOptions = [];
+let deployDownloading = false;
+
+async function loadDeployDownloadOptions() {
+  const wrap = document.getElementById("deploy-download-options");
+  if (!wrap) return;
   try {
-    await api("/api/deploy/clone", { method: "POST", body: JSON.stringify({ repo, target_dir: target }) });
-    pollDeployClone(btn, statusEl, logEl, fill);
+    const data = await api("/api/deploy/download_options");
+    deployDownloadOptions = data.options || [];
+    const recommendedId = (data.recommended || {}).id;
+    if (!deployDownloadOptions.length) {
+      wrap.innerHTML = '<span class="status-text error">未获取到下载选项</span>';
+      return;
+    }
+    wrap.innerHTML = deployDownloadOptions.map(opt => {
+      const isRec = opt.id === recommendedId;
+      return '<label class="deploy-download-option' + (isRec ? " recommended" : "") + '">'
+        + '<input type="radio" name="deploy-download-option" value="' + esc(opt.id) + '"' + (isRec ? " checked" : "") + '>'
+        + '<span class="dd-label">' + esc(opt.label) + '</span>'
+        + (isRec ? '<span class="dd-badge">已按你的显卡推荐</span>' : "")
+        + "</label>";
+    }).join("");
+  } catch (e) {
+    wrap.innerHTML = '<span class="status-text error">加载下载选项失败: ' + esc(e.message) + "</span>";
+  }
+}
+
+function getDeployDownloadOption() {
+  const checked = document.querySelector('input[name="deploy-download-option"]:checked');
+  if (!checked) return null;
+  return deployDownloadOptions.find(opt => opt.id === checked.value) || null;
+}
+
+function initDeployDownload() {
+  loadDeployDownloadOptions();
+  const dirInput = document.getElementById("deploy-download-dir");
+  const btn = document.getElementById("btn-deploy-download");
+  const cancelBtn = document.getElementById("btn-deploy-download-cancel");
+  const updateBtn = () => { btn.disabled = !dirInput.value.trim() || deployDownloading; };
+  dirInput.addEventListener("input", updateBtn);
+  updateBtn();
+  btn.addEventListener("click", startDeployDownload);
+  cancelBtn.addEventListener("click", async () => {
+    try {
+      await api("/api/deploy/download_cancel", { method: "POST" });
+      document.getElementById("deploy-download-status").textContent = "正在取消...";
+    } catch (e) {
+      document.getElementById("deploy-download-status").textContent = e.message;
+    }
+  });
+}
+
+async function startDeployDownload() {
+  if (deployDownloading) return;
+  const opt = getDeployDownloadOption();
+  const target = document.getElementById("deploy-download-dir").value.trim();
+  if (!opt || !target) return;
+  const btn = document.getElementById("btn-deploy-download");
+  const cancelBtn = document.getElementById("btn-deploy-download-cancel");
+  const statusEl = document.getElementById("deploy-download-status");
+  const box = document.getElementById("deploy-download-box");
+  const logEl = document.getElementById("deploy-download-log");
+  const fill = document.getElementById("deploy-download-fill");
+  deployDownloading = true;
+  btn.disabled = true;
+  cancelBtn.classList.remove("hidden");
+  statusEl.textContent = "正在准备下载...";
+  statusEl.className = "status-text";
+  box.classList.remove("hidden");
+  logEl.textContent = "";
+  fill.style.width = "0%";
+  try {
+    await api("/api/deploy/download", { method: "POST", body: JSON.stringify({ url: opt.url, target_dir: target }) });
+    pollDeployDownload();
   } catch (e) {
     statusEl.textContent = e.message;
     statusEl.className = "status-text error";
+    deployDownloading = false;
+    cancelBtn.classList.add("hidden");
     btn.disabled = false;
   }
 }
 
-async function pollDeployClone(btn, statusEl, logEl, fill) {
+async function pollDeployDownload() {
+  const btn = document.getElementById("btn-deploy-download");
+  const cancelBtn = document.getElementById("btn-deploy-download-cancel");
+  const statusEl = document.getElementById("deploy-download-status");
+  const logEl = document.getElementById("deploy-download-log");
+  const fill = document.getElementById("deploy-download-fill");
   try {
-    const st = await api("/api/deploy/clone_status");
+    const st = await api("/api/deploy/download_status");
     if (logEl) {
       logEl.textContent = (st.log || []).join("\n");
       logEl.scrollTop = logEl.scrollHeight;
@@ -661,27 +720,36 @@ async function pollDeployClone(btn, statusEl, logEl, fill) {
     const pct = Math.min(100, Math.max(0, st.progress || 0));
     if (fill) fill.style.width = pct + "%";
     if (st.running) {
-      statusEl.textContent = "克隆中 " + pct + "%";
+      statusEl.textContent = st.cancel_requested ? "正在取消..." : "下载并解压中 " + pct + "%";
       statusEl.className = "status-text";
-      setTimeout(() => pollDeployClone(btn, statusEl, logEl, fill), 1000);
+      setTimeout(pollDeployDownload, 1000);
       return;
     }
+    deployDownloading = false;
+    cancelBtn.classList.add("hidden");
     btn.disabled = false;
     if (st.success) {
-      statusEl.textContent = "克隆完成，请扫描环境";
+      statusEl.textContent = "下载并解压完成";
       statusEl.className = "status-text success";
-      document.getElementById("deploy-gs-path").value = st.target_dir || "";
-      localStorage.setItem("mygo_deploy_gs_path", st.target_dir || "");
+      if (fill) fill.style.width = "100%";
+      const gsPath = st.extracted_path || st.target_dir || "";
+      document.getElementById("deploy-gs-path").value = gsPath;
+      localStorage.setItem("mygo_deploy_gs_path", gsPath);
       localStorage.setItem("mygo_deploy_installed", "yes");
       showDeployFlow("has");
+    } else if (st.cancelled) {
+      statusEl.textContent = "已取消下载";
+      statusEl.className = "status-text";
     } else {
-      statusEl.textContent = "克隆失败，请查看日志";
+      statusEl.textContent = "下载失败，请查看日志";
       statusEl.className = "status-text error";
     }
   } catch (e) {
+    deployDownloading = false;
+    cancelBtn.classList.add("hidden");
+    btn.disabled = false;
     statusEl.textContent = e.message;
     statusEl.className = "status-text error";
-    btn.disabled = false;
   }
 }
 initDeployFlow();

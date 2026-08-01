@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import traceback
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -20,7 +21,7 @@ from .emotion_analyzer import analyze_emotions
 from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt
 from .translator import translate_lines
-from .deploy_check import scan_environment
+from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
 
 
 DEFAULT_INTERVAL = 0.5
@@ -56,6 +57,7 @@ def create_app(config_path="config.yaml"):
         "time_info": [],
         "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
         "deploy_clone": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target_dir": ""},
+        "deploy_download": {"running": False, "done": False, "success": None, "cancelled": False, "cancel_requested": False, "log": [], "progress": 0, "target_dir": "", "extracted_path": ""},
     }
 
     @app.route("/")
@@ -681,4 +683,111 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/deploy/clone_status", methods=["GET"])
     def deploy_clone_status():
         return jsonify(state["deploy_clone"])
+    @app.route("/api/deploy/download_options", methods=["GET"])
+    def deploy_download_options():
+        return jsonify(get_download_options())
+
+    @app.route("/api/deploy/download", methods=["POST"])
+    def deploy_download():
+        data = request.get_json(silent=True) or {}
+        url = str(data.get("url", "")).strip()
+        target = str(data.get("target_dir", "")).strip()
+        if not url or not target:
+            return jsonify({"error": "请填写下载地址和解压目录"}), 400
+        if state["deploy_download"]["running"]:
+            return jsonify({"error": "下载正在进行中"}), 409
+        try:
+            target_path = Path(target).resolve()
+            if target_path.exists() and any(target_path.iterdir()):
+                return jsonify({"error": "目标目录已存在且不为空"}), 400
+            target_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return jsonify({"error": "目录无效: " + str(e)}), 400
+
+        state["deploy_download"] = {
+            "running": True, "done": False, "success": None, "cancelled": False,
+            "cancel_requested": False, "log": [], "progress": 0,
+            "target_dir": str(target_path), "extracted_path": "",
+        }
+
+        def worker():
+            tmp_file = None
+            try:
+                log = state["deploy_download"]["log"]
+                tmp_file = target_path / "gptsovits_download.7z"
+                log.append("开始下载: " + url)
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=60) as resp, open(tmp_file, "wb") as out:
+                    total = int(resp.headers.get("Content-Length") or 0)
+                    downloaded = 0
+                    while True:
+                        if state["deploy_download"]["cancel_requested"]:
+                            raise RuntimeError("用户取消下载")
+                        chunk = resp.read(1024 * 256)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            state["deploy_download"]["progress"] = min(70, round(downloaded * 60 / total))
+                        if len(log) % 10 == 0:
+                            log.append("已下载 " + str(downloaded // (1024 * 1024)) + " MB")
+                        if len(log) > 300:
+                            del log[:len(log) - 300]
+                log.append("下载完成，正在准备解压...")
+                state["deploy_download"]["progress"] = 75
+
+                if importlib.util.find_spec("py7zr") is None:
+                    log.append("未检测到 py7zr，正在安装解压组件...")
+                    proc = subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "py7zr"],
+                        capture_output=True, text=True,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                    if proc.returncode != 0:
+                        raise RuntimeError("py7zr 安装失败: " + (proc.stderr or proc.stdout or "")[-500:])
+                    log.append("py7zr 安装完成")
+
+                import py7zr
+                state["deploy_download"]["progress"] = 80
+                with py7zr.SevenZipFile(str(tmp_file), "r") as archive:
+                    archive.extractall(path=str(target_path))
+                state["deploy_download"]["progress"] = 95
+
+                entries = [p for p in target_path.iterdir()]
+                dirs = [p for p in entries if p.is_dir()]
+                files = [p for p in entries if p.is_file()]
+                extracted = target_path
+                if len(dirs) == 1 and not files:
+                    extracted = dirs[0]
+                state["deploy_download"]["extracted_path"] = str(extracted)
+                state["deploy_download"]["progress"] = 100
+                state["deploy_download"]["success"] = True
+                log.append("下载并解压完成: " + str(extracted))
+            except Exception as e:
+                log = state["deploy_download"]["log"]
+                cancelled = state["deploy_download"]["cancel_requested"]
+                state["deploy_download"]["cancelled"] = bool(cancelled)
+                log.append("已取消下载" if cancelled else ("下载失败: " + str(e)))
+                state["deploy_download"]["success"] = False
+            finally:
+                if tmp_file and tmp_file.exists():
+                    try:
+                        tmp_file.unlink()
+                    except Exception:
+                        pass
+                state["deploy_download"]["running"] = False
+                state["deploy_download"]["done"] = True
+
+        threading.Thread(target=worker, daemon=True).start()
+        return jsonify({"status": "started", "target_dir": str(target_path)})
+
+    @app.route("/api/deploy/download_cancel", methods=["POST"])
+    def deploy_download_cancel():
+        state["deploy_download"]["cancel_requested"] = True
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/deploy/download_status", methods=["GET"])
+    def deploy_download_status():
+        return jsonify(state["deploy_download"])
     return app
