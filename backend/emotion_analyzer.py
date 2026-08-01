@@ -56,7 +56,7 @@ def analyze_emotions(
     lines: list[dict],
     api_key: str,
     base_url: str = "https://api.deepseek.com",
-    model: str = "deepseek-v4-pro",
+    model: str = "deepseek-v4-flash",
     lang: str = "zh",
 ) -> list[dict]:
     """

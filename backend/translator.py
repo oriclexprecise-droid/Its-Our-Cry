@@ -30,7 +30,7 @@ def translate_lines(
     lines: list[dict],
     api_key: str,
     base_url: str = "https://api.deepseek.com",
-    model: str = "deepseek-v4-pro",
+    model: str = "deepseek-v4-flash",
 ) -> list[dict]:
     """调用 DeepSeek API 把台词翻译成日语。"""
     if not lines:

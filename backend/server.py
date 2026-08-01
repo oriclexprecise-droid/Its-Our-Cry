@@ -83,7 +83,7 @@ def create_app(config_path="config.yaml"):
             "gptsovits_path": config["gptsovits_path"],
             "deepseek": {
                 "base_url": config["deepseek"].get("base_url", "https://api.deepseek.com"),
-                "model": config["deepseek"].get("model", "deepseek-v4-pro"),
+                "model": config["deepseek"].get("model", "deepseek-v4-flash"),
             },
         })
 
@@ -110,7 +110,7 @@ def create_app(config_path="config.yaml"):
         api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
         lang = data.get("lang", "zh")
         base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
-        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-pro")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
 
         if not script_text.strip():
             return jsonify({"error": "script is empty"}), 400

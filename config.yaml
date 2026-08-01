@@ -42,7 +42,7 @@ emotions:
 deepseek:
   api_key: "sk-8d1d4a28d7a54013ac4ed8b0b9bbefda"
   base_url: "https://api.deepseek.com"
-  model: "deepseek-v4-pro"
+  model: "deepseek-v4-flash"
 
 # TTS 推理参数
 tts:
