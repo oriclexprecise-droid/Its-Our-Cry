@@ -1082,7 +1082,7 @@ async function pollDeployDownload() {
 }
 initDeployFlow();
 loadConfig();
-applyRandomBackground();
+initBackgroundSettings();
 function initPanelCollapse() {
   const specs = [
     { btn: "btn-collapse-settings", key: "mygo_panel_settings_collapsed" },
@@ -1281,14 +1281,57 @@ function initAIConfig() {
     } catch (e) {}
   });
 }
-async function applyRandomBackground() {
+const BG_PREF_KEY = "mygo_bg_pref";
+
+function applyBgImage(filename) {
+  if (!filename) return;
+  document.body.style.backgroundImage = "url(\"/picture/" + encodeURIComponent(filename) + "\")";
+}
+
+async function initBackgroundSettings() {
+  const select = document.getElementById("bg-select");
+  if (!select) return;
+  let list = [];
   try {
     const data = await api("/api/backgrounds");
-    const list = data.backgrounds || [];
-    if (!list.length) return;
-    const pick = list[Math.floor(Math.random() * list.length)];
-    document.body.style.backgroundImage = "url(\"/picture/" + encodeURIComponent(pick) + "\")";
+    list = data.backgrounds || [];
   } catch (e) {}
+  list.forEach(name => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
+  });
+  const saved = localStorage.getItem(BG_PREF_KEY) || "";
+  const savedValid = saved && list.includes(saved);
+  if (savedValid) {
+    select.value = saved;
+    applyBgImage(saved);
+  } else if (list.length) {
+    select.value = "";
+    applyBgImage(list[Math.floor(Math.random() * list.length)]);
+  }
+  const status = document.getElementById("bg-status");
+  select.addEventListener("change", () => {
+    const val = select.value;
+    localStorage.setItem(BG_PREF_KEY, val);
+    if (val) {
+      applyBgImage(val);
+      if (status) { status.textContent = "已切换背景"; status.className = "status-text success"; }
+    } else if (list.length) {
+      applyBgImage(list[Math.floor(Math.random() * list.length)]);
+      if (status) { status.textContent = "已切换为随机背景"; status.className = "status-text success"; }
+    }
+  });
+  const randomBtn = document.getElementById("btn-bg-random");
+  if (randomBtn) {
+    randomBtn.addEventListener("click", () => {
+      select.value = "";
+      localStorage.setItem(BG_PREF_KEY, "");
+      if (list.length) applyBgImage(list[Math.floor(Math.random() * list.length)]);
+      if (status) { status.textContent = "已切换为随机背景"; status.className = "status-text success"; }
+    });
+  }
 }
 
 initAIConfig();

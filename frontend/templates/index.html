@@ -105,8 +105,10 @@
             <label for="api-key">API Key</label>
             <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
           </div>
-                    <button type="button" id="btn-save-ai-config" class="btn-secondary btn-small">保存配置</button>
-          <button type="button" id="btn-clear-ai-key" class="btn-secondary btn-small">清除 Key</button>
+          <div class="btn-row">
+            <button type="button" id="btn-save-ai-config" class="btn-secondary btn-small btn-flex">保存配置</button>
+            <button type="button" id="btn-clear-ai-key" class="btn-secondary btn-small">清除 Key</button>
+          </div>
         </div>
         <div class="side-section">
           <h3 class="side-section-title">旁白字幕时长</h3>
@@ -138,10 +140,25 @@
               <input type="number" id="narration-fixed" min="0" step="0.1" value="0.0">
             </div>
           </div>
-          <button type="button" id="btn-save-narration" class="btn-secondary btn-small">保存旁白时长</button>
+          <div class="btn-row">
+            <button type="button" id="btn-save-narration" class="btn-secondary btn-small btn-flex">保存旁白时长</button>
+          </div>
           <span id="narration-config-status" class="status-text"></span>
         </div>
-      </div>
+        <div class="side-section">
+          <h3 class="side-section-title">外观</h3>
+          <div class="api-field">
+            <label for="bg-select">背景图</label>
+            <select id="bg-select">
+              <option value="">随机背景</option>
+            </select>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="btn-bg-random" class="btn-secondary btn-small btn-flex">随机一张</button>
+          </div>
+          <span id="bg-status" class="status-text"></span>
+          <p class="bg-disclaimer">背景图片版权归原作者所有，仅供本地个人创作使用，请勿用于商业发布或未经授权的公开传播。</p>
+        </div>      </div>
     </section>
         <section class="panel side-panel">
       <div class="panel-header"><h2>部署</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-deploy" title="收起面板">▾</button></div>
