@@ -19,6 +19,9 @@ Set-Location $root
   --exclude-module GPT_SoVITS --exclude-module numpy --exclude-module scipy `
   --exclude-module librosa --exclude-module transformers --exclude-module soundfile `
   --exclude-module gradio --exclude-module faiss --exclude-module onnxruntime `
+  --hidden-import webview --hidden-import webview.platforms.edgechromium `
+  --hidden-import clr_loader --hidden-import pythonnet `
+  --collect-all pythonnet --collect-all clr_loader `
   launcher.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller 构建失败' }
 

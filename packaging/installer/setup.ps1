@@ -6,8 +6,20 @@ $src = Join-Path $PSScriptRoot 'app'
 if (-not (Test-Path $src)) { $src = Join-Path (Get-Location) 'app' }
 if (-not (Test-Path $src)) { throw '未找到安装数据' }
 
+$defaultInstallDir = Join-Path $env:USERPROFILE "It's Our Cry"
+if ([string]::IsNullOrWhiteSpace($InstallDir) -and -not $silent) {
+  Add-Type -AssemblyName System.Windows.Forms
+  $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+  $folderDialog.Description = "选择 It's Our Cry!!!!! 的安装位置（可安装到任意盘符）"
+  $folderDialog.SelectedPath = $defaultInstallDir
+  $folderDialog.ShowNewFolderButton = $true
+  if ($folderDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+    exit 1
+  }
+  $InstallDir = $folderDialog.SelectedPath
+}
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
-  $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\It's Our Cry"
+  $InstallDir = $defaultInstallDir
 }
 
 if (Test-Path $InstallDir) {

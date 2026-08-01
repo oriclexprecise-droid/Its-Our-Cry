@@ -6,10 +6,10 @@
 
 import os
 import socket
+import subprocess
 import sys
 import threading
 import urllib.request
-import webbrowser
 from pathlib import Path
 
 
@@ -43,6 +43,50 @@ def _write_log(root, text):
         pass
 
 
+def _find_edge():
+    roots = [
+        os.environ.get("PROGRAMFILES(X86)"),
+        os.environ.get("PROGRAMFILES"),
+        os.environ.get("LOCALAPPDATA"),
+    ]
+    for root in roots:
+        if not root:
+            continue
+        candidate = Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _open_desktop_window(url):
+    try:
+        import webview
+
+        webview.create_window(
+            "It's Our Cry!!!!!",
+            url,
+            width=1440,
+            height=900,
+            min_size=(1100, 700),
+        )
+        webview.start()
+        return
+    except Exception as e:
+        _write_log(app_root(), "webview failed, fallback edge app mode:\n" + str(e))
+
+    edge = _find_edge()
+    if edge:
+        try:
+            subprocess.Popen([edge, "--app=" + url])
+            return
+        except Exception as e:
+            _write_log(app_root(), "edge app mode failed:\n" + str(e))
+
+    import webbrowser
+
+    webbrowser.open(url)
+
+
 def main():
     # 无控制台模式下 sys.stdout/stderr 是 None，Flask/click 打印 banner 会崩
     if sys.stdout is None:
@@ -73,24 +117,43 @@ def main():
         port = 5123
         if _port_in_use(port):
             if _is_our_server(port):
-                webbrowser.open(f"http://127.0.0.1:{port}/")
+                _write_log(root, "server already running on " + str(port))
+                if os.environ.get("MYGO_NO_BROWSER") == "1":
+                    print(f"server url: http://127.0.0.1:{port}/")
+                    return
+                _open_desktop_window(f"http://127.0.0.1:{port}/")
                 return
             for candidate in range(5124, 5224):
                 if not _port_in_use(candidate):
                     port = candidate
                     break
         url = f"http://127.0.0.1:{port}/"
+        _write_log(root, "server url: " + url)
 
-        if os.environ.get("MYGO_NO_BROWSER") != "1":
-            threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+        if os.environ.get("MYGO_NO_BROWSER") == "1":
+            print("=" * 50)
+            print("  It's Our Cry!!!!! 配音工作台")
+            print("  " + url)
+            print("  按 Ctrl+C 停止服务")
+            print("=" * 50)
 
-        print("=" * 50)
-        print("  It's Our Cry!!!!! 配音工作台")
-        print("  " + url)
-        print("  按 Ctrl+C 停止服务")
-        print("=" * 50)
+            app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False, threaded=True)
+            return
 
-        app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+        server_thread = threading.Thread(
+            target=app.run,
+            kwargs={
+                "host": "127.0.0.1",
+                "port": port,
+                "debug": False,
+                "use_reloader": False,
+                "threaded": True,
+            },
+            daemon=True,
+            name="itsourcry-flask",
+        )
+        server_thread.start()
+        _open_desktop_window(url)
     except Exception as e:
         import traceback
         _write_log(root, "run failed:\n" + traceback.format_exc())
