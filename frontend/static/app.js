@@ -1406,7 +1406,7 @@ async function loadModels() {
       item.appendChild(head);
       const files = document.createElement("div");
       files.className = "model-item-files";
-      files.textContent = "GPT: " + modelFileName(m.gpt_model_rel) + "\nSoVITS: " + modelFileName(m.model_rel);
+      files.textContent = "GPT: " + modelFileName(m.gpt_model_rel) + "\nSoVITS: " + modelFileName(m.model_rel) + "\n参考音频: " + (m.ref_audio_dir || "-");
       item.appendChild(files);
       listEl.appendChild(item);
     });
@@ -1443,11 +1443,17 @@ async function loadAvailableModels() {
   try {
     const data = await api("/api/models/available");
     fillModelPairSelect(pairSel, data.pairs || []);
+    const refInput = document.getElementById("model-ref-dir");
+    const refDatalist = document.getElementById("model-ref-dir-options");
+    if (refInput && refDatalist) {
+      refDatalist.innerHTML = (data.ref_dirs || []).map(d => '<option value="' + esc(d) + '"></option>').join("");
+    }
   } catch (e) {}
 }
 
 async function addModel() {
   const name = document.getElementById("model-name").value.trim();
+  const refAudioDir = document.getElementById("model-ref-dir").value.trim();
   const pairVal = document.getElementById("model-pair").value;
   const status = document.getElementById("model-config-status");
   const sep = pairVal.indexOf("|||");
@@ -1461,8 +1467,9 @@ async function addModel() {
   status.textContent = "正在添加...";
   status.className = "status-text";
   try {
-    await api("/api/models", { method: "POST", body: JSON.stringify({ name, gpt_model: gpt, model: sovits }) });
+    await api("/api/models", { method: "POST", body: JSON.stringify({ name, gpt_model: gpt, model: sovits, ref_audio_dir: refAudioDir }) });
     document.getElementById("model-name").value = "";
+    document.getElementById("model-ref-dir").value = "";
     status.textContent = "模型已添加";
     status.className = "status-text success";
     await loadModels();

@@ -233,14 +233,18 @@ def create_app(config_path="config.yaml"):
                 "name": name,
                 "model_rel": cfg.get("model_rel") or "",
                 "gpt_model_rel": cfg.get("gpt_model_rel") or "",
-                "ref_audio_dir": cfg.get("ref_audio_dir") or "",
+                "ref_audio_dir": Path(cfg.get("ref_audio_dir") or "").name,
                 "source": "builtin" if name in builtin_names else "user",
             })
         return jsonify({"models": items})
 
     @app.route("/api/models/available", methods=["GET"])
     def available_models():
-        return jsonify(_scan_model_files(project_root, gs_path))
+        ref_base = project_root / "reference_audio"
+        ref_dirs = sorted(d.name for d in ref_base.iterdir() if d.is_dir()) if ref_base.is_dir() else []
+        data = _scan_model_files(project_root, gs_path)
+        data["ref_dirs"] = ref_dirs
+        return jsonify(data)
 
     @app.route("/api/models", methods=["POST"])
     def add_model():
@@ -248,6 +252,9 @@ def create_app(config_path="config.yaml"):
         name = str(data.get("name") or "").strip()
         gpt_model = str(data.get("gpt_model") or "").strip()
         model = str(data.get("model") or "").strip()
+        ref_dir_name = str(data.get("ref_audio_dir") or "").strip() or name
+        if "/" in ref_dir_name or "\\" in ref_dir_name or ref_dir_name in (".", ".."):
+            return jsonify({"error": "参考音频目录不能包含路径分隔符"}), 400
         if not name or name == "旁白":
             return jsonify({"error": "激活词不能为空且不能是“旁白”"}), 400
         if name in config["characters"]:
@@ -257,7 +264,7 @@ def create_app(config_path="config.yaml"):
         if not gpt_path.exists() or not sovits_path.exists():
             return jsonify({"error": "权重文件不存在，请重新选择"}), 400
 
-        ref_rel = "reference_audio/" + name
+        ref_rel = "reference_audio/" + ref_dir_name
         ref_dir = project_root / ref_rel
         try:
             ref_dir.mkdir(parents=True, exist_ok=True)

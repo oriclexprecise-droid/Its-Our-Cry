@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
-<link rel="stylesheet" href="/static/style.css?v=20260806">
+<link rel="stylesheet" href="/static/style.css?v=20260807">
 <style>
 .creator-tip {
   position: fixed;
@@ -209,6 +209,11 @@
             <label for="model-pair">权重对（GPT + SoVITS 同名自动匹配）</label>
             <select id="model-pair"></select>
           </div>
+          <div class="api-field">
+            <label for="model-ref-dir">参考音频目录</label>
+            <input type="text" id="model-ref-dir" list="model-ref-dir-options" placeholder="留空则使用激活词同名目录" autocomplete="off">
+            <datalist id="model-ref-dir-options"></datalist>
+          </div>
           <div class="btn-row">
             <button type="button" id="btn-model-add" class="btn-secondary btn-small btn-flex">添加模型</button>
           </div>
@@ -301,7 +306,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260806"></script>
+<script src="/static/app.js?v=20260807"></script>
 <script>
 (function () {
   var tips = [
