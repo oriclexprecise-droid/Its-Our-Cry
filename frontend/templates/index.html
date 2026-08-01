@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyGO TTS 配音工作台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>MyGO TTS 配音工作台</h1>
+    <span class="subtitle">剧本分析 → 情绪校对 → 语音合成</span>
+  </header>
+  <main>
+    <section id="step-input" class="panel">
+      <div class="panel-header"><h2>1. 输入剧本</h2></div>
+      <div class="panel-body">
+        <div class="api-key-row">
+          <label>DeepSeek API Key</label>
+          <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
+        </div>
+        <textarea id="script-input" placeholder="粘贴剧本内容...&#10;&#10;格式示例：&#10;千早爱音：大家好！今天也要加油！&#10;高松灯：嗯...我会努力的。"></textarea>
+        <div class="input-row">
+          <div class="lang-select-row">
+            <label>剧本语言</label>
+            <select id="script-lang">
+              <option value="zh">中文</option>
+              <option value="ja">日本語</option>
+              <option value="auto">自动</option>
+            </select>
+          </div>
+          <button id="btn-analyze" class="btn-primary">分析情绪</button>
+        </div>
+        <div id="analyze-status" class="status-text"></div>
+      </div>
+    </section>
+    <section id="step-review" class="panel hidden">
+      <div class="panel-header">
+        <h2>2. 校对台词与情绪</h2>
+        <span id="line-count"></span>
+      </div>
+      <div class="panel-body">
+        <div id="lines-container"></div>
+        <div class="review-actions">
+          <button id="btn-generate" class="btn-primary">生成全部语音</button>
+          <button id="btn-merge" class="btn-primary hidden">合并音频并生成字幕</button>
+          <span id="progress-text" class="status-text hidden"></span>
+        </div>
+      </div>
+    </section>
+    <section id="step-download" class="panel hidden">
+      <div class="panel-header"><h2>3. 下载结果</h2></div>
+      <div class="panel-body download-links">
+        <button id="dl-audio" class="btn-secondary">下载合并音频 (WAV)</button>
+        <button id="dl-srt" class="btn-secondary">下载字幕文件 (SRT)</button>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

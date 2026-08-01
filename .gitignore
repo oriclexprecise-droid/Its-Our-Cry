@@ -1,0 +1,10 @@
+﻿__pycache__/
+*.pyc
+*.log
+output/
+outputs/
+work/
+_snapshot_20260801/
+build/
+dist/
+*.spec
