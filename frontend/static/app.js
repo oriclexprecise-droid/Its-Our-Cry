@@ -98,7 +98,7 @@ if (proofreadModalEl) {
     proofreadModalEl.classList.add("hidden");
   });
 
-  document.getElementById("btn-proofread-fix").addEventListener("click", () => {
+  document.getElementById("btn-proofread-fix").addEventListener("click", async () => {
     const rawLines = document.getElementById("script-input").value.split("\n");
     const fixedChars = {};
     document.querySelectorAll("#proofread-list .proofread-input").forEach(input => {
@@ -121,6 +121,12 @@ if (proofreadModalEl) {
     }
     const status = document.getElementById("analyze-status");
     if (status) { status.textContent = "已修正角色名，保留原分析结果"; status.className = "status-text success"; }
+    const fixMsg = Object.keys(fixedChars).map(name => name + " → " + fixedChars[name]).join("；");
+    if (fixMsg) {
+      try {
+        await api("/api/logs", { method: "POST", body: JSON.stringify({ type: "character_fix", message: "角色名修正：" + fixMsg, payload: { fixes: fixedChars } }) });
+      } catch (e) {}
+    }
     proofreadModalEl.classList.add("hidden");
   });
 }
@@ -1031,7 +1037,9 @@ applyRandomBackground();
 function initPanelCollapse() {
   const specs = [
     { btn: "btn-collapse-settings", key: "mygo_panel_settings_collapsed" },
-    { btn: "btn-collapse-deploy", key: "mygo_panel_deploy_collapsed" }
+    { btn: "btn-collapse-deploy", key: "mygo_panel_deploy_collapsed" },
+    { btn: "btn-collapse-log", key: "mygo_panel_log_collapsed" },
+    { btn: "btn-collapse-legal", key: "mygo_panel_legal_collapsed" }
   ];
   const registry = {};
   specs.forEach(spec => {
@@ -1049,19 +1057,60 @@ function initPanelCollapse() {
       const next = !panel.classList.contains("collapsed");
       apply(next);
       localStorage.setItem(spec.key, next ? "1" : "0");
-      if (spec.btn === "btn-collapse-deploy" && !next) {
-        const settings = registry["btn-collapse-settings"];
-        if (settings && !settings.panel.classList.contains("collapsed")) {
-          settings.panel.classList.add("collapsed");
-          settings.btn.textContent = "▴";
-          settings.btn.title = "展开面板";
-          localStorage.setItem("mygo_panel_settings_collapsed", "1");
-        }
+      if (!next) {
+        Object.keys(registry).forEach(otherBtn => {
+          if (otherBtn === spec.btn) return;
+          const other = registry[otherBtn];
+          if (other && !other.panel.classList.contains("collapsed")) {
+            other.panel.classList.add("collapsed");
+            other.btn.textContent = "▴";
+            other.btn.title = "展开面板";
+            const otherSpec = specs.find(s => s.btn === otherBtn);
+            if (otherSpec) localStorage.setItem(otherSpec.key, "1");
+          }
+        });
       }
     });
   });
 }
 initPanelCollapse();
+function fmtLogEvent(ev) {
+  if (!ev || !ev.ts) return "";
+  const d = new Date(ev.ts);
+  const t = isNaN(d.getTime()) ? "" : d.toLocaleTimeString("zh-CN", { hour12: false });
+  return "[" + t + "] " + (ev.message || ev.type || "日志");
+}
+
+async function refreshLogs() {
+  const el = document.getElementById("log-view");
+  if (!el) return;
+  try {
+    const data = await api("/api/logs");
+    const lines = (data.events || []).map(fmtLogEvent);
+    el.textContent = lines.length ? lines.join("\n") : "暂无日志";
+    el.scrollTop = el.scrollHeight;
+  } catch (e) {}
+}
+
+const logDownloadBtn = document.getElementById("btn-log-download");
+if (logDownloadBtn) {
+  logDownloadBtn.addEventListener("click", () => {
+    window.location = "/api/logs/export";
+  });
+}
+
+const logResetBtn = document.getElementById("btn-log-reset");
+if (logResetBtn) {
+  logResetBtn.addEventListener("click", async () => {
+    if (!confirm("确定清空全部日志吗？")) return;
+    try {
+      await api("/api/logs/reset", { method: "POST" });
+      refreshLogs();
+    } catch (e) {}
+  });
+}
+refreshLogs();
+setInterval(refreshLogs, 4000);
 
 const DEEPSEEK_PRESET = { name: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-v4-pro" };
 const AI_CONFIG_KEY = "mygo_ai_config";

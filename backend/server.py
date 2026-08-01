@@ -23,6 +23,7 @@ from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt
 from .translator import translate_lines
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
+from .feedback import read_events, record_event
 
 
 DEFAULT_INTERVAL = 0.5
@@ -132,6 +133,10 @@ def create_app(config_path="config.yaml"):
             )
         except Exception as e:
             traceback.print_exc()
+            record_event(
+                {"type": "error", "message": "情绪分析失败：" + str(e)},
+                project_root=project_root,
+            )
             return jsonify({"error": "emotion analysis failed: " + str(e)}), 500
 
         emotion_map = {}
@@ -163,6 +168,10 @@ def create_app(config_path="config.yaml"):
 
         valid_chars = list(config["characters"].keys()) + ["旁白"]
         proofread = find_character_issues(lines, valid_chars)
+        record_event(
+            {"type": "analyze", "message": f"情绪分析完成：共 {len(lines)} 条台词", "payload": {"count": len(lines)}},
+            project_root=project_root,
+        )
 
         state["lines"] = lines
         state["emotions"] = emotions
@@ -178,7 +187,19 @@ def create_app(config_path="config.yaml"):
         if "emotion" in data:
             if data["emotion"] not in config["emotions"]:
                 return jsonify({"error": "invalid emotion"}), 400
-            state["lines"][index]["emotion"] = data["emotion"]
+            old_emotion = state["lines"][index].get("emotion")
+            new_emotion = data["emotion"]
+            if old_emotion and old_emotion != new_emotion:
+                line_info = state["lines"][index]
+                record_event(
+                    {
+                        "type": "emotion_correction",
+                        "message": f"情绪修正：第{index + 1}行 {line_info['character']} {old_emotion} → {new_emotion}",
+                        "payload": {"index": index, "character": line_info["character"], "old": old_emotion, "new": new_emotion},
+                    },
+                    project_root=project_root,
+                )
+            state["lines"][index]["emotion"] = new_emotion
         if "text" in data:
             state["lines"][index]["text"] = data["text"]
         if "interval" in data:
@@ -215,6 +236,41 @@ def create_app(config_path="config.yaml"):
             state["lines"][idx]["interval"] = interval
         return jsonify({"status": "ok", "updated": len(valid), "indices": valid})
 
+    @app.route("/api/logs", methods=["GET"])
+    def get_logs():
+        events = read_events(limit=200, project_root=project_root)
+        return jsonify({"events": events})
+
+    @app.route("/api/logs", methods=["POST"])
+    def add_log():
+        data = request.get_json() or {}
+        record_event(
+            {
+                "type": data.get("type", "event"),
+                "message": data.get("message", ""),
+                "payload": data.get("payload", {}),
+            },
+            project_root=project_root,
+        )
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/logs/export", methods=["GET"])
+    def export_logs():
+        events_path = Path(project_root) / "feedback" / "events.jsonl"
+        if not events_path.exists():
+            return jsonify({"error": "暂无日志"}), 404
+        return send_file(
+            str(events_path),
+            as_attachment=True,
+            download_name="feedback-events.jsonl",
+            mimetype="application/json",
+        )
+    @app.route("/api/logs/reset", methods=["POST"])
+    def reset_logs():
+        events_path = Path(project_root) / "feedback" / "events.jsonl"
+        if events_path.exists():
+            events_path.write_text("", encoding="utf-8")
+        return jsonify({"status": "ok"})
     @app.route("/api/ref_audio/<character>/<emotion>", methods=["GET"])
     def list_ref_audio(character, emotion):
         if character not in config["characters"]:
