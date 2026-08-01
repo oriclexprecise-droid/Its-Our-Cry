@@ -611,6 +611,14 @@ function initDeployFlow() {
     localStorage.setItem("mygo_deploy_installed", "no");
     showDeployFlow("no");
   });
+  document.getElementById("btn-deploy-back-has").addEventListener("click", () => {
+    localStorage.removeItem("mygo_deploy_installed");
+    showDeployFlow(null);
+  });
+  document.getElementById("btn-deploy-back-no").addEventListener("click", () => {
+    localStorage.removeItem("mygo_deploy_installed");
+    showDeployFlow(null);
+  });
   const cloneDir = document.getElementById("deploy-clone-dir");
   const cloneBtn = document.getElementById("btn-deploy-clone");
   const updateCloneBtn = () => { cloneBtn.disabled = !cloneDir.value.trim(); };

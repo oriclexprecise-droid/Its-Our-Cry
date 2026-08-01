@@ -168,3 +168,6 @@ textarea { min-height: 240px; line-height: 1.6; }
 .deploy-choice-row { display: flex; gap: 8px; }
 .deploy-choice-row .btn-secondary { margin-top: 0; flex: 1; text-align: center; }
 #deploy-has-flow, #deploy-no-flow { margin-top: 12px; }
+
+.deploy-back-row { margin-bottom: 10px; }
+.deploy-back-row .btn-secondary { margin-top: 0; padding: 4px 10px; font-size: 12px; }
