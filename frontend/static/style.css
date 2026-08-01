@@ -3,7 +3,16 @@ body {
   font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
   background: #1a1a2e; color: #e0e0e0; min-height: 100vh;
 }
-#app { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+#app { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+.layout { display: flex; gap: 20px; align-items: flex-start; }
+main { flex: 1; min-width: 0; }
+.side-panels { width: 260px; flex: none; display: flex; flex-direction: column; gap: 16px; position: sticky; top: 20px; }
+.side-panel { margin-bottom: 0; }
+.side-empty { min-height: 120px; }
+@media (max-width: 980px) {
+  .layout { flex-direction: column; }
+  .side-panels { width: 100%; position: static; }
+}
 header { text-align: center; margin-bottom: 32px; }
 header h1 { font-size: 28px; color: #ff6b9d; margin-bottom: 4px; }
 header .subtitle { font-size: 13px; color: #888; }
