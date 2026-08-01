@@ -162,6 +162,8 @@ def scan_environment(config, project_root, gptsovits_path=None):
         packages.append({"name": display, "version": version, "installed": bool(version)})
 
     ffmpeg = _ffmpeg_info()
+    gpus = _gpus()
+    cuda_version = _cuda_version()
     core_names = {name for name, _ in CORE_PACKAGES}
 
     issues = []
