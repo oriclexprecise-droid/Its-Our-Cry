@@ -20,7 +20,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 from .script_parser import find_character_issues, parse_script
 from .emotion_analyzer import analyze_emotions
 from .tts_engine import get_engine
-from .audio_merger import merge_wav_files, generate_srt
+from .audio_merger import merge_wav_files, generate_srt, convert_channels
 from .translator import translate_lines
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
 from .feedback import read_events, record_event
@@ -568,12 +568,13 @@ def create_app(config_path="config.yaml"):
 
             time_map = dict(zip(ordered_idx, state["time_info"]))
 
-            import numpy as np
-            import soundfile as sf
+            import wave
 
-            first_info = sf.info(wav_paths[0])
-            sample_rate = first_info.samplerate
-            channels = first_info.channels
+            with wave.open(wav_paths[0], "r") as first_wav:
+                sample_rate = first_wav.getframerate()
+                channels = first_wav.getnchannels()
+                sampwidth = first_wav.getsampwidth()
+            frame_bytes = channels * sampwidth
             total_duration = state["time_info"][-1]["end"]
             total_samples = max(1, int(round(total_duration * sample_rate)))
 
@@ -584,24 +585,27 @@ def create_app(config_path="config.yaml"):
 
             created_files = []
             for char, idx_list in char_indices.items():
-                track = np.zeros((total_samples, channels), dtype=np.float32)
+                track = bytearray(total_samples * frame_bytes)
                 has_audio = False
                 for idx in idx_list:
                     info = time_map.get(idx)
                     gen_path = state["generated"][idx]["path"]
                     if info is None or not Path(gen_path).exists():
                         continue
-                    data, seg_sr = sf.read(gen_path, dtype="float32", always_2d=True)
-                    start_sample = int(round(info["start"] * sample_rate))
-                    length = min(len(data), max(0, total_samples - start_sample))
-                    if length > 0:
-                        seg = data[:length]
-                        if seg.shape[1] != channels:
-                            if seg.shape[1] == 1:
-                                seg = np.repeat(seg, channels, axis=1)
-                            elif channels == 1:
-                                seg = seg[:, :1]
-                        track[start_sample:start_sample + length] = seg
+                    with wave.open(gen_path, "r") as seg_wav:
+                        seg_sr = seg_wav.getframerate()
+                        seg_width = seg_wav.getsampwidth()
+                        seg_channels = seg_wav.getnchannels()
+                        seg_data = seg_wav.readframes(seg_wav.getnframes())
+                    if seg_sr != sample_rate:
+                        raise RuntimeError(f"采样率不一致：{Path(gen_path).name} 为 {seg_sr}，首个音频为 {sample_rate}")
+                    if seg_width != sampwidth:
+                        raise RuntimeError(f"位深不一致：{Path(gen_path).name} 为 {seg_width * 8}bit，首个音频为 {sampwidth * 8}bit")
+                    seg_data = convert_channels(seg_data, seg_channels, channels, sampwidth)
+                    start_byte = int(round(info["start"] * sample_rate)) * frame_bytes
+                    length_bytes = min(len(seg_data), max(0, total_samples * frame_bytes - start_byte))
+                    if length_bytes > 0:
+                        track[start_byte:start_byte + length_bytes] = seg_data[:length_bytes]
                         has_audio = True
 
                     shutil.copy2(gen_path, segments_dir / Path(gen_path).name)
@@ -609,7 +613,11 @@ def create_app(config_path="config.yaml"):
 
                 if has_audio:
                     track_path = tracks_dir / f"{char}.wav"
-                    sf.write(str(track_path), track, sample_rate)
+                    with wave.open(str(track_path), "w") as out_wav:
+                        out_wav.setnchannels(channels)
+                        out_wav.setsampwidth(sampwidth)
+                        out_wav.setframerate(sample_rate)
+                        out_wav.writeframes(bytes(track))
                     created_files.append(str(track_path))
 
             export_merged = export_dir / "merged_output.wav"

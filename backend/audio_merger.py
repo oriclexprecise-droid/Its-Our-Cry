@@ -111,6 +111,25 @@ def merge_wav_files(
     return time_info
 
 
+
+def convert_channels(data: bytes, src_channels: int, dst_channels: int, sampwidth: int) -> bytes:
+    """在单/双声道之间转换 PCM 字节帧，不改变采样率与位深。"""
+    if src_channels == dst_channels:
+        return data
+    frame_len = src_channels * sampwidth
+    n_frames = len(data) // frame_len
+    out = bytearray()
+    if dst_channels > src_channels:
+        for i in range(n_frames):
+            frame = data[i * frame_len:(i + 1) * frame_len]
+            out.extend(frame)
+            out.extend(frame)
+    else:
+        for i in range(n_frames):
+            frame = data[i * frame_len:(i + 1) * frame_len]
+            out.extend(frame[:dst_channels * sampwidth])
+    return bytes(out)
+
 def generate_srt(
     time_info: list[dict],
     lines: list[dict],
