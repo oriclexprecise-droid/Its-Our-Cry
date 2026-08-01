@@ -74,6 +74,30 @@ def _pkg_version(*names):
     return None
 
 
+def _runtime_python(gs_path):
+    """打包版 app 里 sys.executable 是 exe，pip 必须用 GPT-SoVITS runtime。"""
+    if gs_path:
+        candidate = Path(gs_path) / "runtime" / "python.exe"
+        if candidate.exists():
+            return str(candidate)
+    return sys.executable
+
+
+def _runtime_pkg_versions(python_exe):
+    """用目标 python 一次性列出已安装包版本。"""
+    code = (
+        "import importlib.metadata as m\n"
+        "print('\\n'.join(d.metadata['Name'] + '==' + d.version for d in m.distributions()))"
+    )
+    out = _run([python_exe, "-c", code], timeout=30)
+    result = {}
+    for line in out.splitlines():
+        if "==" in line:
+            name, _, ver = line.partition("==")
+            result[name.strip().lower()] = ver.strip()
+    return result
+
+
 def _gb(num):
     try:
         return round(float(num) / (1024 ** 3), 1)
@@ -203,7 +227,7 @@ def _torch_index(gpus, cuda_version):
     return None
 
 
-def build_install_plan(packages, gpus, cuda_version):
+def build_install_plan(packages, gpus, cuda_version, python_exe=None):
     missing = [p["name"] for p in packages if not p["installed"]]
     if not missing:
         return {
@@ -215,16 +239,17 @@ def build_install_plan(packages, gpus, cuda_version):
         }
     torch_pkgs = [name for name in ("torch", "torchaudio") if name in missing]
     other_pkgs = [name for name in missing if name not in ("torch", "torchaudio")]
+    python_exe = python_exe or sys.executable
     index = _torch_index(gpus, cuda_version) if torch_pkgs else None
 
     commands = []
     if torch_pkgs:
-        cmd = [sys.executable, "-m", "pip", "install"] + torch_pkgs
+        cmd = [python_exe, "-m", "pip", "install"] + torch_pkgs
         if index:
             cmd += ["--index-url", index]
         commands.append(cmd)
     if other_pkgs:
-        commands.append([sys.executable, "-m", "pip", "install"] + other_pkgs)
+        commands.append([python_exe, "-m", "pip", "install"] + other_pkgs)
 
     if torch_pkgs:
         if gpus:
@@ -270,17 +295,24 @@ def scan_environment(config, project_root, gptsovits_path=None):
     for sub in ["GPT_SoVITS", "tools", "pretrained_models", "runtime", "configs"]:
         checks[sub] = (gs_path / sub).exists() if gs_exists else False
     runtime_python = (gs_path / "runtime" / "python.exe").exists() if gs_exists else False
+    runtime_python_exe = _runtime_python(str(gs_path))
 
     packages = []
+    pkg_map = None
+    if gs_exists and runtime_python_exe != sys.executable:
+        pkg_map = _runtime_pkg_versions(runtime_python_exe)
     for display, meta in CORE_PACKAGES + OPTIONAL_PACKAGES:
-        version = _pkg_version(display, meta)
+        if pkg_map is not None:
+            version = pkg_map.get(meta.lower())
+        else:
+            version = _pkg_version(display, meta)
         packages.append({"name": display, "version": version, "installed": bool(version)})
 
     ffmpeg = _ffmpeg_info(gs_path)
     gpus = _gpus()
     cuda_version = _cuda_version()
     core_names = {name for name, _ in CORE_PACKAGES}
-    install_plan = build_install_plan(packages, gpus, cuda_version)
+    install_plan = build_install_plan(packages, gpus, cuda_version, python_exe=runtime_python_exe)
 
     issues = []
 
@@ -333,8 +365,8 @@ def scan_environment(config, project_root, gptsovits_path=None):
         },
         "python": {
             "version": platform.python_version(),
-            "executable": sys.executable,
-            "pip": _run([sys.executable, "-m", "pip", "--version"]) or "pip not found",
+            "executable": runtime_python_exe,
+            "pip": _run([runtime_python_exe, "-m", "pip", "--version"]) or "pip not found",
         },
         "cpu": platform.processor() or platform.machine(),
         "cores": os.cpu_count(),

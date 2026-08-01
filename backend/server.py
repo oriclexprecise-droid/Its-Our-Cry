@@ -29,27 +29,68 @@ from .feedback import read_events, record_event
 DEFAULT_INTERVAL = 0.5
 
 
+def _runtime_python_for(config):
+    gs = str(config.get("gptsovits_path") or "").strip()
+    if gs:
+        candidate = Path(gs) / "runtime" / "python.exe"
+        if candidate.exists():
+            return str(candidate)
+    return sys.executable
+
+
+def _persist_user_settings(project_root, config):
+    """把用户本地设置写到 user_settings.json（不污染仓库 config.yaml）。"""
+    try:
+        settings = {
+            "deepseek_api_key": config["deepseek"].get("api_key", ""),
+            "gptsovits_path": config.get("gptsovits_path", ""),
+        }
+        (project_root / "user_settings.json").write_text(
+            json.dumps(settings, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 def create_app(config_path="config.yaml"):
+    project_root = Path(config_path).parent.resolve()
+
     app = Flask(
         __name__,
-        template_folder="../frontend/templates",
-        static_folder="../frontend/static",
+        template_folder=str(project_root / "frontend" / "templates"),
+        static_folder=str(project_root / "frontend" / "static"),
     )
 
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
+    user_settings = {}
+    user_settings_path = project_root / "user_settings.json"
+    if user_settings_path.exists():
+        try:
+            user_settings = json.loads(user_settings_path.read_text(encoding="utf-8"))
+        except Exception:
+            user_settings = {}
+    if user_settings.get("deepseek_api_key"):
+        config["deepseek"]["api_key"] = user_settings["deepseek_api_key"]
+    if user_settings.get("gptsovits_path"):
+        config["gptsovits_path"] = user_settings["gptsovits_path"]
+
     # Resolve all relative paths to absolute to survive cwd changes
-    project_root = Path(config_path).parent.resolve()
+    gs_path = str(config.get("gptsovits_path") or "").strip()
+    config["gptsovits_path"] = gs_path
     config["output_dir"] = str(project_root / config["output_dir"])
-    config["gptsovits_path"] = str(Path(config["gptsovits_path"]))
+    # 打包版不携带 GPT-SoVITS 时，角色权重随程序放在项目目录内
+    model_base = Path(gs_path) if gs_path else project_root
     for char_name, char_cfg in config["characters"].items():
         char_cfg["ref_audio_dir"] = str(project_root / char_cfg["ref_audio_dir"])
         char_cfg["model_rel"] = str(char_cfg["model"]).replace("\\", "/")
-        char_cfg["model"] = str(Path(config["gptsovits_path"]) / char_cfg["model"])
+        char_cfg["model"] = str(model_base / char_cfg["model"])
         char_cfg["gpt_model_rel"] = str(char_cfg.get("gpt_model") or "").replace("\\", "/")
         if char_cfg.get("gpt_model"):
-            char_cfg["gpt_model"] = str(Path(config["gptsovits_path"]) / char_cfg["gpt_model"])
+            char_cfg["gpt_model"] = str(model_base / char_cfg["gpt_model"])
 
     state = {
         "lines": [],
@@ -101,6 +142,9 @@ def create_app(config_path="config.yaml"):
         data = request.get_json()
         if "deepseek_api_key" in data:
             config["deepseek"]["api_key"] = data["deepseek_api_key"]
+        if "gptsovits_path" in data:
+            config["gptsovits_path"] = str(data["gptsovits_path"] or "").strip()
+        _persist_user_settings(project_root, config)
         return jsonify({"status": "ok"})
 
     @app.route("/api/analyze", methods=["POST"])
@@ -358,7 +402,11 @@ def create_app(config_path="config.yaml"):
 
         def generate_worker():
             try:
-                engine = get_engine(config["gptsovits_path"])
+                engine = get_engine(
+                    config["gptsovits_path"],
+                    project_root=project_root,
+                    worker_script=str(project_root / "backend" / "tts_worker.py"),
+                )
                 engine.load()
 
                 char_groups = {}
@@ -462,7 +510,7 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/download/<path:file_type>", methods=["GET"])
     def download_file(file_type):
         from flask import send_from_directory
-        OUT = r"C:\Users\admin\Documents\Codex\2026-07-26\niu-a-hi\output"
+        OUT = str(Path(config["output_dir"]).resolve())
         files = {"merged": "merged_output.wav", "srt": "subtitles.srt"}
         filename = files.get(file_type)
         if not filename:
@@ -608,6 +656,9 @@ def create_app(config_path="config.yaml"):
     def deploy_scan():
         data = request.get_json(silent=True) or {}
         user_path = str(data.get("gptsovits_path", "")).strip()
+        if user_path:
+            config["gptsovits_path"] = user_path
+            _persist_user_settings(project_root, config)
         try:
             return jsonify(scan_environment(config, project_root, user_path or None))
         except Exception as e:
@@ -618,6 +669,9 @@ def create_app(config_path="config.yaml"):
     def deploy_install():
         data = request.get_json(silent=True) or {}
         user_path = str(data.get("gptsovits_path", "")).strip()
+        if user_path:
+            config["gptsovits_path"] = user_path
+            _persist_user_settings(project_root, config)
         if state["deploy_install"]["running"]:
             return jsonify({"error": "安装正在进行中"}), 409
         try:
@@ -771,11 +825,11 @@ def create_app(config_path="config.yaml"):
             entries = [("SoVITS", char_cfg.get("model_rel") or ""), ("GPT", char_cfg.get("gpt_model_rel") or "")]
             for kind, rel in entries:
                 rel = str(rel).replace("\\", "/")
-            if not rel:
-                continue
-            source = source_root / rel
-            target = target_root / rel
-            if source.exists() and not target.exists():
+                if not rel:
+                    continue
+                source = source_root / rel
+                target = target_root / rel
+                if source.exists() and not target.exists():
                     missing.append({"character": char, "kind": kind, "rel": rel, "source": source, "target": target})
         if not missing:
             return jsonify({"status": "nothing_to_copy"})
@@ -870,7 +924,7 @@ def create_app(config_path="config.yaml"):
                 if importlib.util.find_spec("py7zr") is None:
                     log.append("未检测到 py7zr，正在安装解压组件...")
                     proc = subprocess.run(
-                        [sys.executable, "-m", "pip", "install", "py7zr"],
+                        [_runtime_python_for(config), "-m", "pip", "install", "py7zr"],
                         capture_output=True, text=True,
                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                     )
@@ -891,6 +945,8 @@ def create_app(config_path="config.yaml"):
                 if len(dirs) == 1 and not files:
                     extracted = dirs[0]
                 state["deploy_download"]["extracted_path"] = str(extracted)
+                config["gptsovits_path"] = str(extracted)
+                _persist_user_settings(project_root, config)
                 state["deploy_download"]["progress"] = 100
                 state["deploy_download"]["success"] = True
                 log.append("下载并解压完成: " + str(extracted))
