@@ -529,6 +529,10 @@ def create_app(config_path="config.yaml"):
 
                 for char, idx_list in char_groups.items():
                     if char not in config["characters"]:
+                        if char == "旁白":
+                            for idx in idx_list:
+                                state["progress"]["current"] += 1
+                            continue
                         for idx in idx_list:
                             fail(idx, f"角色「{char}」没有配音模型，仅保留字幕，请检查角色名是否写错")
                         continue

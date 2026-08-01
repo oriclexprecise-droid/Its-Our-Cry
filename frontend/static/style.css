@@ -362,3 +362,13 @@ textarea { min-height: 240px; line-height: 1.6; }
   line-height: 1.4;
   word-break: break-all;
 }
+.narration-note {
+  display: block;
+  padding: 4px 6px;
+  border: 1px solid #1a4a7a;
+  border-radius: 4px;
+  color: #8ab4f8;
+  font-size: 12px;
+  text-align: center;
+  background: rgba(138,180,248,0.08);
+}

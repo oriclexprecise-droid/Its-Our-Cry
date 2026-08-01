@@ -150,20 +150,23 @@ function renderLines() {
     const idxCell = state.selectMode
       ? '<label class="idx-check"><input type="checkbox" class="line-check" data-index="' + i + '"' + checked + '>#' + (i + 1) + '</label>'
       : '<span class="idx">#' + (i + 1) + '</span>';
+    const isNarration = line.character === "旁白";
     return '<div class="line-item">'
       + idxCell
       + '<span class="char">' + esc(line.character) + '</span>'
       + '<span class="line-texts">'
       + '<span class="text" title="' + esc(line.text) + '">' + esc(line.text) + '</span>'
       + (line.translated_text ? '<span class="translated" title="' + esc(line.translated_text) + '">日语：' + esc(line.translated_text) + '</span>' : '')
-      + (state.failures[i] ? '<span class="line-fail" title="' + esc(state.failures[i]) + '">' + esc(state.failures[i]) + '</span>' : '')
+      + (state.failures[i] && !isNarration ? '<span class="line-fail" title="' + esc(state.failures[i]) + '">' + esc(state.failures[i]) + '</span>' : '')
       + '</span>'
       + '<input type="number" class="interval-input" data-index="' + i + '" min="0" max="10" step="0.1" value="' + (typeof line.interval === "number" ? line.interval : 0.5) + '" title="每句前间隔（秒）">'
-      + '<select data-index="' + i + '" class="emotion-select">' + opts + '</select>'
-      + '<span class="line-actions">'
-      + '<button type="button" class="btn-line-action btn-play" data-index="' + i + '" disabled>试听</button>'
-      + '<button type="button" class="btn-line-action btn-regenerate" data-index="' + i + '" disabled>重新生成</button>'
-      + '</span>'
+      + (isNarration ? '<span class="narration-note">字幕</span>'
+        : '<select data-index="' + i + '" class="emotion-select">' + opts + '</select>')
+      + (isNarration ? '<span class="narration-note">无需配音</span>'
+        : '<span class="line-actions">'
+        + '<button type="button" class="btn-line-action btn-play" data-index="' + i + '" disabled>试听</button>'
+        + '<button type="button" class="btn-line-action btn-regenerate" data-index="' + i + '" disabled>重新生成</button>'
+        + '</span>')
       + '</div>';
   }).join("");
   container.querySelectorAll(".emotion-select").forEach(sel => {
@@ -420,13 +423,13 @@ async function pollProgress(btn, progressText, barFill) {
       btn.disabled = false; btn.textContent = "生成全部语音"; state.generating = false;
       setLineButtonsDisabled(false); renderLines(); refreshGenerated(p); return;
     }
-    if (!p.generating && p.generated_count > 0 && p.merged_path) {
+    if (!p.generating && p.merged_path) {
       const failCount = Object.keys(p.failures || {}).length;
-      if (failCount > 0) {
+      if (failCount > 0 || p.generated_count > 0) {
         progressText.textContent = "生成完成：语音 " + p.generated_count + " 条，另有 " + failCount + " 条仅保留字幕";
-        progressText.className = "status-text error";
+        progressText.className = "status-text success";
       } else {
-        progressText.textContent = "生成完成!";
+        progressText.textContent = "生成完成：全部为旁白字幕";
         progressText.className = "status-text success";
       }
       btn.textContent = "重新生成"; btn.disabled = false; state.generating = false;
