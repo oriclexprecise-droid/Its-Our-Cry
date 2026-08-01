@@ -1394,20 +1394,44 @@ async function loadModels() {
       head.className = "model-item-head";
       const nameEl = document.createElement("span");
       nameEl.className = "model-item-name";
-      nameEl.textContent = "激活词：" + m.name + "（" + (m.source === "user" ? "自建" : "内置") + "）";
+      nameEl.textContent = m.name;
       head.appendChild(nameEl);
-      if (m.source === "user") {
-        const del = document.createElement("button");
-        del.className = "btn-secondary btn-small";
-        del.textContent = "删除";
-        del.addEventListener("click", () => deleteModel(m.name));
-        head.appendChild(del);
-      }
       item.appendChild(head);
       const files = document.createElement("div");
       files.className = "model-item-files";
-      files.textContent = "GPT: " + modelFileName(m.gpt_model_rel) + "\nSoVITS: " + modelFileName(m.model_rel) + "\n参考音频: " + (m.ref_audio_dir || "-");
+      files.textContent = "GPT: " + m.gpt_file + "\nSoVITS: " + m.sovits_file + "\n参考音频: " + (m.ref_audio_dir || "-");
       item.appendChild(files);
+      const aliasWrap = document.createElement("div");
+      aliasWrap.className = "model-alias-wrap";
+      (m.aliases || []).forEach(alias => {
+        const chip = document.createElement("span");
+        chip.className = "model-alias-chip";
+        chip.textContent = alias;
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "model-alias-del";
+        del.textContent = "×";
+        del.title = "删除激活词";
+        del.addEventListener("click", () => deleteModelAlias(m.key, alias));
+        chip.appendChild(del);
+        aliasWrap.appendChild(chip);
+      });
+      item.appendChild(aliasWrap);
+      const addRow = document.createElement("div");
+      addRow.className = "model-alias-add";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "新增激活词，如：爱音";
+      input.autocomplete = "off";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary btn-small";
+      btn.textContent = "添加";
+      btn.addEventListener("click", () => addModelAlias(m.key, input, btn));
+      input.addEventListener("keydown", e => { if (e.key === "Enter") addModelAlias(m.key, input, btn); });
+      addRow.appendChild(input);
+      addRow.appendChild(btn);
+      item.appendChild(addRow);
       listEl.appendChild(item);
     });
   } catch (e) {
@@ -1415,87 +1439,33 @@ async function loadModels() {
   }
 }
 
-function modelFileName(p) {
-  if (!p) return "-";
-  return p.split("/").pop().split("\\").pop();
-}
-
-function fillModelPairSelect(sel, pairs) {
-  sel.innerHTML = "";
-  if (!pairs.length) {
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "未找到同名配对权重";
-    sel.appendChild(opt);
-    return;
-  }
-  pairs.forEach(p => {
-    const opt = document.createElement("option");
-    opt.value = p.gpt + "|||" + p.sovits;
-    opt.textContent = p.name;
-    sel.appendChild(opt);
-  });
-}
-
-async function loadAvailableModels() {
-  const pairSel = document.getElementById("model-pair");
-  if (!pairSel) return;
+async function addModelAlias(key, input, btn) {
+  const alias = input.value.trim();
+  if (!alias) { input.focus(); return; }
+  btn.disabled = true;
   try {
-    const data = await api("/api/models/available");
-    fillModelPairSelect(pairSel, data.pairs || []);
-    const refInput = document.getElementById("model-ref-dir");
-    const refDatalist = document.getElementById("model-ref-dir-options");
-    if (refInput && refDatalist) {
-      refDatalist.innerHTML = (data.ref_dirs || []).map(d => '<option value="' + esc(d) + '"></option>').join("");
-    }
-  } catch (e) {}
-}
-
-async function addModel() {
-  const name = document.getElementById("model-name").value.trim();
-  const refAudioDir = document.getElementById("model-ref-dir").value.trim();
-  const pairVal = document.getElementById("model-pair").value;
-  const status = document.getElementById("model-config-status");
-  const sep = pairVal.indexOf("|||");
-  const gpt = sep >= 0 ? pairVal.slice(0, sep) : "";
-  const sovits = sep >= 0 ? pairVal.slice(sep + 3) : "";
-  if (!name || !gpt || !sovits) {
-    status.textContent = "请填写激活词并选择同名配对权重";
-    status.className = "status-text error";
-    return;
-  }
-  status.textContent = "正在添加...";
-  status.className = "status-text";
-  try {
-    await api("/api/models", { method: "POST", body: JSON.stringify({ name, gpt_model: gpt, model: sovits, ref_audio_dir: refAudioDir }) });
-    document.getElementById("model-name").value = "";
-    document.getElementById("model-ref-dir").value = "";
-    status.textContent = "模型已添加";
-    status.className = "status-text success";
+    await api("/api/models/" + encodeURIComponent(key) + "/aliases", { method: "POST", body: JSON.stringify({ alias }) });
+    input.value = "";
     await loadModels();
-    await loadConfig();
   } catch (e) {
-    status.textContent = "添加失败: " + e.message;
-    status.className = "status-text error";
+    alert("添加激活词失败: " + e.message);
+  } finally {
+    btn.disabled = false;
   }
 }
 
-async function deleteModel(name) {
-  if (!confirm("确定删除模型“" + name + "”吗？")) return;
+async function deleteModelAlias(key, alias) {
+  if (!confirm("确定删除激活词“" + alias + "”吗？")) return;
   try {
-    await api("/api/models/" + encodeURIComponent(name), { method: "DELETE" });
+    await api("/api/models/" + encodeURIComponent(key) + "/aliases/" + encodeURIComponent(alias), { method: "DELETE" });
     await loadModels();
-    await loadConfig();
   } catch (e) {
-    alert("删除失败: " + e.message);
+    alert("删除激活词失败: " + e.message);
   }
 }
 
 function initModelConfig() {
-  const addBtn = document.getElementById("btn-model-add");
-  if (addBtn) addBtn.addEventListener("click", addModel);
   loadModels();
-  loadAvailableModels();
 }
 
 initAIConfig();

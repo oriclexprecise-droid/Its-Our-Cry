@@ -30,6 +30,37 @@ from .feedback import read_events, record_event
 DEFAULT_INTERVAL = 0.5
 
 
+DEFAULT_MODEL_ALIASES = {
+    "MyGO_千早爱音_v2pp": "千早爱音",
+    "MyGO_要乐奈_v2pp": "要乐奈",
+    "MyGO_高松灯_v2pp": "高松灯",
+    "MyGO_椎名立希_v2pp": "椎名立希",
+    "MyGO_长崎素世_v2pp": "长崎素世",
+    "Mujica_Mortis_v2pp": "Mortis",
+    "Mujica_三角初華_v2pp": "三角初华",
+    "Mujica_八幡海鈴_v2pp": "八幡海铃",
+    "Mujica_祐天寺若麥_乖猫_v2pp": "祐天寺若麦乖猫",
+    "Mujica_祐天寺若麥_哈气_v2pp": "祐天寺若麦哈气",
+    "Mujica_若葉睦_v2pp": "若叶睦",
+    "Mujica_豊川祥子_白_v2pp": "丰川祥子白",
+    "Mujica_豊川祥子_黒_v2pp": "丰川祥子黑",
+}
+
+
+def _model_aliases_path(project_root):
+    return project_root / "model_aliases.json"
+
+
+def _load_model_aliases(project_root):
+    path = _model_aliases_path(project_root)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
 def _user_models_path(project_root):
     return project_root / "user_models.json"
 
@@ -152,19 +183,66 @@ def create_app(config_path="config.yaml"):
     config["output_dir"] = str(project_root / config["output_dir"])
     # 打包版不携带 GPT-SoVITS 时，角色权重随程序放在项目目录内
     model_base = Path(gs_path) if gs_path else project_root
-    # 用户自建模型（user_models.json）合并进角色表，与内置模型共用同一套解析
-    user_models = _load_user_models(project_root)
-    builtin_names = set(config["characters"].keys())
-    for name, cfg in user_models.items():
-        if name not in config["characters"]:
-            config["characters"][name] = dict(cfg)
-    for char_name, char_cfg in config["characters"].items():
-        char_cfg["ref_audio_dir"] = str(project_root / char_cfg["ref_audio_dir"])
-        char_cfg["model_rel"] = str(char_cfg["model"]).replace("\\", "/")
-        char_cfg["model"] = str(model_base / char_cfg["model"])
-        char_cfg["gpt_model_rel"] = str(char_cfg.get("gpt_model") or "").replace("\\", "/")
-        if char_cfg.get("gpt_model"):
-            char_cfg["gpt_model"] = str(model_base / char_cfg["gpt_model"])
+    # 角色模型：权重对固定，激活词只是模型上的标签（可增删）
+    saved_aliases = _load_model_aliases(project_root)
+    scan = _scan_model_files(project_root, gs_path)
+    models = {}
+    for pair in scan.get("pairs", []):
+        key = pair["name"]
+        default_alias = DEFAULT_MODEL_ALIASES.get(key, key)
+        models[key] = {
+            "gpt": pair["gpt"],
+            "sovits": pair["sovits"],
+            "ref_audio_dir": "reference_audio/" + default_alias,
+            "aliases": [default_alias],
+        }
+    for key, saved in saved_aliases.items():
+        if key not in models:
+            continue
+        if saved.get("ref_audio_dir"):
+            models[key]["ref_audio_dir"] = str(saved["ref_audio_dir"]).replace("\\", "/")
+        for alias in saved.get("aliases", []):
+            if isinstance(alias, str) and alias.strip() and alias not in models[key]["aliases"]:
+                models[key]["aliases"].append(alias.strip())
+
+    # 迁移旧 user_models.json（历史数据）
+    legacy_models = _load_user_models(project_root)
+    for name, cfg in legacy_models.items():
+        for m in models.values():
+            if (Path(str(cfg.get("gpt_model") or "")).name == Path(m["gpt"]).name and
+                    Path(str(cfg.get("model") or "")).name == Path(m["sovits"]).name):
+                if name not in m["aliases"]:
+                    m["aliases"].append(name)
+                break
+
+    def persist_model_aliases():
+        data = {}
+        for key, m in models.items():
+            data[key] = {
+                "ref_audio_dir": m.get("ref_audio_dir") or "",
+                "aliases": list(m["aliases"]),
+            }
+        try:
+            _model_aliases_path(project_root).write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def rebuild_characters():
+        config["characters"] = {}
+        for key, m in models.items():
+            for alias in m["aliases"]:
+                ref_rel = m.get("ref_audio_dir") or ("reference_audio/" + alias)
+                config["characters"][alias] = {
+                    "model": m["sovits"],
+                    "gpt_model": m["gpt"],
+                    "model_rel": Path(m["sovits"]).name,
+                    "gpt_model_rel": Path(m["gpt"]).name,
+                    "ref_audio_dir": str(project_root / ref_rel),
+                }
+
+    rebuild_characters()
 
     state = {
         "lines": [],
@@ -228,13 +306,14 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/models", methods=["GET"])
     def list_models():
         items = []
-        for name, cfg in config["characters"].items():
+        for key, m in models.items():
             items.append({
-                "name": name,
-                "model_rel": cfg.get("model_rel") or "",
-                "gpt_model_rel": cfg.get("gpt_model_rel") or "",
-                "ref_audio_dir": Path(cfg.get("ref_audio_dir") or "").name,
-                "source": "builtin" if name in builtin_names else "user",
+                "key": key,
+                "name": DEFAULT_MODEL_ALIASES.get(key, key),
+                "gpt_file": Path(m["gpt"]).name,
+                "sovits_file": Path(m["sovits"]).name,
+                "ref_audio_dir": Path(m.get("ref_audio_dir") or "").name,
+                "aliases": list(m["aliases"]),
             })
         return jsonify({"models": items})
 
@@ -246,56 +325,36 @@ def create_app(config_path="config.yaml"):
         data["ref_dirs"] = ref_dirs
         return jsonify(data)
 
-    @app.route("/api/models", methods=["POST"])
-    def add_model():
+    @app.route("/api/models/<path:key>/aliases", methods=["POST"])
+    def add_model_alias(key):
         data = request.get_json() or {}
-        name = str(data.get("name") or "").strip()
-        gpt_model = str(data.get("gpt_model") or "").strip()
-        model = str(data.get("model") or "").strip()
-        ref_dir_name = str(data.get("ref_audio_dir") or "").strip() or name
-        if "/" in ref_dir_name or "\\" in ref_dir_name or ref_dir_name in (".", ".."):
-            return jsonify({"error": "参考音频目录不能包含路径分隔符"}), 400
-        if not name or name == "旁白":
+        alias = str(data.get("alias") or "").strip()
+        if not alias or alias == "旁白":
             return jsonify({"error": "激活词不能为空且不能是“旁白”"}), 400
-        if name in config["characters"]:
-            return jsonify({"error": "激活词“" + name + "”已存在"}), 400
-        gpt_path = _resolve_model_path(model_base, gpt_model)
-        sovits_path = _resolve_model_path(model_base, model)
-        if not gpt_path.exists() or not sovits_path.exists():
-            return jsonify({"error": "权重文件不存在，请重新选择"}), 400
+        if "/" in alias or "\\" in alias or alias in (".", ".."):
+            return jsonify({"error": "激活词不能包含路径分隔符"}), 400
+        if key not in models:
+            return jsonify({"error": "模型不存在"}), 404
+        for mkey, m in models.items():
+            if alias in m["aliases"]:
+                return jsonify({"error": f"激活词“{alias}”已属于模型“{DEFAULT_MODEL_ALIASES.get(mkey, mkey)}”"}), 400
+        models[key]["aliases"].append(alias)
+        persist_model_aliases()
+        rebuild_characters()
+        return jsonify({"status": "ok", "aliases": models[key]["aliases"]})
 
-        ref_rel = "reference_audio/" + ref_dir_name
-        ref_dir = project_root / ref_rel
-        try:
-            ref_dir.mkdir(parents=True, exist_ok=True)
-            for emotion in config.get("emotions", []):
-                (ref_dir / emotion).mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            return jsonify({"error": "创建参考音频目录失败: " + str(e)}), 500
-
-        user_models[name] = {
-            "model": _model_store_value(model_base, sovits_path),
-            "gpt_model": _model_store_value(model_base, gpt_path),
-            "ref_audio_dir": ref_rel,
-        }
-        _save_user_models(project_root, user_models)
-        char_cfg = dict(user_models[name])
-        char_cfg["ref_audio_dir"] = str(ref_dir)
-        char_cfg["model_rel"] = str(char_cfg["model"]).replace("\\", "/")
-        char_cfg["model"] = str(_resolve_model_path(model_base, char_cfg["model"]))
-        char_cfg["gpt_model_rel"] = str(char_cfg.get("gpt_model") or "").replace("\\", "/")
-        char_cfg["gpt_model"] = str(_resolve_model_path(model_base, char_cfg["gpt_model"]))
-        config["characters"][name] = char_cfg
-        return jsonify({"status": "ok", "name": name})
-
-    @app.route("/api/models/<path:name>", methods=["DELETE"])
-    def delete_model(name):
-        if name not in user_models:
-            return jsonify({"error": "内置模型不能删除或模型不存在"}), 400
-        user_models.pop(name, None)
-        config["characters"].pop(name, None)
-        _save_user_models(project_root, user_models)
-        return jsonify({"status": "ok"})
+    @app.route("/api/models/<path:key>/aliases/<path:alias>", methods=["DELETE"])
+    def delete_model_alias(key, alias):
+        if key not in models:
+            return jsonify({"error": "模型不存在"}), 404
+        if alias not in models[key]["aliases"]:
+            return jsonify({"error": "激活词不存在"}), 404
+        if len(models[key]["aliases"]) <= 1:
+            return jsonify({"error": "每个模型至少保留一个激活词"}), 400
+        models[key]["aliases"].remove(alias)
+        persist_model_aliases()
+        rebuild_characters()
+        return jsonify({"status": "ok", "aliases": models[key]["aliases"]})
 
     @app.route("/api/settings/narration", methods=["PUT"])
     def save_narration_settings():

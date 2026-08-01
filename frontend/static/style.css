@@ -302,6 +302,13 @@ textarea { min-height: 240px; line-height: 1.6; }
 .model-item-files { color: #a9b8d8; word-break: break-all; line-height: 1.5; margin-top: 2px; }
 .model-empty { color: #8899aa; font-size: 12px; padding: 8px 0; }
 .model-item .btn-secondary { padding: 3px 8px; font-size: 11px; }
+.model-alias-wrap { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.model-alias-chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px 2px 8px; background: rgba(78, 204, 163, 0.12); border: 1px solid rgba(78, 204, 163, 0.35); border-radius: 12px; color: #9fe8d0; font-size: 11px; }
+.model-alias-del { border: none; background: transparent; color: #9fe8d0; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
+.model-alias-del:hover { color: #ff6b9d; }
+.model-alias-add { display: flex; gap: 6px; margin-top: 8px; }
+.model-alias-add input { flex: 1; min-width: 0; padding: 5px 8px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 5px; color: #e0e0e0; font-size: 12px; font-family: inherit; outline: none; }
+.model-alias-add input:focus { border-color: #4ecca3; }
 .log-body { padding: 12px; }
 .log-view {
   height: 220px;

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
-<link rel="stylesheet" href="/static/style.css?v=20260807">
+<link rel="stylesheet" href="/static/style.css?v=20260808">
 <style>
 .creator-tip {
   position: fixed;
@@ -196,28 +196,8 @@
       <div class="panel-header"><h2>模型配置</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-models" title="收起面板">▾</button></div>
       <div class="panel-body">
         <div class="side-section">
-          <h3 class="side-section-title">已有模型</h3>
+          <h3 class="side-section-title">角色模型（激活词可增删）</h3>
           <div id="model-list" class="model-list"><div class="model-empty">加载中...</div></div>
-        </div>
-        <div class="side-section">
-          <h3 class="side-section-title">新增模型</h3>
-          <div class="api-field">
-            <label for="model-name">激活词</label>
-            <input type="text" id="model-name" placeholder="例如 丰川祥子" autocomplete="off">
-          </div>
-          <div class="api-field">
-            <label for="model-pair">权重对（GPT + SoVITS 同名自动匹配）</label>
-            <select id="model-pair"></select>
-          </div>
-          <div class="api-field">
-            <label for="model-ref-dir">参考音频目录</label>
-            <input type="text" id="model-ref-dir" list="model-ref-dir-options" placeholder="留空则使用激活词同名目录" autocomplete="off">
-            <datalist id="model-ref-dir-options"></datalist>
-          </div>
-          <div class="btn-row">
-            <button type="button" id="btn-model-add" class="btn-secondary btn-small btn-flex">添加模型</button>
-          </div>
-          <span id="model-config-status" class="status-text"></span>
         </div>
       </div>
     </section>
@@ -306,7 +286,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260807"></script>
+<script src="/static/app.js?v=20260808"></script>
 <script>
 (function () {
   var tips = [
