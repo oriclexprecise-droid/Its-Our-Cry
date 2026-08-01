@@ -226,10 +226,14 @@ def create_app(config_path="config.yaml"):
 
         data = request.get_json() or {}
         indices = data.get("indices", list(range(len(state["lines"]))))
+        indices = [i for i in indices if isinstance(i, int) and 0 <= i < len(state["lines"])]
+        if not indices:
+            return jsonify({"error": "没有可生成的台词"}), 400
 
         state["generating"] = True
         state["progress"] = {"current": 0, "total": len(indices)}
-        state["generated"] = {}
+        for idx in indices:
+            state["generated"].pop(idx, None)
         state["time_info"] = []
 
         def generate_worker():
@@ -297,6 +301,16 @@ def create_app(config_path="config.yaml"):
         threading.Thread(target=generate_worker, daemon=True).start()
         return jsonify({"status": "started", "total": len(indices)})
 
+    @app.route("/api/segment/<int:index>", methods=["GET"])
+    def get_segment(index):
+        gen = state["generated"].get(index)
+        if not gen:
+            return jsonify({"error": "该台词还没有音频"}), 404
+        path = gen["path"]
+        if not Path(path).exists():
+            return jsonify({"error": "音频文件不存在"}), 404
+        return send_file(path, mimetype="audio/wav")
+
     @app.route("/api/merge", methods=["POST"])
     def merge():
         """用户手动触发合并音频和生成 SRT。"""
@@ -322,6 +336,7 @@ def create_app(config_path="config.yaml"):
             "generating": state["generating"],
             "progress": state["progress"],
             "generated_count": len(state["generated"]),
+            "generated_indices": sorted(state["generated"].keys()),
             "error": state.get("error"),
             "merged_path": state.get("merged_path"),
             "srt_path": state.get("srt_path"),

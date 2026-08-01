@@ -1,4 +1,5 @@
 const state = { lines: [], chars: [], emotions: [], generating: false };
+let audioPlayer = null;
 
 async function api(url, opts = {}) {
   const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -54,6 +55,7 @@ document.getElementById("btn-analyze").addEventListener("click", async () => {
 });
 
 function renderLines() {
+  if (audioPlayer) { audioPlayer.pause(); }
   const container = document.getElementById("lines-container");
   document.getElementById("line-count").textContent = "共 " + state.lines.length + " 条台词";
   container.innerHTML = state.lines.map((line, i) => {
@@ -66,6 +68,10 @@ function renderLines() {
       + (line.translated_text ? '<span class="translated" title="' + esc(line.translated_text) + '">日语：' + esc(line.translated_text) + '</span>' : '')
       + '</span>'
       + '<select data-index="' + i + '" class="emotion-select">' + opts + '</select>'
+      + '<span class="line-actions">'
+      + '<button type="button" class="btn-line-action btn-play" data-index="' + i + '" disabled>试听</button>'
+      + '<button type="button" class="btn-line-action btn-regenerate" data-index="' + i + '" disabled>重新生成</button>'
+      + '</span>'
       + '</div>';
   }).join("");
   container.querySelectorAll(".emotion-select").forEach(sel => {
@@ -75,30 +81,50 @@ function renderLines() {
       try { await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ emotion: e.target.value }) }); } catch (err) {}
     });
   });
+  container.querySelectorAll(".btn-play").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.index);
+      if (!audioPlayer) audioPlayer = new Audio();
+      if (!audioPlayer.paused && audioPlayer.dataset && audioPlayer.dataset.idx === String(idx)) {
+        audioPlayer.pause();
+        btn.textContent = "试听";
+        return;
+      }
+      audioPlayer.src = "/api/segment/" + idx + "?t=" + Date.now();
+      audioPlayer.dataset = audioPlayer.dataset || {};
+      audioPlayer.dataset.idx = String(idx);
+      audioPlayer.onended = () => { btn.textContent = "试听"; };
+      audioPlayer.play().then(() => { btn.textContent = "停止"; }).catch(() => { btn.textContent = "试听"; });
+    });
+  });
+  container.querySelectorAll(".btn-regenerate").forEach(btn => {
+    btn.addEventListener("click", () => {
+      startGeneration([parseInt(btn.dataset.index)]);
+    });
+  });
+}
+
+function setLineButtonsDisabled(disabled) {
+  document.querySelectorAll(".btn-line-action").forEach(b => { b.disabled = disabled; });
+}
+
+function refreshGenerated(p) {
+  const generated = p.generated_indices || [];
+  const set = new Set(generated.map(String));
+  document.querySelectorAll(".btn-line-action").forEach(btn => {
+    const idx = btn.dataset.index;
+    const ready = set.has(idx);
+    if (btn.classList.contains("btn-play")) {
+      btn.disabled = !ready;
+      if (!ready) btn.textContent = "试听";
+    } else if (btn.classList.contains("btn-regenerate")) {
+      btn.disabled = !ready;
+    }
+  });
 }
 
 function esc(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
-async function downloadFile(type, label) {
-  try {
-    const resp = await fetch("/api/download/" + type + "?t=" + Date.now());
-    if (!resp.ok) throw new Error("file not ready");
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = type === "merged" ? "merged_output.wav" : "subtitles.srt";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    alert("下载失败: " + e.message);
-  }
-}
-
-document.getElementById("dl-audio").addEventListener("click", () => downloadFile("merged"));
-document.getElementById("dl-srt").addEventListener("click", () => downloadFile("srt"));
 
 document.getElementById("btn-merge").addEventListener("click", async () => {
   const btn = document.getElementById("btn-merge");
@@ -123,13 +149,16 @@ document.getElementById("btn-merge").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("btn-generate").addEventListener("click", async () => {
+document.getElementById("btn-generate").addEventListener("click", () => startGeneration());
+
+async function startGeneration(indices) {
   if (state.generating) return;
   const btn = document.getElementById("btn-generate");
   const progressText = document.getElementById("progress-text");
   btn.disabled = true;
   btn.textContent = "生成中...";
   state.generating = true;
+  setLineButtonsDisabled(true);
   progressText.classList.remove("hidden");
   let barWrap = document.querySelector(".progress-bar-wrap");
   if (!barWrap) {
@@ -140,7 +169,8 @@ document.getElementById("btn-generate").addEventListener("click", async () => {
   }
   const barFill = barWrap.querySelector(".progress-bar-fill");
   try {
-    await api("/api/generate", { method: "POST", body: JSON.stringify({}) });
+    const body = indices ? JSON.stringify({ indices }) : JSON.stringify({});
+    await api("/api/generate", { method: "POST", body });
     pollProgress(btn, progressText, barFill);
   } catch (e) {
     progressText.textContent = e.message;
@@ -148,8 +178,9 @@ document.getElementById("btn-generate").addEventListener("click", async () => {
     btn.disabled = false;
     btn.textContent = "生成全部语音";
     state.generating = false;
+    setLineButtonsDisabled(false);
   }
-});
+}
 
 async function pollProgress(btn, progressText, barFill) {
   try {
@@ -163,12 +194,14 @@ async function pollProgress(btn, progressText, barFill) {
     if (p.error) {
       progressText.textContent = "错误: " + p.error;
       progressText.className = "status-text error";
-      btn.disabled = false; btn.textContent = "生成全部语音"; state.generating = false; return;
+      btn.disabled = false; btn.textContent = "生成全部语音"; state.generating = false;
+      setLineButtonsDisabled(false); refreshGenerated(p); return;
     }
     if (!p.generating && p.generated_count > 0 && p.merged_path) {
       progressText.textContent = "生成完成!";
       progressText.className = "status-text success";
       btn.textContent = "重新生成"; btn.disabled = false; state.generating = false;
+      refreshGenerated(p);
       document.getElementById("step-download").classList.remove("hidden");
       return;
     }

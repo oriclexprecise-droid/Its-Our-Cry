@@ -39,7 +39,7 @@ textarea { min-height: 240px; line-height: 1.6; }
 .status-text.success { color: #4ecca3; }
 .hidden { display: none !important; }
 .line-item {
-  display: grid; grid-template-columns: 48px 120px 1fr 100px;
+  display: grid; grid-template-columns: 48px 120px 1fr 110px auto;
   gap: 10px; align-items: center; padding: 10px 12px;
   border-bottom: 1px solid #1a3350; font-size: 13px;
 }
@@ -74,3 +74,11 @@ textarea { min-height: 240px; line-height: 1.6; }
 
 .download-links .status-text { width: 100%; margin-top: 8px; }
 #btn-open-export { margin-top: 0; }
+
+.line-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.btn-line-action {
+  padding: 5px 8px; background: #0f3460; border: 1px solid #1a4a7a;
+  border-radius: 4px; color: #e0e0e0; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.btn-line-action:hover:not(:disabled) { background: #1a4a7a; }
+.btn-line-action:disabled { opacity: 0.45; cursor: not-allowed; }
