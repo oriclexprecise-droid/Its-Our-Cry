@@ -84,9 +84,17 @@
       <div class="panel-header"><h2>设置</h2></div>
       <div class="panel-body side-empty"></div>
     </section>
-    <section class="panel side-panel">
+        <section class="panel side-panel">
       <div class="panel-header"><h2>部署</h2></div>
-      <div class="panel-body side-empty"></div>
+      <div class="panel-body deploy-body">
+        <label class="deploy-label" for="deploy-gs-path">GPT-SoVITS 目录</label>
+        <input type="text" id="deploy-gs-path" placeholder="例如 D:\GPT-SoVITS-v2pro" autocomplete="off">
+        <div class="deploy-actions">
+          <button id="btn-deploy-scan" class="btn-secondary btn-small">扫描环境</button>
+        </div>
+        <span id="deploy-scan-status" class="status-text"></span>
+        <div id="deploy-scan-result" class="deploy-scan-result"></div>
+      </div>
     </section>
   </aside>
   </div>

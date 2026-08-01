@@ -127,3 +127,24 @@ textarea { min-height: 240px; line-height: 1.6; }
 }
 .btn-line-action:hover:not(:disabled) { background: #1a4a7a; }
 .btn-line-action:disabled { opacity: 0.45; cursor: not-allowed; }
+
+
+.deploy-body { padding: 16px; }
+.deploy-label { display: block; font-size: 12px; color: #aaa; margin-bottom: 6px; }
+#deploy-gs-path { margin-bottom: 10px; font-size: 12px; padding: 8px 10px; }
+.deploy-actions { display: flex; align-items: center; }
+.deploy-actions .btn-secondary { margin-top: 0; }
+.deploy-scan-result { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; }
+.scan-overview { font-size: 12px; padding: 8px 10px; border-radius: 6px; }
+.scan-overview.ok { background: rgba(78,204,163,0.12); color: #4ecca3; border: 1px solid rgba(78,204,163,0.4); }
+.scan-overview.bad { background: rgba(233,69,96,0.12); color: #e94560; border: 1px solid rgba(233,69,96,0.4); }
+.scan-group { border: 1px solid #1a3350; border-radius: 6px; padding: 10px; background: rgba(255,255,255,0.02); }
+.scan-group h4 { font-size: 12px; color: #ff6b9d; margin-bottom: 6px; font-weight: 600; }
+.scan-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: #ccc; padding: 3px 0; border-bottom: 1px dashed #1a3350; }
+.scan-row:last-child { border-bottom: none; }
+.scan-row .scan-label { flex: 0 0 auto; color: #999; }
+.scan-row .scan-value { flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-value.ok { color: #4ecca3; }
+.scan-value.bad { color: #e94560; }
+.scan-row.wrap .scan-value { white-space: normal; overflow: visible; }
+.issue-list { margin: 0; padding-left: 16px; font-size: 12px; color: #e94560; line-height: 1.6; }

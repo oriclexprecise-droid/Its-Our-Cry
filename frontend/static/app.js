@@ -16,6 +16,7 @@ async function loadConfig() {
   const cfg = await api("/api/config");
   state.chars = cfg.characters;
   state.emotions = cfg.emotions;
+  loadDeployPath(cfg);
   if (cfg.has_api_key) {
     try {
       const keyData = await api("/api/config/api_key");
@@ -393,4 +394,104 @@ document.getElementById("btn-open-export").addEventListener("click", async () =>
   }
 });
 
+
+function loadDeployPath(cfg) {
+  const input = document.getElementById("deploy-gs-path");
+  if (!input) return;
+  const saved = localStorage.getItem("mygo_deploy_gs_path");
+  if (saved) {
+    input.value = saved;
+  } else if (cfg.gptsovits_path) {
+    input.value = cfg.gptsovits_path;
+  }
+  input.addEventListener("change", () => {
+    localStorage.setItem("mygo_deploy_gs_path", input.value.trim());
+  });
+}
+
+document.getElementById("btn-deploy-scan").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-deploy-scan");
+  const status = document.getElementById("deploy-scan-status");
+  const result = document.getElementById("deploy-scan-result");
+  const input = document.getElementById("deploy-gs-path");
+  const path = input.value.trim();
+  btn.disabled = true;
+  status.textContent = "正在扫描环境...";
+  status.className = "status-text";
+  result.innerHTML = "";
+  try {
+    const data = await api("/api/deploy/scan", { method: "POST", body: JSON.stringify({ gptsovits_path: path }) });
+    localStorage.setItem("mygo_deploy_gs_path", path);
+    renderDeployScan(data);
+    status.textContent = "扫描完成";
+    status.className = "status-text success";
+  } catch (e) {
+    status.textContent = e.message;
+    status.className = "status-text error";
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function scanGroup(title, items, okMode) {
+  return '<div class="scan-group"><h4>' + esc(title) + "</h4>" +
+    items.map(function (item) {
+      const label = item[0];
+      const value = String(item[1] == null ? "未知" : item[1]);
+      let cls = "";
+      if (okMode) {
+        const ok = !/未|缺失|否|失败|not found|not installed|unknown/i.test(value);
+        cls = ok ? " ok" : " bad";
+      }
+      const wrap = value.length > 48 ? " wrap" : "";
+      return '<div class="scan-row' + wrap + '"><span class="scan-label">' + esc(label) + '</span><span class="scan-value' + cls + '" title="' + esc(value) + '">' + esc(value) + "</span></div>";
+    }).join("") + "</div>";
+}
+
+function renderDeployScan(d) {
+  const host = document.getElementById("deploy-scan-result");
+  const rows = [];
+  rows.push('<div class="scan-overview ' + (d.ready ? "ok" : "bad") + '">' + (d.ready ? "环境就绪" : "存在问题，请查看下方详情") + "</div>");
+
+  const osLabel = (d.os.system || "") + " " + (d.os.release || "") + " (" + (d.os.arch || "") + ")";
+  const cpuLabel = d.cpu + " · " + (d.cores || "?") + " 线程";
+  rows.push(scanGroup("电脑配置", [
+    ["系统", osLabel],
+    ["CPU", cpuLabel],
+    ["内存", d.memory_total_gb ? d.memory_total_gb + " GB" : "未知"],
+    ["磁盘剩余", d.disk ? d.disk.free_gb + " GB / " + d.disk.total_gb + " GB" : "未知"],
+    ["Python", d.python.version],
+    ["pip", d.python.pip]
+  ]));
+
+  const gpuRows = d.gpu && d.gpu.length
+    ? d.gpu.map(g => ["显卡", g.name + " · " + g.vram_gb + " GB · 驱动 " + g.driver])
+    : [["NVIDIA 显卡", "未检测到"]];
+  if (d.cuda_version) gpuRows.push(["CUDA", d.cuda_version]);
+  rows.push(scanGroup("显卡 / CUDA", gpuRows, true));
+
+  rows.push(scanGroup("依赖检查", d.packages.map(p => [p.name, p.installed ? p.version : "未安装"]), true));
+
+  const gs = d.gptsovits || {};
+  rows.push(scanGroup("GPT-SoVITS 目录", [
+    ["目录", gs.path || "未配置"],
+    ["目录存在", gs.exists ? "是" : "否"],
+    ["runtime/python", gs.runtime_python ? "存在" : "缺失"],
+    ["GPT_SoVITS", gs.checks && gs.checks.GPT_SoVITS ? "存在" : "缺失"],
+    ["tools", gs.checks && gs.checks.tools ? "存在" : "缺失"],
+    ["pretrained_models", gs.checks && gs.checks.pretrained_models ? "存在" : "缺失"],
+    ["磁盘剩余", d.gptsovits_disk ? d.gptsovits_disk.free_gb + " GB" : "未知"]
+  ], true));
+
+  rows.push(scanGroup("FFmpeg", [
+    ["状态", d.ffmpeg.installed ? "已安装" : "未安装"],
+    ["版本", d.ffmpeg.version || "-"]
+  ], true));
+
+  if (d.issues && d.issues.length) {
+    rows.push('<div class="scan-group"><h4>需要处理</h4><ul class="issue-list">' + d.issues.map(i => "<li>" + esc(i) + "</li>").join("") + "</ul></div>");
+  }
+
+  host.innerHTML = rows.join("");
+}
 loadConfig();

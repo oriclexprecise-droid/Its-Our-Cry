@@ -18,6 +18,7 @@ from .emotion_analyzer import analyze_emotions
 from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt
 from .translator import translate_lines
+from .deploy_check import scan_environment
 
 
 DEFAULT_INTERVAL = 0.5
@@ -65,6 +66,7 @@ def create_app(config_path="config.yaml"):
             "emotions": config["emotions"],
             "has_api_key": has_key,
             "default_interval": DEFAULT_INTERVAL,
+            "gptsovits_path": config["gptsovits_path"],
         })
 
     @app.route("/api/config/api_key", methods=["GET"])
@@ -522,5 +524,15 @@ def create_app(config_path="config.yaml"):
             return jsonify({"status": "ok"})
         except Exception as e:
             return jsonify({"error": "打开失败: " + str(e)}), 500
+
+    @app.route("/api/deploy/scan", methods=["POST"])
+    def deploy_scan():
+        data = request.get_json(silent=True) or {}
+        user_path = str(data.get("gptsovits_path", "")).strip()
+        try:
+            return jsonify(scan_environment(config, project_root, user_path or None))
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "环境扫描失败: " + str(e)}), 500
 
     return app
