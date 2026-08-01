@@ -57,5 +57,12 @@ tts:
   top_p: 1.0
   seed: -1
 
+# 旁白字幕时长（旁白无语音时，字幕按这些参数停留）
+narration:
+  base_duration: 2.0
+  per_char: 0.32
+  min_duration: 1.5
+  max_duration: 8.0
+
 # 输出目录
 output_dir: "output"

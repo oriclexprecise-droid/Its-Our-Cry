@@ -345,3 +345,12 @@ textarea { min-height: 240px; line-height: 1.6; }
   header h1 { font-size: 40px; }
   .panel-body { padding: 14px; }
 }
+
+.line-fail {
+  display: block;
+  margin-top: 4px;
+  color: #ff6b9d;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-all;
+}

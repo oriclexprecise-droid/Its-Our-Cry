@@ -65,6 +65,13 @@ def create_app(config_path="config.yaml"):
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    config.setdefault("narration", {
+        "base_duration": 2.0,
+        "per_char": 0.32,
+        "min_duration": 1.5,
+        "max_duration": 8.0,
+    })
+
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
     user_settings = {}
     user_settings_path = project_root / "user_settings.json"
@@ -77,6 +84,8 @@ def create_app(config_path="config.yaml"):
         config["deepseek"]["api_key"] = user_settings["deepseek_api_key"]
     if user_settings.get("gptsovits_path"):
         config["gptsovits_path"] = user_settings["gptsovits_path"]
+    if user_settings.get("narration"):
+        config["narration"] = {**config.get("narration", {}), **user_settings["narration"]}
 
     # Resolve all relative paths to absolute to survive cwd changes
     gs_path = str(config.get("gptsovits_path") or "").strip()
@@ -101,6 +110,7 @@ def create_app(config_path="config.yaml"):
         "srt_path": None,
         "generating": False,
         "progress": {"current": 0, "total": 0},
+        "failures": {},
         "time_info": [],
         "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
         "deploy_model_copy": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total": 0, "current": ""},
@@ -121,6 +131,7 @@ def create_app(config_path="config.yaml"):
             "emotions": config["emotions"],
             "has_api_key": has_key,
             "default_interval": DEFAULT_INTERVAL,
+            "narration": config.get("narration", {}),
             "gptsovits_path": config["gptsovits_path"],
             "deepseek": {
                 "base_url": config["deepseek"].get("base_url", "https://api.deepseek.com"),
@@ -146,6 +157,37 @@ def create_app(config_path="config.yaml"):
             config["gptsovits_path"] = str(data["gptsovits_path"] or "").strip()
         _persist_user_settings(project_root, config)
         return jsonify({"status": "ok"})
+
+    @app.route("/api/settings/narration", methods=["PUT"])
+    def save_narration_settings():
+        data = request.get_json() or {}
+
+        def _num(value, default):
+            try:
+                num = float(value)
+            except (TypeError, ValueError):
+                return default
+            return num if num >= 0 else default
+
+        narration = {
+            "base_duration": _num(data.get("base_duration"), 2.0),
+            "per_char": _num(data.get("per_char"), 0.32),
+            "min_duration": _num(data.get("min_duration"), 1.5),
+            "max_duration": _num(data.get("max_duration"), 8.0),
+        }
+        if narration["min_duration"] > narration["max_duration"]:
+            narration["min_duration"], narration["max_duration"] = narration["max_duration"], narration["min_duration"]
+        config["narration"] = narration
+        try:
+            settings = {}
+            settings_path = project_root / "user_settings.json"
+            if settings_path.exists():
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            settings["narration"] = narration
+            settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return jsonify({"status": "ok", "narration": narration})
 
     @app.route("/api/analyze", methods=["POST"])
     def analyze():
@@ -217,11 +259,18 @@ def create_app(config_path="config.yaml"):
             project_root=project_root,
         )
 
+        skipped = []
+        raw_lines = script_text.strip().split("\n")
+        parsed_line_nos = {line["line_no"] for line in lines}
+        for skipped_no, raw in enumerate(raw_lines, start=1):
+            if raw.strip() and skipped_no not in parsed_line_nos:
+                skipped.append({"line_no": skipped_no, "text": raw.strip()[:100]})
+
         state["lines"] = lines
         state["emotions"] = emotions
         state["lang"] = lang
 
-        return jsonify({"lines": lines, "proofread": proofread})
+        return jsonify({"lines": lines, "proofread": proofread, "skipped": skipped})
 
     @app.route("/api/line/<int:index>", methods=["PUT"])
     def update_line(index):
@@ -351,22 +400,59 @@ def create_app(config_path="config.yaml"):
         return random.choice(files)
 
     def finalize_output():
-        indices = sorted(state["generated"].keys())
-        if not indices:
-            return
-        wav_paths = []
-        merged_lines = []
-        for idx in indices:
-            gen = state["generated"][idx]
-            if Path(gen["path"]).exists():
-                wav_paths.append(gen["path"])
-                merged_lines.append(state["lines"][idx])
-        if not wav_paths:
+        if not state["lines"]:
             return
         output_dir = Path(config["output_dir"])
+        segments_dir = output_dir / "segments"
+        segments_dir.mkdir(parents=True, exist_ok=True)
         merged_path = output_dir / "merged_output.wav"
         srt_path = output_dir / "subtitles.srt"
-        gaps = [line.get("interval", DEFAULT_INTERVAL) for line in merged_lines]
+
+        all_indices = list(range(len(state["lines"])))
+        wav_paths = []
+        merged_lines = []
+        gaps = []
+        for idx in all_indices:
+            line = state["lines"][idx]
+            gen = state["generated"].get(idx)
+            if gen and Path(gen["path"]).exists():
+                wav_paths.append(gen["path"])
+            else:
+                wav_paths.append(str(segments_dir / f"silence_{idx:04d}.wav"))
+            merged_lines.append(line)
+            gaps.append(line.get("interval", DEFAULT_INTERVAL))
+
+        # 没有语音的台词用静音占位，保证 SRT 时间轴完整
+        sample_rate, channels, sampwidth = 24000, 1, 2
+        for wav_path in wav_paths:
+            if Path(wav_path).exists():
+                try:
+                    with wave.open(wav_path, "r") as wf:
+                        sample_rate = wf.getframerate()
+                        channels = wf.getnchannels()
+                        sampwidth = wf.getsampwidth()
+                    break
+                except Exception:
+                    pass
+        for idx, wav_path in enumerate(wav_paths):
+            if state["generated"].get(all_indices[idx]) and Path(wav_path).exists():
+                continue
+            text = merged_lines[idx].get("translated_text") or merged_lines[idx]["text"]
+            if merged_lines[idx].get("character") == "旁白":
+                nr = config.get("narration", {})
+                base = float(nr.get("base_duration", 2.0))
+                per = float(nr.get("per_char", 0.32))
+                lo = float(nr.get("min_duration", 1.5))
+                hi = float(nr.get("max_duration", 8.0))
+                seconds = max(lo, min(hi, base + len(text or "") * per))
+            else:
+                seconds = max(1.2, min(6.0, len(text or "") * 0.32 + 0.6))
+            with wave.open(wav_path, "w") as out:
+                out.setnchannels(channels)
+                out.setsampwidth(sampwidth)
+                out.setframerate(sample_rate)
+                out.writeframes(b"\x00" * int(sample_rate * seconds) * channels * sampwidth)
+
         time_info = merge_wav_files(
             wav_paths=wav_paths,
             output_path=str(merged_path),
@@ -396,6 +482,8 @@ def create_app(config_path="config.yaml"):
 
         state["generating"] = True
         state["progress"] = {"current": 0, "total": len(indices)}
+        state["failures"] = {}
+        state["error"] = None
         for idx in indices:
             state["generated"].pop(idx, None)
         state["time_info"] = []
@@ -417,18 +505,33 @@ def create_app(config_path="config.yaml"):
                         char_groups[char] = []
                     char_groups[char].append(idx)
 
+                def fail(idx, message):
+                    state["failures"][idx] = message
+                    state["progress"]["current"] += 1
+                    record_event(
+                        {"type": "generate_failed", "message": f"第{idx + 1}条生成失败：{message}", "payload": {"index": idx, "message": message}},
+                        project_root=project_root,
+                    )
+
                 for char, idx_list in char_groups.items():
                     if char not in config["characters"]:
+                        for idx in idx_list:
+                            fail(idx, f"角色「{char}」没有配音模型，仅保留字幕，请检查角色名是否写错")
                         continue
                     char_config = config["characters"][char]
-                    engine.switch_character(char_config["model"], char_config.get("gpt_model"))
+                    try:
+                        engine.switch_character(char_config["model"], char_config.get("gpt_model"))
+                    except Exception as e:
+                        for idx in idx_list:
+                            fail(idx, f"角色模型加载失败（仅保留字幕）：{str(e)[-200:]}")
+                        continue
 
                     for idx in idx_list:
                         line = state["lines"][idx]
                         emotion = line.get("emotion", "thinking")
                         ref_audio = pick_ref_audio(char, emotion)
                         if ref_audio is None:
-                            state["progress"]["current"] += 1
+                            fail(idx, f"缺少参考音频：{char}/{emotion}，仅保留字幕，请先在语音库放入音频")
                             continue
 
                         output_dir = Path(config["output_dir"]) / "segments"
@@ -438,21 +541,25 @@ def create_app(config_path="config.yaml"):
                         tts_lang = state.get("lang", "zh")
                         if tts_lang not in ("zh", "ja"):
                             tts_lang = "zh"
-                        duration = engine.synthesize_to_file(
-                            text=line.get("translated_text") or line["text"],
-                            ref_audio_path=ref_audio,
-                            output_path=str(output_path),
-                            text_lang=tts_lang,
-                            prompt_lang=tts_lang,
-                            text_split_method=tts_cfg.get("text_split_method", "cut5"),
-                            batch_size=tts_cfg.get("batch_size", 1),
-                            speed_factor=tts_cfg.get("speed_factor", 1.0),
-                            fragment_interval=tts_cfg.get("fragment_interval", 0.3),
-                            temperature=tts_cfg.get("temperature", 1.0),
-                            top_k=tts_cfg.get("top_k", 15),
-                            top_p=tts_cfg.get("top_p", 1.0),
-                            seed=tts_cfg.get("seed", -1),
-                        )
+                        try:
+                            duration = engine.synthesize_to_file(
+                                text=line.get("translated_text") or line["text"],
+                                ref_audio_path=ref_audio,
+                                output_path=str(output_path),
+                                text_lang=tts_lang,
+                                prompt_lang=tts_lang,
+                                text_split_method=tts_cfg.get("text_split_method", "cut5"),
+                                batch_size=tts_cfg.get("batch_size", 1),
+                                speed_factor=tts_cfg.get("speed_factor", 1.0),
+                                fragment_interval=tts_cfg.get("fragment_interval", 0.3),
+                                temperature=tts_cfg.get("temperature", 1.0),
+                                top_k=tts_cfg.get("top_k", 15),
+                                top_p=tts_cfg.get("top_p", 1.0),
+                                seed=tts_cfg.get("seed", -1),
+                            )
+                        except Exception as e:
+                            fail(idx, f"{char} 生成失败（仅保留字幕）：{str(e)[-300:]}")
+                            continue
                         state["generated"][idx] = {
                             "path": str(output_path),
                             "duration": duration,
@@ -502,6 +609,7 @@ def create_app(config_path="config.yaml"):
             "progress": state["progress"],
             "generated_count": len(state["generated"]),
             "generated_indices": sorted(state["generated"].keys()),
+            "failures": state.get("failures", {}),
             "error": state.get("error"),
             "merged_path": state.get("merged_path"),
             "srt_path": state.get("srt_path"),

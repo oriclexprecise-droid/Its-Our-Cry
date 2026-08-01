@@ -1,4 +1,4 @@
-const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set() };
+const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {} };
 let audioPlayer = null;
 
 async function api(url, opts = {}) {
@@ -16,6 +16,7 @@ async function loadConfig() {
   const cfg = await api("/api/config");
   state.chars = cfg.characters;
   state.emotions = cfg.emotions;
+  setNarrationInputs(cfg.narration || {});
   loadDeployPath(cfg);
   const savedAi = loadAIConfigFromStorage();
   if (savedAi) {
@@ -49,6 +50,7 @@ async function runAnalyze() {
   try {
     const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }) });
     state.lines = data.lines;
+    state.failures = {};
     state.hasGenerated = false;
     state.selectMode = false;
     state.selected = new Set();
@@ -56,8 +58,15 @@ async function runAnalyze() {
     document.getElementById("btn-select-mode").classList.remove("active");
     document.getElementById("selection-toolbar").classList.add("hidden");
     renderLines();
-    status.textContent = "已分析 " + data.lines.length + " 条台词";
-    status.className = "status-text success";
+    const skipped = data.skipped || [];
+    if (skipped.length) {
+      const nums = skipped.slice(0, 6).map(s => "第" + s.line_no + "行").join("、");
+      status.textContent = "已分析 " + data.lines.length + " 条台词；" + skipped.length + " 行格式不对已跳过（" + nums + (skipped.length > 6 ? " 等" : "") + "）";
+      status.className = "status-text error";
+    } else {
+      status.textContent = "已分析 " + data.lines.length + " 条台词";
+      status.className = "status-text success";
+    }
     document.getElementById("step-review").classList.remove("hidden");
     document.getElementById("step-download").classList.add("hidden");
     document.getElementById("btn-merge").classList.add("hidden");
@@ -147,6 +156,7 @@ function renderLines() {
       + '<span class="line-texts">'
       + '<span class="text" title="' + esc(line.text) + '">' + esc(line.text) + '</span>'
       + (line.translated_text ? '<span class="translated" title="' + esc(line.translated_text) + '">日语：' + esc(line.translated_text) + '</span>' : '')
+      + (state.failures[i] ? '<span class="line-fail" title="' + esc(state.failures[i]) + '">' + esc(state.failures[i]) + '</span>' : '')
       + '</span>'
       + '<input type="number" class="interval-input" data-index="' + i + '" min="0" max="10" step="0.1" value="' + (typeof line.interval === "number" ? line.interval : 0.5) + '" title="每句前间隔（秒）">'
       + '<select data-index="' + i + '" class="emotion-select">' + opts + '</select>'
@@ -250,6 +260,7 @@ function setLineButtonsDisabled(disabled) {
 function refreshGenerated(p) {
   const generated = p.generated_indices || [];
   state.hasGenerated = generated.length > 0;
+  state.failures = p.failures || {};
   const set = new Set(generated.map(String));
   document.querySelectorAll(".btn-line-action").forEach(btn => {
     const idx = btn.dataset.index;
@@ -258,7 +269,7 @@ function refreshGenerated(p) {
       btn.disabled = !ready;
       if (!ready) btn.textContent = "试听";
     } else if (btn.classList.contains("btn-regenerate")) {
-      btn.disabled = !ready;
+      btn.disabled = !(ready || state.failures[idx]);
     }
   });
 }
@@ -353,6 +364,20 @@ async function startGeneration(indices) {
   if (state.generating) return;
   const btn = document.getElementById("btn-generate");
   const progressText = document.getElementById("progress-text");
+  const targets = indices ? indices.map(i => state.lines[i]) : state.lines;
+  const bad = [];
+  targets.forEach((line, k) => {
+    if (line.character !== "旁白" && !state.chars.includes(line.character)) {
+      const lineNo = (indices ? indices[k] : k) + 1;
+      bad.push("#" + lineNo + " " + line.character);
+    }
+  });
+  if (bad.length) {
+    progressText.textContent = "以下角色不存在，无法生成：" + bad.slice(0, 5).join("、") + (bad.length > 5 ? " 等" + bad.length + " 条" : "");
+    progressText.className = "status-text error";
+    progressText.classList.remove("hidden");
+    return;
+  }
   btn.disabled = true;
   btn.textContent = "生成中...";
   state.generating = true;
@@ -393,13 +418,19 @@ async function pollProgress(btn, progressText, barFill) {
       progressText.textContent = "错误: " + p.error;
       progressText.className = "status-text error";
       btn.disabled = false; btn.textContent = "生成全部语音"; state.generating = false;
-      setLineButtonsDisabled(false); refreshGenerated(p); return;
+      setLineButtonsDisabled(false); renderLines(); refreshGenerated(p); return;
     }
     if (!p.generating && p.generated_count > 0 && p.merged_path) {
-      progressText.textContent = "生成完成!";
-      progressText.className = "status-text success";
+      const failCount = Object.keys(p.failures || {}).length;
+      if (failCount > 0) {
+        progressText.textContent = "生成完成：语音 " + p.generated_count + " 条，另有 " + failCount + " 条仅保留字幕";
+        progressText.className = "status-text error";
+      } else {
+        progressText.textContent = "生成完成!";
+        progressText.className = "status-text success";
+      }
       btn.textContent = "重新生成"; btn.disabled = false; state.generating = false;
-      setLineButtonsDisabled(false); refreshGenerated(p);
+      setLineButtonsDisabled(false); renderLines(); refreshGenerated(p);
       document.getElementById("step-download").classList.remove("hidden");
       return;
     }
@@ -1142,6 +1173,44 @@ function saveAIConfigToStorage() {
   return cfg;
 }
 
+function setNarrationInputs(nr) {
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  setVal("narration-base", nr.base_duration != null ? nr.base_duration : 2.0);
+  setVal("narration-per", nr.per_char != null ? nr.per_char : 0.32);
+  setVal("narration-min", nr.min_duration != null ? nr.min_duration : 1.5);
+  setVal("narration-max", nr.max_duration != null ? nr.max_duration : 8.0);
+}
+
+function initNarrationConfig() {
+  const btn = document.getElementById("btn-save-narration");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const status = document.getElementById("narration-config-status");
+    const data = {
+      base_duration: parseFloat(document.getElementById("narration-base").value),
+      per_char: parseFloat(document.getElementById("narration-per").value),
+      min_duration: parseFloat(document.getElementById("narration-min").value),
+      max_duration: parseFloat(document.getElementById("narration-max").value)
+    };
+    for (const k of Object.keys(data)) {
+      if (isNaN(data[k]) || data[k] < 0) {
+        status.textContent = "请输入不小于 0 的秒数";
+        status.className = "status-text error";
+        return;
+      }
+    }
+    try {
+      const res = await api("/api/settings/narration", { method: "PUT", body: JSON.stringify(data) });
+      setNarrationInputs(res.narration || data);
+      status.textContent = "旁白时长已保存";
+      status.className = "status-text success";
+    } catch (e) {
+      status.textContent = "保存失败: " + e.message;
+      status.className = "status-text error";
+    }
+  });
+}
+
 function initAIConfig() {
   const saved = loadAIConfigFromStorage();
   if (saved) applyAIConfig(saved);
@@ -1184,3 +1253,4 @@ async function applyRandomBackground() {
 }
 
 initAIConfig();
+initNarrationConfig();
