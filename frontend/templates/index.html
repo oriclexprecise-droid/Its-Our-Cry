@@ -4,12 +4,40 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=20260802">
+<style>
+.creator-tip {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 60;
+  max-width: min(430px, calc(100vw - 240px));
+  color: rgba(222, 233, 255, 0.92);
+  font-size: 14px;
+  line-height: 1.6;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+.creator-tip.tip-fade {
+  opacity: 0;
+  transform: translateY(5px);
+}
+@media (max-width: 560px) {
+  .creator-tip {
+    position: static;
+    text-align: center;
+    margin: 0 auto 8px;
+    max-width: 100%;
+  }
+}
+</style>
 </head>
 <body>
 <div class="developer-badge">开发者：ORiCale</div>
 <div id="app">
   <header>
+    <div id="creator-tip" class="creator-tip"></div>
     <h1>It 's Our Cry!!!!!</h1>
     <div class="version-tag">Version 1.0.0</div>
   </header>
@@ -244,6 +272,35 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=20260802"></script>
+<script>
+(function () {
+  var tips = [
+    "为什么要演奏春日影？",
+    "享受创作的过程，不要因为一时的困难而泄气👍",
+    "别想到每个点都做到最好，量力而行才是正解😁",
+    "这程序可是我花了近80才搞出来的，算上后期的更新，给我一个三连不过分吧💕",
+    "可悲的是，戴上面具后，我才是真的‘我’",
+    "Mujica将出的电影和27年的第三季大家期望如何？（oh不不不，想到高考前吃石我无疑是难绷的）",
+    "能陪我组一辈子的乐队吗？",
+    "Tip位招租，私信up下次版本更新挂上你的tips😎",
+    "Tip里没有使用注意....吗？",
+    "6767676767676767",
+    "我说过了吧？请你们将剩余的人生交给我"
+  ];
+  var el = document.getElementById("creator-tip");
+  if (!el || !tips.length) return;
+  var index = Math.floor(Math.random() * tips.length);
+  el.textContent = tips[index];
+  setInterval(function () {
+    el.classList.add("tip-fade");
+    setTimeout(function () {
+      index = (index + 1) % tips.length;
+      el.textContent = tips[index];
+      el.classList.remove("tip-fade");
+    }, 450);
+  }, 6500);
+})();
+</script>
 </body>
 </html>
