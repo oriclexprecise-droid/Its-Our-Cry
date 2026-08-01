@@ -57,6 +57,8 @@ async function runAnalyze() {
     document.getElementById("btn-select-mode").textContent = "选择模式";
     document.getElementById("btn-select-mode").classList.remove("active");
     document.getElementById("selection-toolbar").classList.add("hidden");
+    const srtBtn = document.getElementById("btn-srt-only");
+    if (srtBtn) srtBtn.classList.add("hidden");
     renderLines();
     const skipped = data.skipped || [];
     if (skipped.length) {
@@ -363,7 +365,7 @@ document.getElementById("btn-apply-interval").addEventListener("click", async ()
 
 document.getElementById("btn-generate").addEventListener("click", () => startGeneration());
 
-async function startGeneration(indices) {
+async function startGeneration(indices, srtOnly) {
   if (state.generating) return;
   const btn = document.getElementById("btn-generate");
   const progressText = document.getElementById("progress-text");
@@ -375,16 +377,23 @@ async function startGeneration(indices) {
       bad.push("#" + lineNo + " " + line.character);
     }
   });
-  if (bad.length) {
+  if (!srtOnly && bad.length) {
     progressText.textContent = "以下角色不存在，无法生成：" + bad.slice(0, 5).join("、") + (bad.length > 5 ? " 等" + bad.length + " 条" : "");
     progressText.className = "status-text error";
     progressText.classList.remove("hidden");
+    const srtBtn = document.getElementById("btn-srt-only");
+    if (srtBtn) {
+      srtBtn.classList.remove("hidden");
+      srtBtn.onclick = () => startGeneration(indices, true);
+    }
     return;
   }
   btn.disabled = true;
   btn.textContent = "生成中...";
   state.generating = true;
   setLineButtonsDisabled(true);
+  const srtBtn = document.getElementById("btn-srt-only");
+  if (srtBtn) srtBtn.classList.add("hidden");
   progressText.classList.remove("hidden");
   let barWrap = document.querySelector(".progress-bar-wrap");
   if (!barWrap) {
@@ -395,7 +404,10 @@ async function startGeneration(indices) {
   }
   const barFill = barWrap.querySelector(".progress-bar-fill");
   try {
-    const body = indices ? JSON.stringify({ indices }) : JSON.stringify({});
+    const payload = {};
+    if (indices) payload.indices = indices;
+    if (srtOnly) payload.srt_only = true;
+    const body = JSON.stringify(payload);
     await api("/api/generate", { method: "POST", body });
     pollProgress(btn, progressText, barFill);
   } catch (e) {
@@ -425,7 +437,10 @@ async function pollProgress(btn, progressText, barFill) {
     }
     if (!p.generating && p.merged_path) {
       const failCount = Object.keys(p.failures || {}).length;
-      if (failCount > 0) {
+      if (p.srt_only) {
+        progressText.textContent = "生成完成：仅生成 SRT 字幕";
+        progressText.className = "status-text success";
+      } else if (failCount > 0) {
         progressText.textContent = "生成完成：语音 " + p.generated_count + " 条，另有 " + failCount + " 条仅保留字幕";
         progressText.className = "status-text success";
       } else if (p.generated_count > 0) {

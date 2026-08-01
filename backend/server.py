@@ -448,7 +448,7 @@ def create_app(config_path="config.yaml"):
             if state["generated"].get(all_indices[idx]) and Path(wav_path).exists():
                 continue
             text = merged_lines[idx].get("translated_text") or merged_lines[idx]["text"]
-            if merged_lines[idx].get("character") == "旁白":
+            if merged_lines[idx].get("character") == "旁白" or state.get("srt_only"):
                 seconds = narration_seconds(text)
             else:
                 seconds = max(1.2, min(6.0, len(text or "") * 0.32 + 0.6))
@@ -493,8 +493,10 @@ def create_app(config_path="config.yaml"):
         indices = [i for i in indices if isinstance(i, int) and 0 <= i < len(state["lines"])]
         if not indices:
             return jsonify({"error": "没有可生成的台词"}), 400
+        srt_only = bool(data.get("srt_only"))
 
         state["generating"] = True
+        state["srt_only"] = srt_only
         state["progress"] = {"current": 0, "total": len(indices)}
         state["failures"] = {}
         state["error"] = None
@@ -504,6 +506,10 @@ def create_app(config_path="config.yaml"):
 
         def generate_worker():
             try:
+                if srt_only:
+                    state["progress"]["current"] = state["progress"]["total"]
+                    finalize_output()
+                    return
                 engine = get_engine(
                     config["gptsovits_path"],
                     project_root=project_root,
@@ -631,6 +637,7 @@ def create_app(config_path="config.yaml"):
             "error": state.get("error"),
             "merged_path": state.get("merged_path"),
             "srt_path": state.get("srt_path"),
+            "srt_only": bool(state.get("srt_only")),
         })
 
     @app.route("/api/download/<path:file_type>", methods=["GET"])
