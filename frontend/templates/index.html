@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
-<link rel="stylesheet" href="/static/style.css?v=20260803">
+<link rel="stylesheet" href="/static/style.css?v=20260805">
 <style>
 .creator-tip {
   position: fixed;
@@ -191,7 +191,35 @@
           <p class="bg-disclaimer">背景图片版权归原作者所有，仅供本地个人创作使用，请勿用于商业发布或未经授权的公开传播。</p>
         </div>      </div>
     </section>
-        <section class="panel side-panel">
+                <section class="panel side-panel">
+      <div class="panel-header"><h2>模型配置</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-models" title="收起面板">▾</button></div>
+      <div class="panel-body">
+        <div class="side-section">
+          <h3 class="side-section-title">已有模型</h3>
+          <div id="model-list" class="model-list"><div class="model-empty">加载中...</div></div>
+        </div>
+        <div class="side-section">
+          <h3 class="side-section-title">新增模型</h3>
+          <div class="api-field">
+            <label for="model-name">激活词</label>
+            <input type="text" id="model-name" placeholder="例如 丰川祥子" autocomplete="off">
+          </div>
+          <div class="api-field">
+            <label for="model-gpt">GPT 权重</label>
+            <select id="model-gpt"></select>
+          </div>
+          <div class="api-field">
+            <label for="model-sovits">SoVITS 权重</label>
+            <select id="model-sovits"></select>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="btn-model-add" class="btn-secondary btn-small btn-flex">添加模型</button>
+          </div>
+          <span id="model-config-status" class="status-text"></span>
+        </div>
+      </div>
+    </section>
+<section class="panel side-panel">
       <div class="panel-header"><h2>部署</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-deploy" title="收起面板">▾</button></div>
       <div class="panel-body deploy-body">
         <div id="deploy-question">
@@ -276,7 +304,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260803"></script>
+<script src="/static/app.js?v=20260805"></script>
 <script>
 (function () {
   var tips = [

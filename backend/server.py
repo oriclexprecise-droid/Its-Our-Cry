@@ -30,6 +30,57 @@ from .feedback import read_events, record_event
 DEFAULT_INTERVAL = 0.5
 
 
+def _user_models_path(project_root):
+    return project_root / "user_models.json"
+
+
+def _load_user_models(project_root):
+    path = _user_models_path(project_root)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_user_models(project_root, models):
+    path = _user_models_path(project_root)
+    path.write_text(json.dumps(models, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _scan_model_files(project_root, gs_path):
+    gpt_map, sovits_map = {}, {}
+    roots = []
+    if gs_path:
+        roots.append(Path(gs_path).resolve())
+    roots.append(project_root)
+    for root in roots:
+        for sub, ext in (("GPT_weights_v2ProPlus", ".ckpt"), ("SoVITS_weights_v2ProPlus", ".pth")):
+            folder = root / sub
+            if folder.is_dir():
+                for f in sorted(folder.iterdir()):
+                    if f.is_file() and f.suffix.lower() == ext:
+                        target = gpt_map if ext == ".ckpt" else sovits_map
+                        if f.name not in target:
+                            target[f.name] = str(f)
+    return {"gpt": list(gpt_map.values()), "sovits": list(sovits_map.values())}
+
+
+def _resolve_model_path(model_base, rel):
+    p = Path(str(rel).strip())
+    return p if p.is_absolute() else (model_base / p)
+
+
+def _model_store_value(model_base, abs_path):
+    abs_path = Path(abs_path)
+    try:
+        return abs_path.relative_to(model_base).as_posix()
+    except ValueError:
+        return str(abs_path)
+
+
 def _runtime_python_for(config):
     gs = str(config.get("gptsovits_path") or "").strip()
     if gs:
@@ -95,6 +146,12 @@ def create_app(config_path="config.yaml"):
     config["output_dir"] = str(project_root / config["output_dir"])
     # 打包版不携带 GPT-SoVITS 时，角色权重随程序放在项目目录内
     model_base = Path(gs_path) if gs_path else project_root
+    # 用户自建模型（user_models.json）合并进角色表，与内置模型共用同一套解析
+    user_models = _load_user_models(project_root)
+    builtin_names = set(config["characters"].keys())
+    for name, cfg in user_models.items():
+        if name not in config["characters"]:
+            config["characters"][name] = dict(cfg)
     for char_name, char_cfg in config["characters"].items():
         char_cfg["ref_audio_dir"] = str(project_root / char_cfg["ref_audio_dir"])
         char_cfg["model_rel"] = str(char_cfg["model"]).replace("\\", "/")
@@ -158,6 +215,71 @@ def create_app(config_path="config.yaml"):
         if "gptsovits_path" in data:
             config["gptsovits_path"] = str(data["gptsovits_path"] or "").strip()
         _persist_user_settings(project_root, config)
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/models", methods=["GET"])
+    def list_models():
+        items = []
+        for name, cfg in config["characters"].items():
+            items.append({
+                "name": name,
+                "model_rel": cfg.get("model_rel") or "",
+                "gpt_model_rel": cfg.get("gpt_model_rel") or "",
+                "ref_audio_dir": cfg.get("ref_audio_dir") or "",
+                "source": "builtin" if name in builtin_names else "user",
+            })
+        return jsonify({"models": items})
+
+    @app.route("/api/models/available", methods=["GET"])
+    def available_models():
+        return jsonify(_scan_model_files(project_root, gs_path))
+
+    @app.route("/api/models", methods=["POST"])
+    def add_model():
+        data = request.get_json() or {}
+        name = str(data.get("name") or "").strip()
+        gpt_model = str(data.get("gpt_model") or "").strip()
+        model = str(data.get("model") or "").strip()
+        if not name or name == "旁白":
+            return jsonify({"error": "激活词不能为空且不能是“旁白”"}), 400
+        if name in config["characters"]:
+            return jsonify({"error": "激活词“" + name + "”已存在"}), 400
+        gpt_path = _resolve_model_path(model_base, gpt_model)
+        sovits_path = _resolve_model_path(model_base, model)
+        if not gpt_path.exists() or not sovits_path.exists():
+            return jsonify({"error": "权重文件不存在，请重新选择"}), 400
+
+        ref_rel = "reference_audio/" + name
+        ref_dir = project_root / ref_rel
+        try:
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            for emotion in config.get("emotions", []):
+                (ref_dir / emotion).mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return jsonify({"error": "创建参考音频目录失败: " + str(e)}), 500
+
+        user_models[name] = {
+            "model": _model_store_value(model_base, sovits_path),
+            "gpt_model": _model_store_value(model_base, gpt_path),
+            "ref_audio_dir": ref_rel,
+        }
+        _save_user_models(project_root, user_models)
+        char_cfg = dict(user_models[name])
+        char_cfg["ref_audio_dir"] = str(ref_dir)
+        char_cfg["model_rel"] = str(char_cfg["model"]).replace("\\", "/")
+        char_cfg["model"] = str(_resolve_model_path(model_base, char_cfg["model"]))
+        char_cfg["gpt_model_rel"] = str(char_cfg.get("gpt_model") or "").replace("\\", "/")
+        char_cfg["gpt_model"] = str(_resolve_model_path(model_base, char_cfg["gpt_model"]))
+        config["characters"][name] = char_cfg
+        return jsonify({"status": "ok", "name": name})
+
+    @app.route("/api/models/<path:name>", methods=["DELETE"])
+    def delete_model(name):
+        if name not in user_models:
+            return jsonify({"error": "内置模型不能删除或模型不存在"}), 400
+        user_models.pop(name, None)
+        config["characters"].pop(name, None)
+        _save_user_models(project_root, user_models)
         return jsonify({"status": "ok"})
 
     @app.route("/api/settings/narration", methods=["PUT"])

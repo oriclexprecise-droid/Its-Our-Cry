@@ -1086,6 +1086,7 @@ initBackgroundSettings();
 function initPanelCollapse() {
   const specs = [
     { btn: "btn-collapse-settings", key: "mygo_panel_settings_collapsed" },
+    { btn: "btn-collapse-models", key: "mygo_panel_models_collapsed" },
     { btn: "btn-collapse-deploy", key: "mygo_panel_deploy_collapsed" },
     { btn: "btn-collapse-log", key: "mygo_panel_log_collapsed" },
     { btn: "btn-collapse-legal", key: "mygo_panel_legal_collapsed" }
@@ -1334,5 +1335,121 @@ async function initBackgroundSettings() {
   }
 }
 
+async function loadModels() {
+  const listEl = document.getElementById("model-list");
+  if (!listEl) return;
+  try {
+    const data = await api("/api/models");
+    const models = data.models || [];
+    listEl.innerHTML = "";
+    if (!models.length) {
+      listEl.innerHTML = '<div class="model-empty">暂无模型</div>';
+      return;
+    }
+    models.forEach(m => {
+      const item = document.createElement("div");
+      item.className = "model-item";
+      const head = document.createElement("div");
+      head.className = "model-item-head";
+      const nameEl = document.createElement("span");
+      nameEl.className = "model-item-name";
+      nameEl.textContent = "激活词：" + m.name + "（" + (m.source === "user" ? "自建" : "内置") + "）";
+      head.appendChild(nameEl);
+      if (m.source === "user") {
+        const del = document.createElement("button");
+        del.className = "btn-secondary btn-small";
+        del.textContent = "删除";
+        del.addEventListener("click", () => deleteModel(m.name));
+        head.appendChild(del);
+      }
+      item.appendChild(head);
+      const files = document.createElement("div");
+      files.className = "model-item-files";
+      files.textContent = "GPT: " + modelFileName(m.gpt_model_rel) + "\nSoVITS: " + modelFileName(m.model_rel);
+      item.appendChild(files);
+      listEl.appendChild(item);
+    });
+  } catch (e) {
+    listEl.innerHTML = '<div class="model-empty">加载失败: ' + e.message + '</div>';
+  }
+}
+
+function modelFileName(p) {
+  if (!p) return "-";
+  return p.split("/").pop().split("\\").pop();
+}
+
+function fillModelSelect(sel, items) {
+  sel.innerHTML = "";
+  if (!items.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "未找到权重文件";
+    sel.appendChild(opt);
+    return;
+  }
+  items.forEach(v => {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = modelFileName(v);
+    sel.appendChild(opt);
+  });
+}
+
+async function loadAvailableModels() {
+  const gptSel = document.getElementById("model-gpt");
+  const sovitsSel = document.getElementById("model-sovits");
+  if (!gptSel || !sovitsSel) return;
+  try {
+    const data = await api("/api/models/available");
+    fillModelSelect(gptSel, data.gpt || []);
+    fillModelSelect(sovitsSel, data.sovits || []);
+  } catch (e) {}
+}
+
+async function addModel() {
+  const name = document.getElementById("model-name").value.trim();
+  const gpt = document.getElementById("model-gpt").value;
+  const sovits = document.getElementById("model-sovits").value;
+  const status = document.getElementById("model-config-status");
+  if (!name || !gpt || !sovits) {
+    status.textContent = "请填写激活词并选择两组权重";
+    status.className = "status-text error";
+    return;
+  }
+  status.textContent = "正在添加...";
+  status.className = "status-text";
+  try {
+    await api("/api/models", { method: "POST", body: JSON.stringify({ name, gpt_model: gpt, model: sovits }) });
+    document.getElementById("model-name").value = "";
+    status.textContent = "模型已添加";
+    status.className = "status-text success";
+    await loadModels();
+    await loadConfig();
+  } catch (e) {
+    status.textContent = "添加失败: " + e.message;
+    status.className = "status-text error";
+  }
+}
+
+async function deleteModel(name) {
+  if (!confirm("确定删除模型“" + name + "”吗？")) return;
+  try {
+    await api("/api/models/" + encodeURIComponent(name), { method: "DELETE" });
+    await loadModels();
+    await loadConfig();
+  } catch (e) {
+    alert("删除失败: " + e.message);
+  }
+}
+
+function initModelConfig() {
+  const addBtn = document.getElementById("btn-model-add");
+  if (addBtn) addBtn.addEventListener("click", addModel);
+  loadModels();
+  loadAvailableModels();
+}
+
 initAIConfig();
 initNarrationConfig();
+initModelConfig();

@@ -295,6 +295,13 @@ textarea { min-height: 240px; line-height: 1.6; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #1a4a7a; border-radius: 5px; }
 ::-webkit-scrollbar-track { background: #0f3460; }
+.model-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.model-item { padding: 8px 10px; background: rgba(15, 52, 96, 0.45); border: 1px solid #1a4a7a; border-radius: 6px; font-size: 12px; }
+.model-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.model-item-name { color: #8ab4f8; font-weight: 600; }
+.model-item-files { color: #a9b8d8; word-break: break-all; line-height: 1.5; margin-top: 2px; }
+.model-empty { color: #8899aa; font-size: 12px; padding: 8px 0; }
+.model-item .btn-secondary { padding: 3px 8px; font-size: 11px; }
 .log-body { padding: 12px; }
 .log-view {
   height: 220px;
