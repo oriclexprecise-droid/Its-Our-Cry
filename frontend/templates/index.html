@@ -13,7 +13,7 @@
   z-index: 60;
   max-width: min(430px, calc(100vw - 240px));
   color: rgba(222, 233, 255, 0.92);
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1.6;
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8);
   pointer-events: none;
@@ -291,15 +291,15 @@
   var el = document.getElementById("creator-tip");
   if (!el || !tips.length) return;
   var index = Math.floor(Math.random() * tips.length);
-  el.textContent = tips[index];
+  el.textContent = "——Tips：" + tips[index];
   setInterval(function () {
     el.classList.add("tip-fade");
     setTimeout(function () {
       index = (index + 1) % tips.length;
-      el.textContent = tips[index];
+      el.textContent = "——Tips：" + tips[index];
       el.classList.remove("tip-fade");
     }, 450);
-  }, 6500);
+  }, 15000);
 })();
 </script>
 </body>
