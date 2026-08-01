@@ -21,19 +21,24 @@ async function loadConfig() {
   const savedAi = loadAIConfigFromStorage();
   if (savedAi) {
     applyAIConfig(savedAi);
-  } else {
-    if (cfg.deepseek) {
-      document.getElementById("ai-name").value = "DeepSeek";
-      document.getElementById("ai-base-url").value = cfg.deepseek.base_url || "";
-      document.getElementById("ai-model").value = cfg.deepseek.model || "";
-    }
-    if (cfg.has_api_key) {
-      try {
-        const keyData = await api("/api/config/api_key");
-        if (keyData.api_key_preview) {
-          document.getElementById("api-key").placeholder = "已保存 " + keyData.api_key_preview;
-        }
-      } catch (e) {}
+  } else if (cfg.deepseek) {
+    document.getElementById("ai-name").value = cfg.deepseek.name || "DeepSeek";
+    document.getElementById("ai-base-url").value = cfg.deepseek.base_url || "";
+    document.getElementById("ai-model").value = cfg.deepseek.model || "";
+  }
+  if (cfg.has_api_key) {
+    try {
+      const keyData = await api("/api/config/api_key");
+      if (keyData.api_key_preview) {
+        document.getElementById("api-key").placeholder = "已保存 " + keyData.api_key_preview;
+      }
+    } catch (e) {}
+  }
+  if (cfg.dpapi_ok === false) {
+    const status = document.getElementById("ai-config-status");
+    if (status) {
+      status.textContent = "注意：当前系统无法加密保存 API Key，密钥不会写入本地文件";
+      status.className = "status-text error";
     }
   }
 }
@@ -1219,15 +1224,13 @@ function applyAIConfig(cfg) {
   document.getElementById("ai-name").value = cfg.name || "";
   document.getElementById("ai-base-url").value = cfg.base_url || "";
   document.getElementById("ai-model").value = cfg.model || "";
-  if (cfg.api_key) document.getElementById("api-key").value = cfg.api_key;
 }
 
 function saveAIConfigToStorage() {
   const cfg = {
     name: document.getElementById("ai-name").value.trim(),
     base_url: document.getElementById("ai-base-url").value.trim(),
-    model: document.getElementById("ai-model").value.trim(),
-    api_key: document.getElementById("api-key").value.trim()
+    model: document.getElementById("ai-model").value.trim()
   };
   localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(cfg));
   return cfg;
@@ -1301,11 +1304,24 @@ function initAIConfig() {
     status.textContent = "已填入 DeepSeek 预设";
     status.className = "status-text success";
   });
-  document.getElementById("btn-save-ai-config").addEventListener("click", () => {
+  document.getElementById("btn-save-ai-config").addEventListener("click", async () => {
     saveAIConfigToStorage();
     const status = document.getElementById("ai-config-status");
-    status.textContent = "配置已保存";
-    status.className = "status-text success";
+    try {
+      const payload = {
+        deepseek_base_url: document.getElementById("ai-base-url").value.trim(),
+        deepseek_model: document.getElementById("ai-model").value.trim(),
+        deepseek_name: document.getElementById("ai-name").value.trim()
+      };
+      const apiKey = document.getElementById("api-key").value.trim();
+      if (apiKey) payload.deepseek_api_key = apiKey;
+      await api("/api/config", { method: "POST", body: JSON.stringify(payload) });
+      status.textContent = "配置已保存";
+      status.className = "status-text success";
+    } catch (e) {
+      status.textContent = "保存失败: " + e.message;
+      status.className = "status-text error";
+    }
   });
   document.getElementById("btn-clear-ai-key").addEventListener("click", async () => {
     document.getElementById("api-key").value = "";

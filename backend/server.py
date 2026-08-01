@@ -118,6 +118,31 @@ def _model_store_value(model_base, abs_path):
         return str(abs_path)
 
 
+def _dpapi_encrypt(text):
+    """Encrypt a secret with Windows DPAPI, scoped to the current user."""
+    if not text:
+        return ""
+    try:
+        import base64
+        import win32crypt
+        blob = win32crypt.CryptProtectData(text.encode("utf-8"), "ItsOurCry", None, None, None, 0)
+        return "dpapi:" + base64.b64encode(bytes(blob)).decode("ascii")
+    except Exception:
+        return None
+
+
+def _dpapi_decrypt(text):
+    if not text or not text.startswith("dpapi:"):
+        return text
+    try:
+        import base64
+        import win32crypt
+        blob = base64.b64decode(text[len("dpapi:"):])
+        _, data = win32crypt.CryptUnprotectData(blob, None, None, None, 0)
+        return bytes(data).decode("utf-8")
+    except Exception:
+        return ""
+
 def _runtime_python_for(config):
     gs = str(config.get("gptsovits_path") or "").strip()
     if gs:
@@ -128,16 +153,27 @@ def _runtime_python_for(config):
 
 
 def _persist_user_settings(project_root, config):
-    """把用户本地设置写到 user_settings.json（不污染仓库 config.yaml）。"""
+    """Write user settings; API key is encrypted with DPAPI before saving."""
     try:
-        settings = {
-            "deepseek_api_key": config["deepseek"].get("api_key", ""),
-            "gptsovits_path": config.get("gptsovits_path", ""),
-        }
-        (project_root / "user_settings.json").write_text(
-            json.dumps(settings, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        settings_path = project_root / "user_settings.json"
+        settings = {}
+        if settings_path.exists():
+            try:
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            except Exception:
+                settings = {}
+        raw_key = config["deepseek"].get("api_key", "")
+        if raw_key:
+            encrypted = _dpapi_encrypt(raw_key)
+            if encrypted:
+                settings["deepseek_api_key"] = encrypted
+        else:
+            settings["deepseek_api_key"] = ""
+        settings["gptsovits_path"] = config.get("gptsovits_path", "")
+        deepseek = config.get("deepseek", {})
+        for field, key in (("base_url", "deepseek_base_url"), ("model", "deepseek_model"), ("name", "deepseek_name")):
+            settings[key] = deepseek.get(field, "")
+        settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
 
@@ -170,12 +206,19 @@ def create_app(config_path="config.yaml"):
             user_settings = json.loads(user_settings_path.read_text(encoding="utf-8"))
         except Exception:
             user_settings = {}
-    if user_settings.get("deepseek_api_key"):
-        config["deepseek"]["api_key"] = user_settings["deepseek_api_key"]
+    stored_key = user_settings.get("deepseek_api_key", "")
+    if stored_key:
+        config["deepseek"]["api_key"] = _dpapi_decrypt(stored_key)
+        if not str(stored_key).startswith("dpapi:"):
+            _persist_user_settings(project_root, config)
+    for field, key in (("base_url", "deepseek_base_url"), ("model", "deepseek_model"), ("name", "deepseek_name")):
+        if user_settings.get(key):
+            config["deepseek"][field] = user_settings[key]
     if user_settings.get("gptsovits_path"):
         config["gptsovits_path"] = user_settings["gptsovits_path"]
     if user_settings.get("narration"):
         config["narration"] = {**config.get("narration", {}), **user_settings["narration"]}
+    dpapi_ok = _dpapi_encrypt("probe") is not None
 
     # Resolve all relative paths to absolute to survive cwd changes
     gs_path = str(config.get("gptsovits_path") or "").strip()
@@ -278,7 +321,9 @@ def create_app(config_path="config.yaml"):
             "default_interval": DEFAULT_INTERVAL,
             "narration": config.get("narration", {}),
             "gptsovits_path": config["gptsovits_path"],
+            "dpapi_ok": dpapi_ok,
             "deepseek": {
+                "name": config["deepseek"].get("name", "DeepSeek"),
                 "base_url": config["deepseek"].get("base_url", "https://api.deepseek.com"),
                 "model": config["deepseek"].get("model", "deepseek-v4-flash"),
             },
@@ -298,6 +343,9 @@ def create_app(config_path="config.yaml"):
         data = request.get_json()
         if "deepseek_api_key" in data:
             config["deepseek"]["api_key"] = data["deepseek_api_key"]
+        for field, key in (("base_url", "deepseek_base_url"), ("model", "deepseek_model"), ("name", "deepseek_name")):
+            if key in data:
+                config["deepseek"][field] = data[key]
         if "gptsovits_path" in data:
             config["gptsovits_path"] = str(data["gptsovits_path"] or "").strip()
         _persist_user_settings(project_root, config)
@@ -705,10 +753,11 @@ def create_app(config_path="config.yaml"):
 
         def generate_worker():
             try:
+                worker_script = project_root / "backend" / "tts_worker.py"
                 engine = get_engine(
                     config["gptsovits_path"],
                     project_root=project_root,
-                    worker_script=str(project_root / "backend" / "tts_worker.py"),
+                    worker_script=str(worker_script) if worker_script.exists() else None,
                 )
                 engine.load()
 

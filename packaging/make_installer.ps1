@@ -16,6 +16,14 @@ New-Item -ItemType Directory -Force -Path (Join-Path $payloadDir 'app') | Out-Nu
 
 Write-Host '== 组装安装包载荷 =='
 Copy-Item (Join-Path $releaseApp '*') (Join-Path $payloadDir 'app') -Recurse -Force
+# 剔除运行期生成的本地数据，避免把开发者的 Key/日志/输出带进安装包
+$appPayload = Join-Path $payloadDir 'app'
+foreach ($f in @('user_settings.json','model_aliases.json','user_models.json','launcher.log','server.err.log','server.out.log','install_info.txt','backend\tts_worker.py')) {
+  Remove-Item (Join-Path $appPayload $f) -Force -ErrorAction SilentlyContinue
+}
+foreach ($d in @('output','exports','feedback','backend')) {
+  Remove-Item (Join-Path $appPayload $d) -Recurse -Force -ErrorAction SilentlyContinue
+}
 Copy-Item (Join-Path $installerDir 'setup.ps1') $payloadDir -Force
 
 if (Test-Path $archive) { Remove-Item $archive -Force }

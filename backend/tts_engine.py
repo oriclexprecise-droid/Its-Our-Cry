@@ -5,13 +5,20 @@
 这样打包版 exe 不需要携带 torch / numpy / soundfile。
 """
 
+import base64
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Optional
+
+try:
+    from ._worker_embedded import TTS_WORKER_B64
+except Exception:
+    TTS_WORKER_B64 = None
 
 
 class TTSEngine:
@@ -48,6 +55,20 @@ class TTSEngine:
         if not candidate.exists():
             raise RuntimeError("未找到 GPT-SoVITS 运行时 (runtime/python.exe)，请检查部署目录是否完整")
         return str(candidate)
+
+    def _materialize_worker_script(self):
+        """Extract the embedded worker source to a temp file for subprocess use."""
+        if not TTS_WORKER_B64:
+            return None
+        try:
+            tmp_dir = Path(tempfile.gettempdir()) / "ItsOurCryWorker"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            worker_path = tmp_dir / "tts_worker.py"
+            if not worker_path.exists():
+                worker_path.write_bytes(base64.b64decode(TTS_WORKER_B64))
+            return str(worker_path)
+        except Exception:
+            return None
 
     def load(self):
         """进程内模式加载模型（仅开发模式使用）。"""
@@ -176,7 +197,9 @@ class TTSEngine:
 
     def _synthesize_worker(self, text, ref_audio_path, output_path, **kwargs) -> float:
         if not self.worker_script or not Path(self.worker_script).exists():
-            raise RuntimeError("找不到 TTS 推理脚本: " + str(self.worker_script))
+            self.worker_script = self._materialize_worker_script()
+            if not self.worker_script:
+                raise RuntimeError("找不到 TTS 推理脚本: " + str(self.worker_script))
         if not self._current_model:
             raise RuntimeError("尚未选择角色模型")
 

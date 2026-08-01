@@ -22,6 +22,8 @@ Set-Location $root
   --hidden-import webview --hidden-import webview.platforms.edgechromium `
   --hidden-import clr_loader --hidden-import pythonnet `
   --collect-all pythonnet --collect-all clr_loader `
+  --hidden-import win32crypt --hidden-import pywintypes `
+  --key ItsOurCry2026Key! `
   launcher.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller 构建失败' }
 
@@ -29,8 +31,9 @@ Write-Host '== 整理发布目录 =='
 New-Item -ItemType Directory -Force -Path $releaseApp | Out-Null
 Copy-Item (Join-Path $root 'dist\ItsOurCry\*') $releaseApp -Recurse -Force
 Copy-Item (Join-Path $root 'frontend') $releaseApp -Recurse -Force
-New-Item -ItemType Directory -Force -Path (Join-Path $releaseApp 'backend') | Out-Null
-Copy-Item (Join-Path $root 'backend\tts_worker.py') (Join-Path $releaseApp 'backend\tts_worker.py') -Force
+# Embed tts_worker.py as base64 inside the exe; no plaintext source in release
+& $runtime\python.exe (Join-Path $PSScriptRoot 'embed_worker.py')
+if ($LASTEXITCODE -ne 0) { throw 'tts_worker embed failed' }
 Copy-Item (Join-Path $root 'GPT_weights_v2ProPlus') $releaseApp -Recurse -Force
 Copy-Item (Join-Path $root 'SoVITS_weights_v2ProPlus') $releaseApp -Recurse -Force
 Copy-Item (Join-Path $root 'reference_audio') $releaseApp -Recurse -Force
