@@ -16,11 +16,11 @@ main { flex: 1; min-width: 0; }
 header { text-align: center; margin-bottom: 32px; }
 header h1 {
   font-size: 46px;
-  color: #ff6b9d;
+  color: #8ab4f8;
   margin-bottom: 0;
   font-family: Impact, "Arial Black", "Microsoft YaHei", sans-serif;
   font-weight: 700;
-  text-shadow: 0 0 22px rgba(255,107,157,0.35);
+  text-shadow: 0 0 22px rgba(138,180,248,0.4);
 }
 .panel { background: #16213e; border-radius: 8px; margin-bottom: 20px; overflow: hidden; }
 .panel-header { background: #0f3460; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
