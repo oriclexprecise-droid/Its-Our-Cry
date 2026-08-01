@@ -17,8 +17,8 @@ from typing import Optional
 import yaml
 from flask import Flask, jsonify, render_template, request, send_file
 
-from .script_parser import parse_script
-from .emotion_analyzer import analyze_emotions
+from .script_parser import find_character_issues, parse_script
+from .emotion_analyzer import SYSTEM_PROMPT, analyze_emotions
 from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt
 from .translator import translate_lines
@@ -77,6 +77,7 @@ def create_app(config_path="config.yaml"):
         return jsonify({
             "characters": list(config["characters"].keys()),
             "emotions": config["emotions"],
+            "emotion_prompt": SYSTEM_PROMPT,
             "has_api_key": has_key,
             "default_interval": DEFAULT_INTERVAL,
             "gptsovits_path": config["gptsovits_path"],
@@ -161,11 +162,14 @@ def create_app(config_path="config.yaml"):
                     translation_map.get(line["index"], "").strip() or line["text"]
                 )
 
+        valid_chars = list(config["characters"].keys()) + ["旁白"]
+        proofread = find_character_issues(lines, valid_chars)
+
         state["lines"] = lines
         state["emotions"] = emotions
         state["lang"] = lang
 
-        return jsonify({"lines": lines})
+        return jsonify({"lines": lines, "proofread": proofread})
 
     @app.route("/api/line/<int:index>", methods=["PUT"])
     def update_line(index):

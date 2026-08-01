@@ -16,6 +16,7 @@ async function loadConfig() {
   const cfg = await api("/api/config");
   state.chars = cfg.characters;
   state.emotions = cfg.emotions;
+  state.emotionPrompt = cfg.emotion_prompt || "";
   loadDeployPath(cfg);
   const savedAi = loadAIConfigFromStorage();
   if (savedAi) {
@@ -37,7 +38,7 @@ async function loadConfig() {
   }
 }
 
-document.getElementById("btn-analyze").addEventListener("click", async () => {
+async function runAnalyze() {
   const text = document.getElementById("script-input").value.trim();
   const apiKey = document.getElementById("api-key").value.trim();
   const lang = document.getElementById("script-lang").value;
@@ -64,13 +65,66 @@ document.getElementById("btn-analyze").addEventListener("click", async () => {
     document.getElementById("btn-generate").disabled = false;
     document.getElementById("btn-generate").textContent = "生成全部语音";
     document.getElementById("progress-text").classList.add("hidden");
+    const issues = data.proofread || [];
+    if (issues.length) showProofreadModal(issues);
   } catch (e) {
     status.textContent = e.message;
     status.className = "status-text error";
   } finally {
     document.getElementById("btn-analyze").disabled = false;
   }
-});
+}
+
+document.getElementById("btn-analyze").addEventListener("click", runAnalyze);
+
+function showProofreadModal(issues) {
+  state.lastProofread = issues;
+  const modal = document.getElementById("proofread-modal");
+  const list = document.getElementById("proofread-list");
+  if (!modal || !list) return;
+  list.innerHTML = issues.map(it => {
+    const arrow = '<span class="proofread-arrow">→</span>';
+    const value = esc(it.suggestion || it.name);
+    return '<div class="proofread-item"><span class="proofread-line">第 ' + it.line_no + ' 行</span><span class="proofread-bad">' + esc(it.name) + '</span>' + arrow
+      + '<input type="text" class="proofread-input" data-line="' + it.line_no + '" data-name="' + esc(it.name) + '" value="' + value + '" placeholder="请输入正确角色名">'
+      + '</div>';
+  }).join("");
+  document.getElementById("proofread-summary").textContent = "发现 " + issues.length + " 个不存在的角色，请确认或修改角色名：";
+  modal.classList.remove("hidden");
+}
+
+const proofreadModalEl = document.getElementById("proofread-modal");
+if (proofreadModalEl) {
+  document.getElementById("btn-proofread-ignore").addEventListener("click", () => {
+    proofreadModalEl.classList.add("hidden");
+  });
+
+  document.getElementById("btn-proofread-fix").addEventListener("click", () => {
+    const rawLines = document.getElementById("script-input").value.split("\n");
+    const fixedChars = {};
+    document.querySelectorAll("#proofread-list .proofread-input").forEach(input => {
+      const lineNo = parseInt(input.dataset.line, 10);
+      const name = input.dataset.name || "";
+      const suggestion = input.value.trim();
+      if (!suggestion || lineNo < 1 || lineNo > rawLines.length) return;
+      const idx = lineNo - 1;
+      const old = rawLines[idx];
+      if (!old.includes(name)) return;
+      rawLines[idx] = old.replace(name, suggestion, 1);
+      fixedChars[name] = suggestion;
+    });
+    document.getElementById("script-input").value = rawLines.join("\n");
+    if (state.lines && state.lines.length) {
+      state.lines.forEach(line => {
+        if (fixedChars[line.character]) line.character = fixedChars[line.character];
+      });
+      renderLines();
+    }
+    const status = document.getElementById("analyze-status");
+    if (status) { status.textContent = "已修正角色名，保留原分析结果"; status.className = "status-text success"; }
+    proofreadModalEl.classList.add("hidden");
+  });
+}
 
 function renderLines() {
   if (audioPlayer) { audioPlayer.pause(); }
@@ -1009,6 +1063,18 @@ function initPanelCollapse() {
   });
 }
 initPanelCollapse();
+
+const promptModalEl = document.getElementById("prompt-modal");
+if (promptModalEl) {
+  document.getElementById("btn-view-prompt").addEventListener("click", () => {
+    const content = document.getElementById("prompt-content");
+    if (content) content.textContent = state.emotionPrompt || "暂无指令内容";
+    promptModalEl.classList.remove("hidden");
+  });
+  document.getElementById("btn-prompt-close").addEventListener("click", () => {
+    promptModalEl.classList.add("hidden");
+  });
+}
 const DEEPSEEK_PRESET = { name: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-v4-pro" };
 const AI_CONFIG_KEY = "mygo_ai_config";
 
