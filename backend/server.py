@@ -65,7 +65,13 @@ def _scan_model_files(project_root, gs_path):
                         target = gpt_map if ext == ".ckpt" else sovits_map
                         if f.name not in target:
                             target[f.name] = str(f)
-    return {"gpt": list(gpt_map.values()), "sovits": list(sovits_map.values())}
+    gpt_by_stem = {Path(name).stem: path for name, path in gpt_map.items()}
+    sovits_by_stem = {Path(name).stem: path for name, path in sovits_map.items()}
+    stems = sorted(set(gpt_by_stem) & set(sovits_by_stem), key=str.lower)
+    pairs = [{"name": stem, "gpt": gpt_by_stem[stem], "sovits": sovits_by_stem[stem]} for stem in stems]
+    gpt_only = [gpt_by_stem[s] for s in sorted(set(gpt_by_stem) - set(sovits_by_stem), key=str.lower)]
+    sovits_only = [sovits_by_stem[s] for s in sorted(set(sovits_by_stem) - set(gpt_by_stem), key=str.lower)]
+    return {"gpt": list(gpt_map.values()), "sovits": list(sovits_map.values()), "pairs": pairs, "gpt_only": gpt_only, "sovits_only": sovits_only}
 
 
 def _resolve_model_path(model_base, rel):
@@ -168,6 +174,8 @@ def create_app(config_path="config.yaml"):
         "merged_path": None,
         "srt_path": None,
         "generating": False,
+        "cancel_requested": False,
+        "cancelled": False,
         "progress": {"current": 0, "total": 0},
         "failures": {},
         "time_info": [],
@@ -619,6 +627,8 @@ def create_app(config_path="config.yaml"):
         srt_only = bool(data.get("srt_only"))
 
         state["generating"] = True
+        state["cancel_requested"] = False
+        state["cancelled"] = False
         state["srt_only"] = srt_only
         state["progress"] = {"current": 0, "total": len(indices)}
         state["failures"] = {}
@@ -653,6 +663,8 @@ def create_app(config_path="config.yaml"):
                     )
 
                 for char, idx_list in char_groups.items():
+                    if state["cancel_requested"]:
+                        break
                     if char not in config["characters"]:
                         if char == "旁白" or srt_only:
                             for idx in idx_list:
@@ -670,6 +682,8 @@ def create_app(config_path="config.yaml"):
                         continue
 
                     for idx in idx_list:
+                        if state["cancel_requested"]:
+                            break
                         line = state["lines"][idx]
                         emotion = line.get("emotion", "thinking")
                         ref_audio = pick_ref_audio(char, emotion)
@@ -709,7 +723,19 @@ def create_app(config_path="config.yaml"):
                         }
                         state["progress"]["current"] += 1
 
-                finalize_output()
+                if state["cancel_requested"]:
+                    state["cancelled"] = True
+                    for idx in indices:
+                        gen = state["generated"].pop(idx, None)
+                        if gen:
+                            try:
+                                path = Path(gen["path"])
+                                if path.exists():
+                                    path.unlink()
+                            except Exception:
+                                pass
+                else:
+                    finalize_output()
             except Exception as e:
                 traceback.print_exc()
                 state["error"] = str(e)
@@ -718,6 +744,13 @@ def create_app(config_path="config.yaml"):
 
         threading.Thread(target=generate_worker, daemon=True).start()
         return jsonify({"status": "started", "total": len(indices)})
+
+    @app.route("/api/generate/cancel", methods=["POST"])
+    def cancel_generate():
+        if not state["generating"]:
+            return jsonify({"status": "ok", "already_stopped": True})
+        state["cancel_requested"] = True
+        return jsonify({"status": "cancelling"})
 
     @app.route("/api/segment/<int:index>", methods=["GET"])
     def get_segment(index):
@@ -757,6 +790,8 @@ def create_app(config_path="config.yaml"):
             "merged_path": state.get("merged_path"),
             "srt_path": state.get("srt_path"),
             "srt_only": bool(state.get("srt_only")),
+            "cancel_requested": bool(state.get("cancel_requested")),
+            "cancelled": bool(state.get("cancelled")),
         })
 
     @app.route("/api/download/<path:file_type>", methods=["GET"])

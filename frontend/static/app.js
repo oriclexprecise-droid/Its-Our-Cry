@@ -74,6 +74,8 @@ async function runAnalyze() {
     document.getElementById("btn-merge").classList.add("hidden");
     document.getElementById("btn-generate").disabled = false;
     document.getElementById("btn-generate").textContent = "生成全部语音";
+    const cancelBtnReset = document.getElementById("btn-cancel-generate");
+    if (cancelBtnReset) cancelBtnReset.classList.add("hidden");
     document.getElementById("progress-text").classList.add("hidden");
     const issues = data.proofread || [];
     if (issues.length) showProofreadModal(issues);
@@ -365,6 +367,19 @@ document.getElementById("btn-apply-interval").addEventListener("click", async ()
 
 document.getElementById("btn-generate").addEventListener("click", () => startGeneration());
 
+document.getElementById("btn-cancel-generate").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-cancel-generate");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = "正在取消...";
+  try {
+    await api("/api/generate/cancel", { method: "POST" });
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "取消生成";
+  }
+});
+
 async function startGeneration(indices, srtOnly) {
   if (state.generating) return;
   const btn = document.getElementById("btn-generate");
@@ -392,6 +407,12 @@ async function startGeneration(indices, srtOnly) {
   btn.textContent = "生成中...";
   state.generating = true;
   setLineButtonsDisabled(true);
+  const cancelBtn = document.getElementById("btn-cancel-generate");
+  if (cancelBtn) {
+    cancelBtn.classList.remove("hidden");
+    cancelBtn.disabled = false;
+    cancelBtn.textContent = "取消生成";
+  }
   const srtBtn = document.getElementById("btn-srt-only");
   if (srtBtn) srtBtn.classList.add("hidden");
   progressText.classList.remove("hidden");
@@ -417,6 +438,8 @@ async function startGeneration(indices, srtOnly) {
     btn.textContent = "生成全部语音";
     state.generating = false;
     setLineButtonsDisabled(false);
+    const cancelBtnCatch = document.getElementById("btn-cancel-generate");
+    if (cancelBtnCatch) cancelBtnCatch.classList.add("hidden");
   }
 }
 
@@ -433,7 +456,23 @@ async function pollProgress(btn, progressText, barFill) {
       progressText.textContent = "错误: " + p.error;
       progressText.className = "status-text error";
       btn.disabled = false; btn.textContent = "生成全部语音"; state.generating = false;
+      const cancelBtnErr = document.getElementById("btn-cancel-generate");
+      if (cancelBtnErr) cancelBtnErr.classList.add("hidden");
       setLineButtonsDisabled(false); renderLines(); refreshGenerated(p); return;
+    }
+    if (p.cancelled) {
+      progressText.textContent = "已取消：本次生成已清理，可重新生成";
+      progressText.className = "status-text";
+      btn.disabled = false; btn.textContent = "重新生成"; state.generating = false;
+      const cancelBtnDone = document.getElementById("btn-cancel-generate");
+      if (cancelBtnDone) { cancelBtnDone.classList.add("hidden"); cancelBtnDone.disabled = false; }
+      setLineButtonsDisabled(false); renderLines(); refreshGenerated(p); return;
+    }
+    if (p.cancel_requested) {
+      progressText.textContent = "正在取消...";
+      progressText.className = "status-text";
+      setTimeout(() => pollProgress(btn, progressText, barFill), 800);
+      return;
     }
     if (!p.generating && p.merged_path) {
       const failCount = Object.keys(p.failures || {}).length;
@@ -448,6 +487,8 @@ async function pollProgress(btn, progressText, barFill) {
         progressText.className = "status-text success";
       }
       btn.textContent = "重新生成"; btn.disabled = false; state.generating = false;
+      const cancelBtnFinish = document.getElementById("btn-cancel-generate");
+      if (cancelBtnFinish) cancelBtnFinish.classList.add("hidden");
       setLineButtonsDisabled(false); renderLines(); refreshGenerated(p);
       document.getElementById("step-download").classList.remove("hidden");
       return;
@@ -1379,41 +1420,41 @@ function modelFileName(p) {
   return p.split("/").pop().split("\\").pop();
 }
 
-function fillModelSelect(sel, items) {
+function fillModelPairSelect(sel, pairs) {
   sel.innerHTML = "";
-  if (!items.length) {
+  if (!pairs.length) {
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = "未找到权重文件";
+    opt.textContent = "未找到同名配对权重";
     sel.appendChild(opt);
     return;
   }
-  items.forEach(v => {
+  pairs.forEach(p => {
     const opt = document.createElement("option");
-    opt.value = v;
-    opt.textContent = modelFileName(v);
+    opt.value = p.gpt + "|||" + p.sovits;
+    opt.textContent = p.name;
     sel.appendChild(opt);
   });
 }
 
 async function loadAvailableModels() {
-  const gptSel = document.getElementById("model-gpt");
-  const sovitsSel = document.getElementById("model-sovits");
-  if (!gptSel || !sovitsSel) return;
+  const pairSel = document.getElementById("model-pair");
+  if (!pairSel) return;
   try {
     const data = await api("/api/models/available");
-    fillModelSelect(gptSel, data.gpt || []);
-    fillModelSelect(sovitsSel, data.sovits || []);
+    fillModelPairSelect(pairSel, data.pairs || []);
   } catch (e) {}
 }
 
 async function addModel() {
   const name = document.getElementById("model-name").value.trim();
-  const gpt = document.getElementById("model-gpt").value;
-  const sovits = document.getElementById("model-sovits").value;
+  const pairVal = document.getElementById("model-pair").value;
   const status = document.getElementById("model-config-status");
+  const sep = pairVal.indexOf("|||");
+  const gpt = sep >= 0 ? pairVal.slice(0, sep) : "";
+  const sovits = sep >= 0 ? pairVal.slice(sep + 3) : "";
   if (!name || !gpt || !sovits) {
-    status.textContent = "请填写激活词并选择两组权重";
+    status.textContent = "请填写激活词并选择同名配对权重";
     status.className = "status-text error";
     return;
   }

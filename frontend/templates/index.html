@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
-<link rel="stylesheet" href="/static/style.css?v=20260805">
+<link rel="stylesheet" href="/static/style.css?v=20260806">
 <style>
 .creator-tip {
   position: fixed;
@@ -91,6 +91,7 @@
         </div>
         <div class="review-actions">
           <button id="btn-generate" class="btn-primary">生成全部语音</button>
+          <button id="btn-cancel-generate" class="btn-secondary btn-small hidden">取消生成</button>
           <button id="btn-merge" class="btn-primary hidden">合并音频并生成字幕</button>
           <button id="btn-srt-only" class="btn-secondary btn-small hidden">只生成 SRT 字幕</button>
           <span id="progress-text" class="status-text hidden"></span>
@@ -205,12 +206,8 @@
             <input type="text" id="model-name" placeholder="例如 丰川祥子" autocomplete="off">
           </div>
           <div class="api-field">
-            <label for="model-gpt">GPT 权重</label>
-            <select id="model-gpt"></select>
-          </div>
-          <div class="api-field">
-            <label for="model-sovits">SoVITS 权重</label>
-            <select id="model-sovits"></select>
+            <label for="model-pair">权重对（GPT + SoVITS 同名自动匹配）</label>
+            <select id="model-pair"></select>
           </div>
           <div class="btn-row">
             <button type="button" id="btn-model-add" class="btn-secondary btn-small btn-flex">添加模型</button>
@@ -304,7 +301,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260805"></script>
+<script src="/static/app.js?v=20260806"></script>
 <script>
 (function () {
   var tips = [
