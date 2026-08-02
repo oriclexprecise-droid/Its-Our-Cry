@@ -628,6 +628,13 @@ def create_app(config_path="config.yaml"):
         state["lines"] = lines
         state["emotions"] = emotions
         state["lang"] = lang
+        state["generated"] = {}
+        state["time_info"] = []
+        state["merged_path"] = None
+        state["srt_path"] = None
+        state["failures"] = {}
+        state["progress"] = {"current": 0, "total": 0}
+        state["srt_only"] = False
 
         return jsonify({"lines": lines, "proofread": proofread, "skipped": skipped})
 
@@ -1082,7 +1089,7 @@ def create_app(config_path="config.yaml"):
             segments_dir = export_dir / "segments"
             segments_dir.mkdir(parents=True, exist_ok=True)
 
-            ordered_idx = sorted(state["generated"].keys())
+            ordered_idx = sorted(i for i in state["generated"].keys() if 0 <= i < len(state["lines"]))
             wav_paths = []
             merged_lines = []
             gaps = []
@@ -1095,7 +1102,7 @@ def create_app(config_path="config.yaml"):
             if not wav_paths:
                 raise RuntimeError("没有可导出的音频文件")
 
-            time_map = dict(zip(ordered_idx, state["time_info"]))
+            time_map = {idx: state["time_info"][idx] for idx in ordered_idx if idx < len(state["time_info"])}
 
             import wave
 
