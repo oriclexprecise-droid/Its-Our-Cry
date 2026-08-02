@@ -688,6 +688,21 @@ def create_app(config_path="config.yaml"):
             state["lines"][idx]["interval"] = interval
         return jsonify({"status": "ok", "updated": len(valid), "indices": valid})
 
+    @app.route("/api/lines/characters", methods=["POST"])
+    def update_lines_characters():
+        data = request.get_json() or {}
+        fixes = data.get("fixes") or {}
+        if not isinstance(fixes, dict):
+            return jsonify({"error": "无效的修正数据"}), 400
+        updated = 0
+        for line in state["lines"]:
+            old = line.get("character")
+            new = fixes.get(old)
+            if isinstance(new, str) and new.strip() and new.strip() != old:
+                line["character"] = new.strip()
+                updated += 1
+        return jsonify({"status": "ok", "updated": updated})
+
     @app.route("/api/logs", methods=["GET"])
     def get_logs():
         events = read_events(limit=200, project_root=project_root)

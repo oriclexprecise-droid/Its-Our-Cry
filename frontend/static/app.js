@@ -138,6 +138,11 @@ if (proofreadModalEl) {
       });
       renderLines();
     }
+    if (Object.keys(fixedChars).length) {
+      try {
+        await api("/api/lines/characters", { method: "POST", body: JSON.stringify({ fixes: fixedChars }) });
+      } catch (e) {}
+    }
     const status = document.getElementById("analyze-status");
     if (status) { status.textContent = "已修正角色名，保留原分析结果"; status.className = "status-text success"; }
     const fixMsg = Object.keys(fixedChars).map(name => name + " → " + fixedChars[name]).join("；");
