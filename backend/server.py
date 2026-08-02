@@ -31,6 +31,29 @@ from .cleanup import clean_items, scan_cleanable
 DEFAULT_INTERVAL = 0.5
 
 
+def _deploy_target_error(target_path, project_root):
+    """Return an error message when a deploy target could erase the app itself."""
+    try:
+        target = Path(target_path).resolve()
+        root = Path(project_root).resolve()
+        if target == root:
+            return "不能选择程序所在目录"
+        try:
+            root.relative_to(target)
+            return "不能选择程序目录的上级目录"
+        except ValueError:
+            pass
+        try:
+            target.relative_to(root)
+            return "不能选择程序目录内部的目录"
+        except ValueError:
+            pass
+    except Exception:
+        pass
+    return None
+
+
+
 DEFAULT_MODEL_ALIASES = {
     "MyGO_千早爱音_v2pp": "千早爱音",
     "MyGO_要乐奈_v2pp": "要乐奈",
@@ -1147,6 +1170,9 @@ def create_app(config_path="config.yaml"):
         data = request.get_json(silent=True) or {}
         user_path = str(data.get("gptsovits_path", "")).strip()
         if user_path:
+            guard = _deploy_target_error(user_path, project_root)
+            if guard:
+                return jsonify({"error": guard}), 400
             config["gptsovits_path"] = user_path
             _persist_user_settings(project_root, config)
         try:
@@ -1160,6 +1186,9 @@ def create_app(config_path="config.yaml"):
         data = request.get_json(silent=True) or {}
         user_path = str(data.get("gptsovits_path", "")).strip()
         if user_path:
+            guard = _deploy_target_error(user_path, project_root)
+            if guard:
+                return jsonify({"error": guard}), 400
             config["gptsovits_path"] = user_path
             _persist_user_settings(project_root, config)
         if state["deploy_install"]["running"]:
@@ -1246,6 +1275,9 @@ def create_app(config_path="config.yaml"):
         if not git:
             return jsonify({"error": "未检测到 Git，请先安装 Git for Windows"}), 400
         target_path = Path(target).resolve()
+        guard = _deploy_target_error(target_path, project_root)
+        if guard:
+            return jsonify({"error": guard}), 400
         if target_path.exists() and any(target_path.iterdir()):
             return jsonify({"error": "目标目录已存在且不为空"}), 400
         try:
@@ -1309,6 +1341,9 @@ def create_app(config_path="config.yaml"):
         if state["deploy_model_copy"]["running"]:
             return jsonify({"error": "模型复制正在进行中"}), 409
         target_root = Path(gs_path).resolve()
+        guard = _deploy_target_error(target_root, project_root)
+        if guard:
+            return jsonify({"error": guard}), 400
         source_root = project_root
         missing = []
         seen = set()
@@ -1364,6 +1399,9 @@ def create_app(config_path="config.yaml"):
         data = request.get_json(silent=True) or {}
         user_path = str(data.get("gptsovits_path", "")).strip()
         if user_path:
+            guard = _deploy_target_error(user_path, project_root)
+            if guard:
+                return jsonify({"error": guard}), 400
             config["gptsovits_path"] = user_path
             _persist_user_settings(project_root, config)
         try:
@@ -1410,6 +1448,9 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "下载正在进行中"}), 409
         try:
             target_path = Path(target).resolve()
+            guard = _deploy_target_error(target_path, project_root)
+            if guard:
+                return jsonify({"error": guard}), 400
             if target_path.exists() and any(target_path.iterdir()):
                 return jsonify({"error": "目标目录已存在且不为空"}), 400
             target_path.mkdir(parents=True, exist_ok=True)
@@ -1426,6 +1467,7 @@ def create_app(config_path="config.yaml"):
             tmp_file = None
             try:
                 log = state["deploy_download"]["log"]
+                initial_names = {p.name for p in target_path.iterdir()} if target_path.exists() else set()
                 tmp_file = target_path / "gptsovits_download.7z"
                 log.append("开始下载: " + url)
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -1488,8 +1530,12 @@ def create_app(config_path="config.yaml"):
                 log.append("已取消下载" if cancelled else ("下载失败: " + str(e)))
                 state["deploy_download"]["success"] = False
                 try:
-                    for item in target_path.iterdir():
-                        if item.name != "gptsovits_download.7z":
+                    if _deploy_target_error(target_path, project_root) is not None:
+                        log.append("安全校验失败，已停止清理，请检查目标目录")
+                    else:
+                        for item in target_path.iterdir():
+                            if item.name in initial_names or item.name == "gptsovits_download.7z":
+                                continue
                             if item.is_dir():
                                 shutil.rmtree(item, ignore_errors=True)
                             else:
@@ -1525,6 +1571,9 @@ def create_app(config_path="config.yaml"):
         if state["deploy_ffmpeg"]["running"]:
             return jsonify({"error": "ffmpeg 下载正在进行中"}), 409
         target_root = Path(gs_path).resolve()
+        guard = _deploy_target_error(target_root, project_root)
+        if guard:
+            return jsonify({"error": guard}), 400
         if not target_root.exists():
             return jsonify({"error": "GPT-SoVITS 目录不存在: " + str(target_root)}), 400
         target = target_root / "runtime" / "ffmpeg.exe"
