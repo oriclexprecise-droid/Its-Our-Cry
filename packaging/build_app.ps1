@@ -40,6 +40,7 @@ Copy-Item (Join-Path $root 'GPT_weights_v2ProPlus') $releaseApp -Recurse -Force
 Copy-Item (Join-Path $root 'SoVITS_weights_v2ProPlus') $releaseApp -Recurse -Force
 Copy-Item (Join-Path $root 'reference_audio') $releaseApp -Recurse -Force
 Copy-Item (Join-Path $root 'picture') $releaseApp -Recurse -Force
+Copy-Item (Join-Path $PSScriptRoot 'tools\7z') (Join-Path $releaseApp 'tools\7z') -Recurse -Force
 Copy-Item (Join-Path $PSScriptRoot 'release_config.yaml') (Join-Path $releaseApp 'config.yaml') -Force
 
 $readme = @"

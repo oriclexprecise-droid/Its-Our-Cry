@@ -1,6 +1,5 @@
 """Flask backend for MyGO TTS Workbench."""
 
-import importlib.util
 import json
 import os
 import random
@@ -144,15 +143,6 @@ def _dpapi_decrypt(text):
     except Exception:
         return ""
 
-def _runtime_python_for(config):
-    gs = str(config.get("gptsovits_path") or "").strip()
-    if gs:
-        candidate = Path(gs) / "runtime" / "python.exe"
-        if candidate.exists():
-            return str(candidate)
-    return sys.executable
-
-
 def _persist_user_settings(project_root, config):
     """Write user settings; API key is encrypted with DPAPI before saving."""
     try:
@@ -177,6 +167,99 @@ def _persist_user_settings(project_root, config):
         settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
+
+
+def _find_extractor(project_root):
+    """Return (exe, kind, label) for an available 7-Zip/WinRAR executable."""
+    root = Path(project_root)
+    for rel in ("tools/7z/7z.exe", "packaging/tools/7z/7z.exe"):
+        candidate = root / rel
+        if candidate.exists():
+            return (str(candidate), "7z", "内置 7-Zip")
+    for name in ("7z", "7zr"):
+        found = shutil.which(name)
+        if found:
+            return (found, "7z", "系统 7-Zip")
+    for base in (r"C:\Program Files\7-Zip", r"C:\Program Files (x86)\7-Zip"):
+        for name in ("7z.exe", "7zr.exe"):
+            candidate = Path(base) / name
+            if candidate.exists():
+                return (str(candidate), "7z", "系统 7-Zip")
+    for name in ("WinRAR", "UnRAR"):
+        found = shutil.which(name)
+        if found:
+            return (found, "winrar", "系统 WinRAR")
+    for base in (r"C:\Program Files\WinRAR", r"C:\Program Files (x86)\WinRAR"):
+        for name in ("WinRAR.exe", "UnRAR.exe"):
+            candidate = Path(base) / name
+            if candidate.exists():
+                return (str(candidate), "winrar", "系统 WinRAR")
+    tar_exe = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tar.exe"
+    if tar_exe.exists():
+        return (str(tar_exe), "tar", "系统内置 tar")
+    return None
+
+
+def _archive_total_uncompressed(tmp_file):
+    """Estimate uncompressed size in bytes; 0 means unknown."""
+    try:
+        import py7zr
+        total = 0
+        with py7zr.SevenZipFile(str(tmp_file), "r") as archive:
+            for info in archive.list():
+                if not getattr(info, "is_directory", False):
+                    total += int(getattr(info, "uncompressed", 0) or 0)
+        return total
+    except Exception:
+        return 0
+
+
+def _extract_archive(exe, kind, tmp_file, target_path, state, log):
+    """Extract a 7z archive with 7-Zip or WinRAR, streaming progress."""
+    if kind == "winrar":
+        cmd = [exe, "x", "-o+", "-y"]
+        if os.path.basename(exe).lower().startswith("winrar"):
+            cmd.append("-ibck")
+        cmd += [str(tmp_file), str(target_path) + os.sep]
+    elif kind == "tar":
+        cmd = [exe, "-xf", str(tmp_file), "-C", str(target_path)]
+    else:
+        cmd = [exe, "x", str(tmp_file), "-o" + str(target_path), "-y", "-bsp1", "-bso1", "-bse1"]
+    log.append("正在解压: " + tmp_file.name + " -> " + str(target_path))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    tail_lines = []
+    last_progress = -1
+    for raw in iter(proc.stdout.readline, ""):
+        line = raw.strip()
+        match = re.search(r"(\d{1,3})\s*%", line)
+        if match:
+            pct = min(100, max(0, int(match.group(1))))
+            progress = min(94, 80 + round(pct * 14 / 100))
+            if progress != last_progress:
+                last_progress = progress
+                state["progress"] = progress
+        if line:
+            tail_lines.append(line)
+            if len(tail_lines) > 40:
+                del tail_lines[:len(tail_lines) - 40]
+        if state.get("cancel_requested"):
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise RuntimeError("用户取消解压")
+    returncode = proc.wait()
+    if returncode != 0:
+        tail = " | ".join(tail_lines[-8:])[-1200:]
+        raise RuntimeError("解压工具退出码 %s: %s" % (returncode, tail))
 
 
 def create_app(config_path="config.yaml"):
@@ -1325,21 +1408,24 @@ def create_app(config_path="config.yaml"):
                 log.append("下载完成，正在准备解压...")
                 state["deploy_download"]["progress"] = 75
 
-                if importlib.util.find_spec("py7zr") is None:
-                    log.append("未检测到 py7zr，正在安装解压组件...")
-                    proc = subprocess.run(
-                        [_runtime_python_for(config), "-m", "pip", "install", "py7zr"],
-                        capture_output=True, text=True,
-                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                log.append("正在查找解压工具...")
+                extractor = _find_extractor(project_root)
+                if extractor is None:
+                    raise RuntimeError(
+                        "未找到 7-Zip 或 WinRAR。请安装 7-Zip 后重试，"
+                        "或手动将下载好的 .7z 解压到目标目录。"
                     )
-                    if proc.returncode != 0:
-                        raise RuntimeError("py7zr 安装失败: " + (proc.stderr or proc.stdout or "")[-500:])
-                    log.append("py7zr 安装完成")
-
-                import py7zr
-                state["deploy_download"]["progress"] = 80
-                with py7zr.SevenZipFile(str(tmp_file), "r") as archive:
-                    archive.extractall(path=str(target_path))
+                exe, kind, label = extractor
+                log.append("使用解压工具: " + label)
+                total_size = _archive_total_uncompressed(tmp_file)
+                if total_size > 0:
+                    free_space = shutil.disk_usage(target_path).free
+                    if total_size > free_space:
+                        raise RuntimeError(
+                            "磁盘空间不足：需要约 %.1f GB，当前可用 %.1f GB"
+                            % (total_size / (1024 ** 3), free_space / (1024 ** 3))
+                        )
+                _extract_archive(exe, kind, tmp_file, target_path, state["deploy_download"], log)
                 state["deploy_download"]["progress"] = 95
 
                 entries = [p for p in target_path.iterdir()]
@@ -1360,6 +1446,15 @@ def create_app(config_path="config.yaml"):
                 state["deploy_download"]["cancelled"] = bool(cancelled)
                 log.append("已取消下载" if cancelled else ("下载失败: " + str(e)))
                 state["deploy_download"]["success"] = False
+                try:
+                    for item in target_path.iterdir():
+                        if item.name != "gptsovits_download.7z":
+                            if item.is_dir():
+                                shutil.rmtree(item, ignore_errors=True)
+                            else:
+                                item.unlink(missing_ok=True)
+                except Exception:
+                    pass
             finally:
                 if tmp_file and tmp_file.exists():
                     try:
