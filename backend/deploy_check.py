@@ -339,9 +339,11 @@ def scan_environment(config, project_root, gptsovits_path=None):
                 "bundled": bundled,
                 "installed": installed,
             })
+            if installed:
+                continue
             if not bundled:
                 issues.append("角色模型未随程序提供: " + char + " " + kind)
-            elif not installed:
+            else:
                 issues.append("角色模型未安装: " + char + " " + kind)
     if not gs_exists:
         issues.append("GPT-SoVITS directory not found: " + str(gs_path))
