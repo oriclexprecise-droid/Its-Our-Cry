@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 <link rel="stylesheet" href="/static/style.css?v=20260810">
 <style>
 .creator-tip {
@@ -37,6 +38,12 @@
 </style>
 </head>
 <body>
+<div id="splash-overlay" class="splash-overlay">
+  <video id="splash-video" autoplay muted playsinline preload="auto" poster="/static/kaiping-cover.jpg">
+    <source src="/static/kaiping.mp4" type="video/mp4">
+  </video>
+  <button type="button" id="splash-skip" class="splash-skip">跳过</button>
+</div>
 <div class="developer-badge">开发者：ORiCale</div>
 <div id="app">
   <header>

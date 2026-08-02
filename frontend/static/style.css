@@ -426,3 +426,9 @@ textarea { min-height: 240px; line-height: 1.6; }
 }
 .header-meta .version-tag { margin-top: 0; }
 .refresh-btn { display: inline-flex; align-items: center; gap: 6px; }
+.splash-overlay { position: fixed; inset: 0; z-index: 9999; background: #000; display: flex; align-items: center; justify-content: center; }
+.splash-overlay video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.splash-skip { position: absolute; right: 22px; bottom: 22px; z-index: 10000; padding: 8px 18px; border: 1px solid rgba(255,255,255,0.35); border-radius: 6px; background: rgba(0,0,0,0.45); color: #fff; font-size: 13px; cursor: pointer; }
+.splash-skip:hover { background: rgba(255,255,255,0.15); }
+.splash-overlay.fade-out { opacity: 0; pointer-events: none; transition: opacity 0.45s ease; }
+.splash-overlay.hidden { display: none; }

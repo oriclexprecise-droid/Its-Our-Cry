@@ -15,6 +15,7 @@ Set-Location $root
 & $pyinstaller `
   --noconfirm --clean --onedir --noconsole `
   --name ItsOurCry `
+  --icon "$PSScriptRoot\app_icon.ico" `
   --exclude-module torch --exclude-module torchaudio --exclude-module torchvision `
   --exclude-module GPT_SoVITS --exclude-module numpy --exclude-module scipy `
   --exclude-module librosa --exclude-module transformers --exclude-module soundfile `

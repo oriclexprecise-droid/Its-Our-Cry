@@ -1126,6 +1126,25 @@ async function pollDeployDownload() {
     statusEl.className = "status-text error";
   }
 }
+function initSplash() {
+  const overlay = document.getElementById("splash-overlay");
+  const video = document.getElementById("splash-video");
+  const skip = document.getElementById("splash-skip");
+  if (!overlay || !video) return;
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    overlay.classList.add("fade-out");
+    setTimeout(() => overlay.classList.add("hidden"), 500);
+  };
+  if (skip) skip.addEventListener("click", close);
+  video.addEventListener("ended", close);
+  video.addEventListener("error", close);
+  const promise = video.play();
+  if (promise) promise.catch(close);
+}
+initSplash();
 initDeployFlow();
 loadConfig();
 initBackgroundSettings();
