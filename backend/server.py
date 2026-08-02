@@ -25,6 +25,7 @@ from .audio_merger import merge_wav_files, generate_srt, convert_channels
 from .translator import translate_lines
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
 from .feedback import read_events, record_event
+from .cleanup import clean_items, scan_cleanable
 
 
 DEFAULT_INTERVAL = 0.5
@@ -116,6 +117,39 @@ def _model_store_value(model_base, abs_path):
         return abs_path.relative_to(model_base).as_posix()
     except ValueError:
         return str(abs_path)
+
+
+def _build_models_dict(project_root, gs_path):
+    saved_aliases = _load_model_aliases(project_root)
+    scan = _scan_model_files(project_root, gs_path)
+    models = {}
+    for pair in scan.get("pairs", []):
+        key = pair["name"]
+        default_alias = DEFAULT_MODEL_ALIASES.get(key, key)
+        models[key] = {
+            "gpt": pair["gpt"],
+            "sovits": pair["sovits"],
+            "ref_audio_dir": "reference_audio/" + default_alias,
+            "aliases": [default_alias],
+        }
+    for key, saved in saved_aliases.items():
+        if key not in models:
+            continue
+        if saved.get("ref_audio_dir"):
+            models[key]["ref_audio_dir"] = str(saved["ref_audio_dir"]).replace("\\", "/")
+        for alias in saved.get("aliases", []):
+            if isinstance(alias, str) and alias.strip() and alias not in models[key]["aliases"]:
+                models[key]["aliases"].append(alias.strip())
+
+    legacy_models = _load_user_models(project_root)
+    for name, cfg in legacy_models.items():
+        for m in models.values():
+            if (Path(str(cfg.get("gpt_model") or "")).name == Path(m["gpt"]).name and
+                    Path(str(cfg.get("model") or "")).name == Path(m["sovits"]).name):
+                if name not in m["aliases"]:
+                    m["aliases"].append(name)
+                break
+    return models
 
 
 def _dpapi_encrypt(text):
@@ -311,36 +345,7 @@ def create_app(config_path="config.yaml"):
     # 打包版不携带 GPT-SoVITS 时，角色权重随程序放在项目目录内
     model_base = Path(gs_path) if gs_path else project_root
     # 角色模型：权重对固定，激活词只是模型上的标签（可增删）
-    saved_aliases = _load_model_aliases(project_root)
-    scan = _scan_model_files(project_root, gs_path)
-    models = {}
-    for pair in scan.get("pairs", []):
-        key = pair["name"]
-        default_alias = DEFAULT_MODEL_ALIASES.get(key, key)
-        models[key] = {
-            "gpt": pair["gpt"],
-            "sovits": pair["sovits"],
-            "ref_audio_dir": "reference_audio/" + default_alias,
-            "aliases": [default_alias],
-        }
-    for key, saved in saved_aliases.items():
-        if key not in models:
-            continue
-        if saved.get("ref_audio_dir"):
-            models[key]["ref_audio_dir"] = str(saved["ref_audio_dir"]).replace("\\", "/")
-        for alias in saved.get("aliases", []):
-            if isinstance(alias, str) and alias.strip() and alias not in models[key]["aliases"]:
-                models[key]["aliases"].append(alias.strip())
-
-    # 迁移旧 user_models.json（历史数据）
-    legacy_models = _load_user_models(project_root)
-    for name, cfg in legacy_models.items():
-        for m in models.values():
-            if (Path(str(cfg.get("gpt_model") or "")).name == Path(m["gpt"]).name and
-                    Path(str(cfg.get("model") or "")).name == Path(m["sovits"]).name):
-                if name not in m["aliases"]:
-                    m["aliases"].append(name)
-                break
+    models = _build_models_dict(project_root, gs_path)
 
     def persist_model_aliases():
         data = {}
@@ -1353,6 +1358,42 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/deploy/copy_models_status", methods=["GET"])
     def deploy_copy_models_status():
         return jsonify(state["deploy_model_copy"])
+
+    @app.route("/api/deploy/clean_scan", methods=["POST"])
+    def deploy_clean_scan():
+        data = request.get_json(silent=True) or {}
+        user_path = str(data.get("gptsovits_path", "")).strip()
+        if user_path:
+            config["gptsovits_path"] = user_path
+            _persist_user_settings(project_root, config)
+        try:
+            return jsonify(scan_cleanable(project_root, config.get("gptsovits_path") or ""))
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "清理扫描失败: " + str(e)}), 500
+
+    @app.route("/api/deploy/clean", methods=["POST"])
+    def deploy_clean():
+        data = request.get_json(silent=True) or {}
+        user_path = str(data.get("gptsovits_path", "")).strip()
+        items = data.get("items") or []
+        if not isinstance(items, list) or not items:
+            return jsonify({"error": "请选择要清理的项目"}), 400
+        if user_path:
+            config["gptsovits_path"] = user_path
+            _persist_user_settings(project_root, config)
+        confirm_missing = bool(data.get("confirm_missing"))
+        try:
+            result = clean_items(project_root, config.get("gptsovits_path") or "", items, confirm_missing=confirm_missing)
+            if "model_weights" in items:
+                rebuilt = _build_models_dict(project_root, config.get("gptsovits_path") or "")
+                models.clear()
+                models.update(rebuilt)
+                rebuild_characters()
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "清理失败: " + str(e)}), 500
+        return jsonify(result)
 
     @app.route("/api/deploy/download_options", methods=["GET"])
     def deploy_download_options():

@@ -432,3 +432,23 @@ textarea { min-height: 240px; line-height: 1.6; }
 .splash-skip:hover { background: rgba(255,255,255,0.15); }
 .splash-overlay.fade-out { opacity: 0; pointer-events: none; transition: opacity 0.45s ease; }
 .splash-overlay.hidden { display: none; }
+
+
+/* 清理空间 */
+.clean-body { padding: 16px; }
+.clean-tip { font-size: 12px; color: #a9b8d8; line-height: 1.6; margin-bottom: 10px; }
+.clean-scan-result { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; max-height: 460px; overflow-y: auto; }
+.clean-warning { background: rgba(233,69,96,0.12); border: 1px solid rgba(233,69,96,0.45); border-radius: 6px; padding: 10px; color: #f4a6b5; font-size: 12px; line-height: 1.6; }
+.clean-warning .issue-list { margin-top: 6px; }
+.clean-ok { background: rgba(78,204,163,0.12); border: 1px solid rgba(78,204,163,0.4); border-radius: 6px; padding: 8px 10px; color: #9fe8d0; font-size: 12px; }
+.clean-groups { display: flex; flex-direction: column; gap: 8px; }
+.clean-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px; background: rgba(255,255,255,0.02); border: 1px solid #1a3350; border-radius: 6px; cursor: pointer; }
+.clean-item:hover { border-color: #2a4a70; }
+.clean-item .clean-check { margin-top: 3px; width: 15px; height: 15px; accent-color: #ff6b9d; flex: none; }
+.clean-item-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.clean-item-title { font-size: 12px; color: #e0e0e0; font-weight: 600; }
+.clean-item-title em { font-style: normal; color: #ff6b9d; margin-left: 6px; }
+.clean-item-detail { font-size: 11px; color: #8899aa; word-break: break-all; }
+.clean-item-warning { font-size: 11px; color: #a9b8d8; line-height: 1.5; }
+.clean-total { font-size: 12px; color: #ccc; }
+.clean-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

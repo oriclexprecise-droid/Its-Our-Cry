@@ -18,6 +18,7 @@ async function loadConfig() {
   state.emotions = cfg.emotions;
   setNarrationInputs(cfg.narration || {});
   loadDeployPath(cfg);
+  loadCleanPath(cfg);
   const savedAi = loadAIConfigFromStorage();
   if (savedAi) {
     applyAIConfig(savedAi);
@@ -597,6 +598,145 @@ async function scanDeploy() {
 }
 
 document.getElementById("btn-deploy-scan").addEventListener("click", scanDeploy);
+function fmtSize(bytes) {
+  if (!bytes && bytes !== 0) return "-";
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  if (bytes >= 1024) return (bytes / 1024).toFixed(0) + " KB";
+  return bytes + " B";
+}
+
+function loadCleanPath(cfg) {
+  const input = document.getElementById("clean-gs-path");
+  if (!input) return;
+  const saved = localStorage.getItem("mygo_deploy_gs_path");
+  input.value = saved || (cfg.gptsovits_path || "");
+  input.addEventListener("change", () => {
+    localStorage.setItem("mygo_deploy_gs_path", input.value.trim());
+  });
+}
+
+let cleanScanData = null;
+
+async function scanClean() {
+  const btn = document.getElementById("btn-clean-scan");
+  const status = document.getElementById("clean-scan-status");
+  const result = document.getElementById("clean-scan-result");
+  const input = document.getElementById("clean-gs-path");
+  if (!btn || !status || !result) return;
+  const path = input.value.trim();
+  btn.disabled = true;
+  status.textContent = "正在扫描...";
+  status.className = "status-text";
+  result.innerHTML = "";
+  try {
+    const data = await api("/api/deploy/clean_scan", { method: "POST", body: JSON.stringify({ gptsovits_path: path }) });
+    localStorage.setItem("mygo_deploy_gs_path", path);
+    cleanScanData = data;
+    renderCleanScan(data);
+    status.textContent = "扫描完成";
+    status.className = "status-text success";
+  } catch (e) {
+    status.textContent = e.message;
+    status.className = "status-text error";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderCleanScan(d) {
+  const host = document.getElementById("clean-scan-result");
+  if (!host) return;
+  const parts = [];
+  const missing = d.missing_models || [];
+  if (missing.length) {
+    parts.push('<div class="clean-warning"><strong>SoVITS 中缺少 ' + missing.length + ' 个模型文件：</strong><ul class="issue-list">' +
+      missing.slice(0, 20).map(m => "<li>" + esc(m.kind + " " + m.name) + "</li>").join("") +
+      (missing.length > 20 ? "<li>…等 " + missing.length + " 项</li>" : "") +
+      '</ul><p>请先到「部署」板块点击“复制缺失模型”，模型补齐后才能清理。</p></div>');
+  } else {
+    parts.push('<div class="clean-ok">模型已确认完整，可以安全清理程序包内的模型副本。</div>');
+  }
+  const groups = d.groups || [];
+  if (!groups.length) {
+    parts.push('<p class="status-text">暂无可清理的内容。</p>');
+    host.innerHTML = parts.join("");
+    return;
+  }
+  const items = groups.map(g =>
+    '<label class="clean-item">' +
+      '<input type="checkbox" class="clean-check" data-key="' + esc(g.key) + '"' + ((g.key === "model_weights" && g.safe) ? " checked" : "") + '>' +
+      '<span class="clean-item-main"><span class="clean-item-title">' + esc(g.label) + ' <em>' + fmtSize(g.size) + '</em></span>' +
+      '<span class="clean-item-detail">' + esc(g.detail) + '</span></span>' +
+      '<span class="clean-item-warning">' + esc(g.warning) + '</span>' +
+    '</label>'
+  ).join("");
+  parts.push('<div class="clean-groups">' + items + '</div>');
+  parts.push('<div class="clean-total">已选 <span id="clean-total-size">0 MB</span></div>');
+  parts.push('<div class="clean-actions"><button id="btn-clean-run" class="btn-secondary btn-small">一键清理选中项</button><span id="clean-run-status" class="status-text"></span></div>');
+  host.innerHTML = parts.join("");
+  const checks = host.querySelectorAll(".clean-check");
+  checks.forEach(c => c.addEventListener("change", updateCleanTotal));
+  updateCleanTotal();
+  document.getElementById("btn-clean-run").addEventListener("click", runClean);
+}
+
+function selectedCleanKeys() {
+  const checks = document.querySelectorAll("#clean-scan-result .clean-check:checked");
+  return Array.from(checks).map(c => c.dataset.key);
+}
+
+function updateCleanTotal() {
+  const el = document.getElementById("clean-total-size");
+  if (!el) return;
+  const keys = selectedCleanKeys();
+  const groups = (cleanScanData && cleanScanData.groups) || [];
+  const total = groups.filter(g => keys.indexOf(g.key) >= 0).reduce((sum, g) => sum + (g.size || 0), 0);
+  el.textContent = fmtSize(total);
+}
+
+async function runClean() {
+  const btn = document.getElementById("btn-clean-run");
+  const statusEl = document.getElementById("clean-run-status");
+  const input = document.getElementById("clean-gs-path");
+  if (!btn || !statusEl) return;
+  const keys = selectedCleanKeys();
+  if (!keys.length) { alert("请先勾选要清理的项目"); return; }
+  const groups = (cleanScanData && cleanScanData.groups) || [];
+  const total = groups.filter(g => keys.indexOf(g.key) >= 0).reduce((sum, g) => sum + (g.size || 0), 0);
+  const missing = (cleanScanData && cleanScanData.missing_models) || [];
+  const names = keys.map(k => { const g = groups.find(x => x.key === k); return g ? g.label + "（" + fmtSize(g.size) + "）" : k; });
+  const msg = "即将删除以下内容：\n" + names.join("\n") + "\n\n共 " + fmtSize(total) + "，删除后不可恢复。确定继续吗？";
+  if (keys.indexOf("model_weights") >= 0 && missing.length && !confirm("SoVITS 中缺少部分模型，继续清理可能导致这些角色无法生成语音。确定仍要清理吗？")) return;
+  if (!confirm(msg)) return;
+  btn.disabled = true;
+  statusEl.textContent = "正在清理...";
+  statusEl.className = "status-text";
+  try {
+    const data = await api("/api/deploy/clean", { method: "POST", body: JSON.stringify({ gptsovits_path: input.value.trim(), items: keys, confirm_missing: keys.indexOf("model_weights") >= 0 && missing.length > 0 }) });
+    const errors = data.errors || [];
+    if (errors.length) {
+      statusEl.textContent = "清理完成，但有 " + errors.length + " 项失败：" + errors.join("；");
+      statusEl.className = "status-text error";
+    } else {
+      statusEl.textContent = "已清理 " + fmtSize(data.freed_bytes || 0);
+      statusEl.className = "status-text success";
+    }
+    await scanClean();
+    await loadConfig();
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.className = "status-text error";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function initCleanSpace() {
+  const scanBtn = document.getElementById("btn-clean-scan");
+  if (scanBtn) scanBtn.addEventListener("click", scanClean);
+}
+
 
 
 function scanGroup(title, items, okMode) {
@@ -1146,6 +1286,7 @@ function initSplash() {
 }
 initSplash();
 initDeployFlow();
+initCleanSpace();
 loadConfig();
 initBackgroundSettings();
 function initPanelCollapse() {
@@ -1153,6 +1294,7 @@ function initPanelCollapse() {
     { btn: "btn-collapse-settings", key: "mygo_panel_settings_collapsed" },
     { btn: "btn-collapse-models", key: "mygo_panel_models_collapsed" },
     { btn: "btn-collapse-deploy", key: "mygo_panel_deploy_collapsed" },
+    { btn: "btn-collapse-clean", key: "mygo_panel_clean_collapsed" },
     { btn: "btn-collapse-log", key: "mygo_panel_log_collapsed" },
     { btn: "btn-collapse-legal", key: "mygo_panel_legal_collapsed" }
   ];

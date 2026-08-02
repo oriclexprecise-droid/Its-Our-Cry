@@ -251,6 +251,22 @@
       </div>
     </section>
     <section class="panel side-panel">
+      <div class="panel-header"><h2>清理空间</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-clean" title="收起面板">▾</button></div>
+      <div class="panel-body clean-body">
+        <div class="side-section">
+          <h3 class="side-section-title">空间清理</h3>
+          <p class="clean-tip">模型复制到 GPT-SoVITS 后，可清理程序包内的冗余文件。</p>
+          <label class="deploy-label" for="clean-gs-path">GPT-SoVITS 目录</label>
+          <input type="text" id="clean-gs-path" placeholder="例如 D:\GPT-SoVITS-v2pro" autocomplete="off">
+          <div class="deploy-actions">
+            <button id="btn-clean-scan" class="btn-secondary btn-small">扫描可清理文件</button>
+          </div>
+          <span id="clean-scan-status" class="status-text"></span>
+          <div id="clean-scan-result" class="clean-scan-result"></div>
+        </div>
+      </div>
+    </section>
+    <section class="panel side-panel">
       <div class="panel-header"><h2>日志</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-log" title="收起面板">▾</button></div>
       <div class="panel-body log-body">
         <pre id="log-view" class="log-view"></pre>
