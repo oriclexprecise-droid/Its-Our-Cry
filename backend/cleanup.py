@@ -35,10 +35,6 @@ def _group_targets(project_root, key):
     root = Path(project_root)
     if key == "model_weights":
         return [root / "GPT_weights_v2ProPlus", root / "SoVITS_weights_v2ProPlus"]
-    if key == "splash":
-        return [root / "frontend" / "static" / "kaiping.mp4", root / "frontend" / "static" / "kaiping-cover.jpg"]
-    if key == "backgrounds":
-        return [root / "picture"]
     if key == "logs_cache":
         return [
             root / "launcher.log",
@@ -95,10 +91,6 @@ def scan_cleanable(project_root, gs_path=""):
          bool(model_entries), not missing_models,
          "SoVITS 中缺少部分模型，请先在「部署」里复制缺失模型，再清理。" if missing_models
          else "已确认模型在 SoVITS 中齐全，可以清理程序包内的模型副本。"),
-        ("splash", "开屏动画", "frontend/static/kaiping.mp4 + 封面图", True, True,
-         "清理后开屏将跳过动画，只显示静态封面或直接进入程序。"),
-        ("backgrounds", "背景图片", "picture 目录", True, True,
-         "清理后背景图库不可用，界面将回退到默认配色。"),
         ("logs_cache", "日志与反馈记录", "launcher.log / feedback / __pycache__ 等", True, True,
          "会删除本地日志、反馈记录和 Python 缓存，不影响已导出结果。"),
         ("build_cache", "构建缓存（开发版）", "build / dist 目录", True, True,
