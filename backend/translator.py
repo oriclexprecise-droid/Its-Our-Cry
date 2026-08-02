@@ -55,5 +55,21 @@ def translate_lines(
         content = json_match.group(0)
 
     results = json.loads(content)
-    results.sort(key=lambda x: x.get("index", 0))
-    return results
+    if not isinstance(results, list):
+        raise ValueError("AI 返回的不是列表格式: " + str(results)[:200])
+
+    cleaned = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("index"))
+        except (TypeError, ValueError):
+            continue
+        translation = str(item.get("translation") or "").strip()
+        if translation:
+            cleaned.append({"index": idx, "translation": translation})
+
+    # 保证顺序并按 index 排序，重复 index 时保留最后一条
+    cleaned.sort(key=lambda x: x["index"])
+    return cleaned

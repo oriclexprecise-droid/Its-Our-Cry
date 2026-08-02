@@ -101,13 +101,22 @@ def analyze_emotions(
         content = json_match.group(0)
 
     results = json.loads(content)
+    if not isinstance(results, list):
+        raise ValueError("AI 返回的不是列表格式: " + str(results)[:200])
 
-    # 保证顺序并按 index 排序
-    results.sort(key=lambda x: x.get("index", 0))
+    cleaned = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("index"))
+        except (TypeError, ValueError):
+            continue
+        emotion = item.get("emotion")
+        if emotion not in EMOTION_CATEGORIES:
+            emotion = "思考"
+        cleaned.append({"index": idx, "emotion": emotion})
 
-    # 验证情绪值
-    for r in results:
-        if r.get("emotion") not in EMOTION_CATEGORIES:
-            r["emotion"] = "认真"  # fallback
-
-    return results
+    # 保证顺序并按 index 排序，重复 index 时保留最后一条
+    cleaned.sort(key=lambda x: x["index"])
+    return cleaned

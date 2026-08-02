@@ -586,9 +586,11 @@ def create_app(config_path="config.yaml"):
 
         emotion_map = {}
         for e in emotions:
-            emotion_map[e["index"]] = e["emotion"]
+            idx = e.get("index")
+            if isinstance(idx, int) and not isinstance(idx, bool):
+                emotion_map[idx] = e.get("emotion") or "思考"
         for line in lines:
-            line["emotion"] = emotion_map.get(line["index"], "thinking")
+            line["emotion"] = emotion_map.get(line["index"], "思考")
 
         if lang == "ja":
             try:
@@ -1014,8 +1016,10 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/merge", methods=["POST"])
     def merge():
         """用户手动触发合并音频和生成 SRT。"""
-        if not state["generated"]:
-            return jsonify({"error": "没有已生成的音频"}), 400
+        if not state["lines"]:
+            return jsonify({"error": "请先分析剧本"}), 400
+        if not state["generated"] and not state.get("merged_path"):
+            return jsonify({"error": "还没有已生成的内容，请先生成语音或字幕"}), 400
         try:
             finalize_output()
             return jsonify({
@@ -1057,8 +1061,10 @@ def create_app(config_path="config.yaml"):
     def export_tracks():
         if state["generating"]:
             return jsonify({"error": "生成中，请稍后再导出"}), 409
-        if not state["generated"]:
-            return jsonify({"error": "没有已生成的音频"}), 400
+        if not state["lines"]:
+            return jsonify({"error": "请先分析剧本"}), 400
+        if not state["generated"] and not state.get("merged_path"):
+            return jsonify({"error": "还没有已生成的内容，请先生成语音或字幕"}), 400
 
         data = request.get_json() or {}
         folder_name = str(data.get("folder_name", "")).strip()
@@ -1099,17 +1105,19 @@ def create_app(config_path="config.yaml"):
                     wav_paths.append(gen_path)
                     merged_lines.append(state["lines"][idx])
                     gaps.append(state["lines"][idx].get("interval", DEFAULT_INTERVAL))
-            if not wav_paths:
-                raise RuntimeError("没有可导出的音频文件")
+            # 纯字幕导出时 wav_paths 为空，只导出合并音频（静音占位）与 SRT
 
             time_map = {idx: state["time_info"][idx] for idx in ordered_idx if idx < len(state["time_info"])}
 
             import wave
 
-            with wave.open(wav_paths[0], "r") as first_wav:
-                sample_rate = first_wav.getframerate()
-                channels = first_wav.getnchannels()
-                sampwidth = first_wav.getsampwidth()
+            if wav_paths:
+                with wave.open(wav_paths[0], "r") as first_wav:
+                    sample_rate = first_wav.getframerate()
+                    channels = first_wav.getnchannels()
+                    sampwidth = first_wav.getsampwidth()
+            else:
+                sample_rate, channels, sampwidth = 24000, 1, 2
             frame_bytes = channels * sampwidth
             total_duration = state["time_info"][-1]["end"]
             total_samples = max(1, int(round(total_duration * sample_rate)))
@@ -1178,7 +1186,13 @@ def create_app(config_path="config.yaml"):
         try:
             resolved = Path(folder).resolve()
             project_resolved = project_root.resolve()
-            if not str(resolved).startswith(str(project_resolved)):
+            try:
+                common = os.path.commonpath([str(resolved), str(project_resolved)])
+            except ValueError:
+                return jsonify({"error": "只能打开项目内的文件夹"}), 400
+            def _norm(p):
+                return str(p).lower() if os.name == "nt" else str(p)
+            if _norm(common) != _norm(str(project_resolved)):
                 return jsonify({"error": "只能打开项目内的文件夹"}), 400
             if not resolved.exists() or not resolved.is_dir():
                 return jsonify({"error": "文件夹不存在"}), 400
@@ -1234,7 +1248,10 @@ def create_app(config_path="config.yaml"):
                         for arg in cmd:
                             if arg == "install":
                                 in_install = True
-                            elif in_install and not arg.startswith("-"):
+                                continue
+                            if in_install and arg.startswith("-"):
+                                in_install = False
+                            elif in_install:
                                 pkgs.append(arg)
                         state["deploy_install"]["command_index"] = cmd_index
                         state["deploy_install"]["current_packages"] = pkgs
@@ -1440,6 +1457,9 @@ def create_app(config_path="config.yaml"):
         if not isinstance(items, list) or not items:
             return jsonify({"error": "请选择要清理的项目"}), 400
         if user_path:
+            guard = _deploy_target_error(user_path, project_root)
+            if guard:
+                return jsonify({"error": guard}), 400
             config["gptsovits_path"] = user_path
             _persist_user_settings(project_root, config)
         confirm_missing = bool(data.get("confirm_missing"))
