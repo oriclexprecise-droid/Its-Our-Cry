@@ -22,6 +22,7 @@ Set-Location $root
   --hidden-import webview --hidden-import webview.platforms.edgechromium `
   --hidden-import clr_loader --hidden-import pythonnet `
   --collect-all pythonnet --collect-all clr_loader `
+  --collect-all py7zr `
   --hidden-import win32crypt --hidden-import pywintypes `
   --key ItsOurCry2026Key! `
   launcher.py

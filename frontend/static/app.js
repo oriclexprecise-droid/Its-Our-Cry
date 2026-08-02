@@ -1148,7 +1148,8 @@ function initPanelCollapse() {
       btn.textContent = collapsed ? "▴" : "▾";
       btn.title = collapsed ? "展开面板" : "收起面板";
     };
-    apply(localStorage.getItem(spec.key) === "1");
+    apply(true);
+    localStorage.setItem(spec.key, "1");
     btn.addEventListener("click", () => {
       const next = !panel.classList.contains("collapsed");
       apply(next);
