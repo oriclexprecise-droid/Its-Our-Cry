@@ -124,6 +124,7 @@ async function runAnalyze() {
   analysisController = controller;
   const stopBtn = document.getElementById("btn-stop-analyze");
   stopBtn.classList.remove("hidden");
+  await syncScriptDraft();
   try {
     const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }), signal: controller.signal });
     if (data.status === "cancelled") {
@@ -204,12 +205,12 @@ document.addEventListener("keydown", (e) => {
     if (el.id === "script-input") {
       if (isZ && !e.shiftKey) {
         e.preventDefault();
-        localScriptUndo();
+        if (!localScriptUndo()) runHistory("undo");
         return;
       }
       if ((isZ && e.shiftKey) || isY) {
         e.preventDefault();
-        localScriptRedo();
+        if (!localScriptRedo()) runHistory("redo");
         return;
       }
     }
@@ -604,6 +605,7 @@ let recentSettings = {};
 let lastAutoVersionAt = 0;
 let lastAutoHash = "";
 let scriptSyncTimer = null;
+let scriptDraftSeq = 0;
 let scriptTextUndo = [];
 let scriptTextRedo = [];
 const SCRIPT_TEXT_HISTORY_LIMIT = 300;
@@ -818,15 +820,17 @@ async function syncScriptDraft() {
   const scriptEl = document.getElementById("script-input");
   const text = scriptEl ? scriptEl.value : state.script || "";
   state.script = text;
+  const seq = ++scriptDraftSeq;
   try {
-    await api("/api/script", { method: "POST", body: JSON.stringify({ text }) });
+    await api("/api/script", { method: "POST", body: JSON.stringify({ text, seq }) });
   } catch (e) {}
 }
 
 function scheduleScriptDraft(text) {
   clearTimeout(scriptSyncTimer);
+  const seq = ++scriptDraftSeq;
   scriptSyncTimer = setTimeout(() => {
-    api("/api/script", { method: "POST", body: JSON.stringify({ text }) }).catch(() => {});
+    api("/api/script", { method: "POST", body: JSON.stringify({ text, seq }) }).catch(() => {});
   }, 400);
 }
 
@@ -854,20 +858,28 @@ function recordScriptTextChange(value) {
 
 function localScriptUndo() {
   const el = document.getElementById("script-input");
-  if (!el || !scriptTextUndo.length) return;
-  const value = el.value;
-  scriptTextRedo.push(value);
-  applyScriptText(scriptTextUndo.pop());
+  if (!el) return false;
+  while (scriptTextUndo.length) {
+    const prev = scriptTextUndo.pop();
+    if (prev === el.value) continue;
+    scriptTextRedo.push(el.value);
+    applyScriptText(prev);
+    return true;
+  }
+  return false;
 }
-
 function localScriptRedo() {
   const el = document.getElementById("script-input");
-  if (!el || !scriptTextRedo.length) return;
-  const value = el.value;
-  scriptTextUndo.push(value);
-  applyScriptText(scriptTextRedo.pop());
+  if (!el) return false;
+  while (scriptTextRedo.length) {
+    const next = scriptTextRedo.pop();
+    if (next === el.value) continue;
+    scriptTextUndo.push(el.value);
+    applyScriptText(next);
+    return true;
+  }
+  return false;
 }
-
 async function saveRecentRecord() {
   if (state.generating) { setRecentStatus("生成中，请稍后再保存版本", "error"); return; }
   await syncScriptDraft();
@@ -1167,8 +1179,8 @@ function updateHistoryButtons(h) {
   const undoBtn = document.getElementById("btn-undo");
   const redoBtn = document.getElementById("btn-redo");
   if (!undoBtn || !redoBtn) return;
-  const uc = h ? h.undo_count : 0;
-  const rc = h ? h.redo_count : 0;
+  const uc = (h ? h.undo_count : 0) + scriptTextUndo.length;
+  const rc = (h ? h.redo_count : 0) + scriptTextRedo.length;
   undoBtn.disabled = uc === 0;
   redoBtn.disabled = rc === 0;
   undoBtn.title = uc ? "撤销 " + (h.undo_label || "") + " (Ctrl+Z)" : "撤销 (Ctrl+Z)";
@@ -1189,7 +1201,7 @@ async function runHistory(dir) {
     const s = res.state || {};
     state.lines = s.lines || [];
     state.script = s.script || "";
-    applyScriptText(state.script || "", { resetHistory: true });
+    applyScriptText(state.script || "");
     state.failures = s.failures || {};
     state.hasGenerated = Object.keys(s.generated || {}).length > 0;
     state.selected = new Set();
@@ -1210,7 +1222,17 @@ async function runHistory(dir) {
     updateHistoryButtons(res.history);
     toast((dir === "undo" ? "已撤销：" : "已重做：") + (res.label || ""), "success");
   } catch (e) {
-    toast((dir === "undo" ? "撤销失败：" : "重做失败：") + e.message, "error");
+    const msg = e.message || "";
+    const noGlobal = dir === "undo" ? /没有可撤销/.test(msg) : /没有可重做/.test(msg);
+    if (noGlobal) {
+      const didLocal = dir === "undo" ? localScriptUndo() : localScriptRedo();
+      if (didLocal) {
+        refreshHistory();
+        toast(dir === "undo" ? "已撤销：剧本输入" : "已重做：剧本输入", "success");
+        return;
+      }
+    }
+    toast((dir === "undo" ? "撤销失败：" : "重做失败：") + msg, "error");
   }
 }
 

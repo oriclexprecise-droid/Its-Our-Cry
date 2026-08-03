@@ -560,6 +560,7 @@ def create_app(config_path="config.yaml"):
     state = {
         "lines": [],
         "script": "",
+        "script_seq": 0,
         "emotions": [],
         "lang": "zh",
         "analysis_seq": 0,
@@ -1293,6 +1294,7 @@ def create_app(config_path="config.yaml"):
             if raw.strip() and skipped_no not in parsed_line_nos:
                 skipped.append({"line_no": skipped_no, "text": raw.strip()[:100]})
 
+        state["script"] = script_text
         push_history("重新分析剧本")
         state["script"] = script_text
         state["lines"] = lines
@@ -2184,7 +2186,12 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/script", methods=["POST"])
     def save_script_draft():
         data = request.get_json(silent=True) or {}
+        seq = data.get("seq")
+        if isinstance(seq, int) and seq <= state.get("script_seq", 0):
+            return jsonify({"status": "ok", "ignored": True})
         state["script"] = str(data.get("text") or "")
+        if isinstance(seq, int):
+            state["script_seq"] = seq
         return jsonify({"status": "ok"})
 
     @app.route("/api/recent/save", methods=["POST"])
