@@ -888,12 +888,16 @@ def create_app(config_path="config.yaml"):
         used = [str(e).strip() for e in config.get("emotions") or [] if str(e).strip()]
         if not used:
             used = list(DEFAULT_EMOTIONS)
+        lines = data.get("lines")
+        if not isinstance(lines, list) or not lines:
+            lines = state.get("lines") or []
         try:
             suggestions = suggest_params(
                 emotions=used,
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
+                lines=lines,
             )
         except Exception as e:
             traceback.print_exc()

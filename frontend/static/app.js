@@ -2699,7 +2699,8 @@ async function suggestEmotionParams() {
   const statusEl = document.getElementById("emotion-params-status");
   if (statusEl) { statusEl.textContent = "AI 正在生成参数建议..."; statusEl.className = "status-text"; }
   try {
-    const res = await api("/api/emotion_params/suggest", { method: "POST", body: JSON.stringify({}) });
+    const scriptLines = (state.lines || []).map(l => ({ index: l.index, character: l.character, emotion: l.emotion, text: l.text }));
+    const res = await api("/api/emotion_params/suggest", { method: "POST", body: JSON.stringify({ lines: scriptLines }) });
     const params = res.params || {};
     for (const name of Object.keys(params)) {
       emotionParams[name] = { ...(emotionParams[name] || {}), ...params[name] };

@@ -57,32 +57,80 @@ def build_system_prompt(emotions):
 
 PARAM_KEYS = ("temperature", "top_k", "top_p", "speed_factor")
 
+GENERIC_DEFAULTS = {
+    "temperature": 1.0,
+    "top_k": 15,
+    "top_p": 1.0,
+    "speed_factor": 1.0,
+    "seed": -1,
+}
 
-def build_param_prompt(emotions):
+DEFAULT_EMOTION_PARAMS = {
+    "生气": {"temperature": 1.05, "top_k": 20, "top_p": 0.95, "speed_factor": 1.1, "seed": -1},
+    "告别": {"temperature": 0.8, "top_k": 12, "top_p": 0.9, "speed_factor": 0.95, "seed": -1},
+    "哭泣": {"temperature": 0.6, "top_k": 8, "top_p": 0.8, "speed_factor": 0.85, "seed": -1},
+    "感动": {"temperature": 0.75, "top_k": 12, "top_p": 0.9, "speed_factor": 0.9, "seed": -1},
+    "决心": {"temperature": 0.85, "top_k": 15, "top_p": 0.92, "speed_factor": 1.0, "seed": -1},
+    "悲伤": {"temperature": 0.65, "top_k": 10, "top_p": 0.85, "speed_factor": 0.88, "seed": -1},
+    "认真": {"temperature": 0.7, "top_k": 10, "top_p": 0.85, "speed_factor": 0.95, "seed": -1},
+    "害羞": {"temperature": 0.7, "top_k": 9, "top_p": 0.85, "speed_factor": 0.9, "seed": -1},
+    "微笑": {"temperature": 0.85, "top_k": 14, "top_p": 0.92, "speed_factor": 1.0, "seed": -1},
+    "惊讶": {"temperature": 1.1, "top_k": 25, "top_p": 0.95, "speed_factor": 1.15, "seed": -1},
+    "思考": {"temperature": 0.75, "top_k": 12, "top_p": 0.88, "speed_factor": 0.95, "seed": -1},
+}
+
+_FALLBACK_PARAMS = {"temperature": 0.8, "top_k": 12, "top_p": 0.9, "speed_factor": 1.0, "seed": -1}
+
+
+def _merge_param_suggestion(name, ai_params):
+    """Curated base overlaid only by AI values that differ from generic defaults."""
+    base = dict(DEFAULT_EMOTION_PARAMS.get(name) or _FALLBACK_PARAMS)
+    for key in base:
+        v = ai_params.get(key)
+        if v is not None and v != GENERIC_DEFAULTS.get(key):
+            base[key] = v
+    return base
+
+
+def build_param_prompt(emotions, lines=None):
     """构建让 AI 推荐 SoVITS 情绪参数的提示词。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
-    return (
-        "你是一个 GPT-SoVITS 语音合成参数调优助手，熟悉文字冒险/二创配音场景。\n"
-        "请为以下每种情绪推荐一组语音合成参数，让语气更贴合情绪。\n"
-        "只输出 JSON 对象，键是情绪名，值是该情绪的参数字典，不要输出其他内容。\n"
-        "可调参数及范围：\n"
-        "- temperature：0.1-1.5，越大表现力越强但越不稳定\n"
-        "- top_k：1-50，越小发音越稳定\n"
-        "- top_p：0.1-1.0，概率截断阈值\n"
-        "- speed_factor：0.5-1.5，1.0 为正常语速\n"
-        "- seed：固定随机种子，-1 表示随机；对比试听时可给固定值\n"
-        "调参原则：\n"
-        "- 哭泣/悲伤/害羞：语速略慢（0.85-0.95），温度偏低（0.5-0.7），top_k 偏小保持稳定\n"
-        "- 生气/惊讶：语速略快（1.05-1.15），温度稍高（0.9-1.1）\n"
-        "- 微笑/决心/认真：正常偏稳，温度 0.7-0.9，top_k 10-20\n"
-        "- 告别/感动/思考：中速、稳定，温度 0.7-0.9\n"
-        "示例：\n"
-        '{"哭泣": {"temperature": 0.6, "top_k": 8, "top_p": 0.8, "speed_factor": 0.9, "seed": -1}}\n'
-        "情绪列表：" + "、".join(emotions)
-    )
+    parts = [
+        "你是一个 GPT-SoVITS 语音合成参数调优助手，熟悉文字冒险/二创配音场景。",
+        "请为以下每种情绪推荐一组语音合成参数，让语气更贴合情绪。",
+        "只输出 JSON 对象，键是情绪名，值是该情绪的参数字典，不要输出其他内容。",
+        "可调参数及范围：",
+        "- temperature：0.1-1.5，越大表现力越强但越不稳定",
+        "- top_k：1-50，越小发音越稳定",
+        "- top_p：0.1-1.0，概率截断阈值",
+        "- speed_factor：0.5-1.5，1.0 为正常语速",
+        "- seed：固定随机种子，-1 表示随机；对比试听时可给固定值",
+        "默认值：temperature=1、top_k=15、top_p=1、speed_factor=1、seed=-1",
+        "调参原则：",
+        "- 哭泣/悲伤/害羞：语速略慢（0.85-0.95），温度偏低（0.5-0.7），top_k 偏小保持稳定",
+        "- 生气/惊讶：语速略快（1.05-1.15），温度稍高（0.9-1.1）",
+        "- 微笑/决心/认真：正常偏稳，温度 0.7-0.9，top_k 10-20",
+        "- 告别/感动/思考：中速、稳定，温度 0.7-0.9",
+        "严格要求：",
+        "- 每个情绪都必须给出全部 5 个参数，值必须在范围内",
+        "- 不同情绪至少要在 temperature 或 speed_factor 上体现出明显差异",
+        "- 禁止所有情绪返回同一组参数，禁止原样返回默认值组合",
+        "示例：",
+        '{"哭泣": {"temperature": 0.6, "top_k": 8, "top_p": 0.8, "speed_factor": 0.9, "seed": -1}}',
+    ]
+    if lines:
+        parts.append("以下为剧本片段（情绪已标注），请结合台词语气调整参数：")
+        for line in lines[:60]:
+            parts.append("- {character}（{emotion}）：{text}".format(
+                character=line.get("character", ""),
+                emotion=line.get("emotion", ""),
+                text=(line.get("text") or "").replace("\n", " ")[:120],
+            ))
+    parts.append("情绪列表：" + "、".join(emotions))
+    return "\n".join(parts)
 
 
-def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash"):
+def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None):
     """调用 DeepSeek API 为情绪列表推荐 SoVITS 合成参数。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
     if not emotions:
@@ -91,7 +139,7 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
     response = client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": build_param_prompt(emotions)},
+            {"role": "system", "content": build_param_prompt(emotions, lines)},
             {"role": "user", "content": "请为这些情绪给出参数建议。"},
         ],
         temperature=0.3,
@@ -106,13 +154,13 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
     for name, p in data.items():
         if not isinstance(p, dict):
             continue
-        cleaned[str(name).strip()] = {
+        cleaned[str(name).strip()] = _merge_param_suggestion(str(name).strip(), {
             "temperature": _param_float(p.get("temperature"), 0.1, 1.5, 1.0),
             "top_k": _param_int(p.get("top_k"), 1, 50, 15),
             "top_p": _param_float(p.get("top_p"), 0.1, 1.0, 1.0),
             "speed_factor": _param_float(p.get("speed_factor"), 0.5, 1.5, 1.0),
             "seed": _param_int(p.get("seed"), -1, 2147483647, -1),
-        }
+        })
     return cleaned
 
 
