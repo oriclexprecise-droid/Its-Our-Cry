@@ -1,6 +1,7 @@
 const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [] };
 let audioPlayer = null;
 let analysisController = null;
+let projectSelectedIds = new Set();
 
 async function api(url, opts = {}) {
   const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -641,10 +642,12 @@ function showProjectPicker() {
   if (projects) projects.classList.remove("hidden");
   if (workbench) workbench.classList.add("hidden");
   if (settings) settings.classList.add("hidden");
-  ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-settings", "btn-recent"].forEach(id => {
+  ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-recent"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add("hidden");
   });
+  const settingsBtn = document.getElementById("btn-settings");
+  if (settingsBtn) settingsBtn.classList.remove("hidden");
   const banner = document.getElementById("deploy-banner");
   if (banner) banner.classList.add("hidden");
 }
@@ -730,6 +733,8 @@ async function openProjectsModal() {
   modal.classList.remove("hidden");
   list.innerHTML = '<div class="recent-empty">加载中...</div>';
   if (status) status.textContent = "";
+  projectSelectedIds = new Set();
+  updateProjectsToolbar();
   try {
     const data = await api("/api/recent");
     const records = data.records || [];
@@ -742,6 +747,7 @@ async function openProjectsModal() {
       const first = r.first_line ? '<div class="recent-preview" title="' + esc(r.first_line) + '">' + esc(r.first_line) + '</div>' : "";
       const meta = (r.line_count ? r.line_count + " 条" : "仅剧本") + " · " + r.voice_count + " 条语音" + (r.fail_count > 0 ? " · 仅字幕 " + r.fail_count + " 条" : "") + " · " + (r.version_count || 0) + " 个小版本";
       return '<div class="project-item">'
+        + '<label class="project-select" title="选择该项目"><input type="checkbox" class="project-select-box" data-id="' + esc(r.id) + '"></label>'
         + '<div class="project-item-main">'
         + '<div class="project-item-head"><span class="project-item-name">' + esc(projectName) + '</span><span class="recent-badge">' + (r.source === "manual" ? "手动" : "自动") + " · " + (r.lang === "ja" ? "日语" : "中文") + "</span></div>"
         + '<div class="project-item-time">' + esc(r.saved_at || "") + '</div>'
@@ -755,6 +761,15 @@ async function openProjectsModal() {
         + '</div>'
         + '</div>';
     }).join("");
+    projectSelectedIds = new Set();
+    const selectAllBox = document.getElementById("projects-select-all");
+    if (selectAllBox) { selectAllBox.checked = false; selectAllBox.indeterminate = false; }
+    updateProjectsToolbar();
+    list.querySelectorAll(".project-select-box").forEach(box => box.addEventListener("change", () => {
+      const id = box.dataset.id;
+      if (box.checked) projectSelectedIds.add(id); else projectSelectedIds.delete(id);
+      updateProjectsToolbar();
+    }));
     list.querySelectorAll(".btn-project-load").forEach(btn => btn.addEventListener("click", () => loadRecentRecord(btn.dataset.id)));
     list.querySelectorAll(".btn-project-open").forEach(btn => btn.addEventListener("click", () => openRecentFolder(btn.dataset.id)));
     list.querySelectorAll(".btn-project-del").forEach(btn => btn.addEventListener("click", () => deleteRecentRecord(btn.dataset.id)));
@@ -960,6 +975,56 @@ async function deleteRecentRecord(id) {
     setRecentStatus("删除失败: " + e.message, "error");
   }
 }
+
+function updateProjectsToolbar() {
+  const allBox = document.getElementById("projects-select-all");
+  const countEl = document.getElementById("projects-selected-count");
+  const delBtn = document.getElementById("btn-projects-delete-selected");
+  const count = projectSelectedIds.size;
+  if (countEl) countEl.textContent = "已选 " + count + " 项";
+  if (delBtn) delBtn.disabled = count === 0;
+  if (allBox) {
+    const total = document.querySelectorAll("#projects-list .project-select-box").length;
+    allBox.checked = total > 0 && count === total;
+    allBox.indeterminate = count > 0 && count < total;
+  }
+}
+
+async function deleteSelectedProjects() {
+  const ids = [...projectSelectedIds];
+  if (!ids.length) return;
+  if (!(await showConfirmModal("确定删除选中的 " + ids.length + " 个项目？此操作不可恢复。"))) return;
+  const status = document.getElementById("projects-status");
+  const btn = document.getElementById("btn-projects-delete-selected");
+  if (status) { status.textContent = "正在删除 " + ids.length + " 个项目..."; status.className = "status-text"; }
+  if (btn) btn.disabled = true;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try {
+      await api("/api/recent/" + id, { method: "DELETE" });
+      ok++;
+    } catch (e) {
+      fail++;
+    }
+  }
+  if (fail === 0) toast("已删除 " + ok + " 个项目", "success");
+  else if (ok === 0) toast("删除失败：" + fail + " 个项目", "error");
+  else toast("已删除 " + ok + " 个，失败 " + fail + " 个", "error");
+  openProjectsModal();
+}
+
+const projectsSelectAllEl = document.getElementById("projects-select-all");
+if (projectsSelectAllEl) {
+  projectsSelectAllEl.addEventListener("change", (e) => {
+    document.querySelectorAll("#projects-list .project-select-box").forEach(box => {
+      box.checked = e.target.checked;
+      if (e.target.checked) projectSelectedIds.add(box.dataset.id); else projectSelectedIds.delete(box.dataset.id);
+    });
+    updateProjectsToolbar();
+  });
+}
+const btnProjectsDeleteSelected = document.getElementById("btn-projects-delete-selected");
+if (btnProjectsDeleteSelected) btnProjectsDeleteSelected.addEventListener("click", deleteSelectedProjects);
 
 async function clearRecentRecords() {
   if (!(await showConfirmModal("确定清空全部项目？此操作不可恢复。"))) return;
@@ -2316,6 +2381,7 @@ function updateDeployBanner(cfgPath) {
 }
 
 const SETTINGS_TAB_KEY = "mygo_settings_tab";
+let settingsReturnTo = "workbench";
 
 function openSettingsTab(tab) {
   document.querySelectorAll(".settings-tab").forEach(btn => {
@@ -2332,6 +2398,7 @@ function showSettings(tab) {
   const settings = document.getElementById("view-settings");
   const projects = document.getElementById("view-projects");
   if (!workbench || !settings) return;
+  settingsReturnTo = (projects && !projects.classList.contains("hidden")) ? "projects" : "workbench";
   if (projects) projects.classList.add("hidden");
   const recentDropdown = document.getElementById("recent-dropdown");
   if (recentDropdown) recentDropdown.classList.add("hidden");
@@ -2369,12 +2436,14 @@ function initSettingsNav() {
   document.getElementById("btn-settings").addEventListener("click", () => {
     const settingsView = document.getElementById("view-settings");
     if (settingsView && !settingsView.classList.contains("hidden")) {
-      showWorkbench();
+      if (settingsReturnTo === "projects") showProjectPicker(); else showWorkbench();
     } else {
       showSettings(null);
     }
   });
-  document.getElementById("btn-back-workbench").addEventListener("click", showWorkbench);
+  document.getElementById("btn-back-workbench").addEventListener("click", () => {
+    if (settingsReturnTo === "projects") showProjectPicker(); else showWorkbench();
+  });
   document.querySelectorAll(".settings-tab").forEach(btn => {
     btn.addEventListener("click", () => showSettings(btn.dataset.settingsTab));
   });

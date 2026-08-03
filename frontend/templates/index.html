@@ -50,7 +50,7 @@
     <div id="creator-tip" class="creator-tip"></div>
     <h1>It 's Our Cry!!!!!</h1>
     <div class="header-meta">
-      <span class="version-tag">Version 1.3.4</span>
+      <span class="version-tag">Version 1.3.5</span>
       <button id="btn-back-workbench" class="btn-secondary btn-small hidden" title="返回工作台">返回工作台</button>
       <button id="btn-undo" class="btn-secondary btn-small hidden" disabled title="撤销 (Ctrl+Z)">撤销</button>
       <button id="btn-redo" class="btn-secondary btn-small hidden" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
@@ -515,6 +515,11 @@
 <div id="projects-modal" class="modal-overlay hidden">
   <div class="modal-box">
     <h3>往期项目</h3>
+    <div class="projects-toolbar">
+      <label class="projects-select-all"><input type="checkbox" id="projects-select-all"> 全选</label>
+      <span id="projects-selected-count" class="status-text projects-selected-count">已选 0 项</span>
+      <button type="button" id="btn-projects-delete-selected" class="btn-secondary btn-small" disabled>删除选中</button>
+    </div>
     <div id="projects-list" class="projects-list"><div class="recent-empty">加载中...</div></div>
     <span id="projects-status" class="status-text"></span>
     <div class="modal-actions">
@@ -532,7 +537,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260804j"></script>
+<script src="/static/app.js?v=20260804k"></script>
 <script>
 (function () {
   var tips = [
