@@ -693,38 +693,34 @@ async function deleteRecentRecord(id) {
 
 async function clearRecentRecords() {
   if (!(await showConfirmModal("确定清空全部近期记录？此操作不可恢复。"))) return;
-  const status = document.getElementById("recent-settings-status");
   try {
     await api("/api/recent/clear", { method: "POST" });
-    if (status) { status.textContent = "已清空全部记录"; status.className = "status-text success"; }
+    setRecentStatus("已清空全部记录", "success");
     refreshRecentList();
   } catch (e) {
-    if (status) { status.textContent = "清空失败: " + e.message; status.className = "status-text error"; }
+    setRecentStatus("清空失败: " + e.message, "error");
   }
 }
 
 async function saveRecentSettings() {
-  const status = document.getElementById("recent-settings-status");
-  if (!status) return;
-  const limitRaw = parseInt(document.getElementById("recent-limit").value, 10);
+  const limitEl = document.getElementById("recent-limit");
+  if (!limitEl) return;
+  const limitRaw = parseInt(limitEl.value, 10);
   if (isNaN(limitRaw) || limitRaw < 10 || limitRaw > 500) {
-    status.textContent = "记录上限请输入 10-500 的数字";
-    status.className = "status-text error";
+    setRecentStatus("记录上限请输入 10-500 的数字", "error");
     return;
   }
-  const auto = document.getElementById("recent-auto-save").checked;
-  status.textContent = "正在保存记录设置...";
-  status.className = "status-text";
+  const autoEl = document.getElementById("recent-auto-save");
+  const auto = autoEl ? autoEl.checked : true;
+  setRecentStatus("正在保存记录设置...", "");
   try {
     const res = await api("/api/recent/settings", { method: "POST", body: JSON.stringify({ limit: limitRaw, auto_save: auto }) });
-    document.getElementById("recent-limit").value = res.settings.limit;
-    document.getElementById("recent-auto-save").checked = !!res.settings.auto_save;
-    status.textContent = "记录设置已保存";
-    status.className = "status-text success";
+    if (limitEl) limitEl.value = res.settings.limit;
+    if (autoEl) autoEl.checked = !!res.settings.auto_save;
+    setRecentStatus("记录设置已保存", "success");
     refreshRecentList();
   } catch (e) {
-    status.textContent = "保存失败: " + e.message;
-    status.className = "status-text error";
+    setRecentStatus("保存失败: " + e.message, "error");
   }
 }
 
@@ -1869,7 +1865,6 @@ function showSettings(tab) {
   workbench.classList.add("hidden");
   settings.classList.remove("hidden");
   document.getElementById("btn-back-workbench").classList.remove("hidden");
-  document.getElementById("btn-settings").classList.add("hidden");
   if (!tab) {
     const installed = localStorage.getItem("mygo_deploy_installed") === "yes";
     const saved = localStorage.getItem(SETTINGS_TAB_KEY);

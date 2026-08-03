@@ -676,3 +676,8 @@ textarea { min-height: 240px; line-height: 1.6; }
   .ref-emotions { grid-template-columns: 1fr; }
   .ref-char-head { flex-direction: column; align-items: flex-start; }
 }
+/* Recent records dropdown controls (workbench) */
+.recent-settings-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; padding-top: 8px; border-top: 1px solid rgba(26, 74, 122, 0.7); }
+.recent-settings-row .recent-option { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #cbd8f0; }
+.recent-settings-row input[type="number"] { width: 70px; padding: 3px 6px; font-size: 11px; background: #0a1c36; color: #e8f0ff; border: 1px solid #1a4a7a; border-radius: 4px; }
+.recent-settings-row .btn-secondary { padding: 3px 8px; font-size: 11px; }

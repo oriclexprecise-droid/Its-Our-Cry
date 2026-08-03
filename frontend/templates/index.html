@@ -50,7 +50,7 @@
     <div id="creator-tip" class="creator-tip"></div>
     <h1>It 's Our Cry!!!!!</h1>
     <div class="header-meta">
-      <span class="version-tag">Version 1.2.2</span>
+      <span class="version-tag">Version 1.2.3</span>
       <button id="btn-back-workbench" class="btn-secondary btn-small hidden" title="返回工作台">返回工作台</button>
       <button id="btn-undo" class="btn-secondary btn-small" disabled title="撤销 (Ctrl+Z)">撤销</button>
       <button id="btn-redo" class="btn-secondary btn-small" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
@@ -71,6 +71,12 @@
       <button id="btn-save-record" class="btn-secondary btn-small" title="把当前工作台保存为近期记录">保存为记录</button>
     </div>
     <div id="recent-list" class="recent-list"><div class="recent-empty">暂无近期记录</div></div>
+    <div class="recent-settings-row">
+      <label class="recent-option" title="生成完成后自动保存记录"><input type="checkbox" id="recent-auto-save"> 自动保存</label>
+      <input type="number" id="recent-limit" min="10" max="500" step="1" value="50" title="最多保留记录数（10-500）">
+      <button id="btn-save-recent-settings" class="btn-secondary btn-small" title="保存记录设置">保存</button>
+      <button id="btn-clear-recent" class="btn-secondary btn-small" title="清空全部记录">清空</button>
+    </div>
     <span id="recent-status" class="status-text"></span>
   </div>
 
@@ -241,19 +247,6 @@
           <span id="pronunciation-config-status" class="status-text"></span>
         </div>
         <div class="side-section">
-          <h3 class="side-section-title">近期记录</h3>
-          <label class="recent-option"><input type="checkbox" id="recent-auto-save"> 生成完成后自动保存记录</label>
-          <div class="api-field">
-            <label for="recent-limit">最多保留记录数（10-500）</label>
-            <input type="number" id="recent-limit" min="10" max="500" step="1" value="50">
-          </div>
-          <div class="btn-row">
-            <button type="button" id="btn-save-recent-settings" class="btn-secondary btn-small btn-flex">保存记录设置</button>
-            <button type="button" id="btn-clear-recent" class="btn-secondary btn-small">清空全部记录</button>
-          </div>
-          <span id="recent-settings-status" class="status-text"></span>
-        </div>
-        <div class="side-section">
           <h3 class="side-section-title">外观</h3>
           <div class="api-field">
             <label for="bg-select">背景图</label>
@@ -276,6 +269,7 @@
           <div id="model-list" class="model-list"><div class="model-empty">加载中...</div></div>
         </div>
       </div>
+    </section>
     <section class="panel settings-page" data-settings-page="refs">
       <div class="panel-header"><h2>参考音频库</h2></div>
       <div class="panel-body ref-body">
@@ -290,7 +284,6 @@
           <div id="ref-library-list" class="ref-library-list"><div class="model-empty">加载中...</div></div>
         </div>
       </div>
-    </section>
     </section>
     <section class="panel settings-page" data-settings-page="deploy">
       <div class="panel-header"><h2>部署</h2></div>
@@ -371,7 +364,7 @@
         <h3 class="side-section-title">数据与隐私</h3>
         <p class="legal-text">本程序仅在本地记录情绪修正等匿名日志用于改进 AI 效果，日志可随时查看、下载与重置，不会上传剧本内容和 API Key。</p>
         <h3 class="side-section-title">版本信息</h3>
-        <p class="legal-text">版本：1.2.2</p>
+        <p class="legal-text">版本：1.2.3</p>
         <p class="legal-text">开发者：ORiCale</p>
         <h3 class="side-section-title">联系与支持</h3>
         <p class="legal-text">Bilibili：<a href="https://space.bilibili.com/3493294730381924" target="_blank" rel="noopener">访问我的主页</a></p>
@@ -414,7 +407,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260808"></script>
+<script src="/static/app.js?v=20260809"></script>
 <script>
 (function () {
   var tips = [
