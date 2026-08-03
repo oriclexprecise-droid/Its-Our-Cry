@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260822">
+<link rel="stylesheet" href="/static/style.css?v=20260823">
 <style>
 .creator-tip {
   position: fixed;
@@ -68,7 +68,7 @@
   <div id="recent-dropdown" class="recent-dropdown hidden">
     <div class="recent-dropdown-head">
       <span class="recent-dropdown-title">近期记录</span>
-      <button id="btn-save-record" class="btn-secondary btn-small" title="把当前工作台保存为近期记录">保存为记录</button>
+      <button id="btn-save-record" class="btn-secondary btn-small" title="把当前工作台保存为草稿新版本（手动）">保存草稿</button>
     </div>
     <div id="recent-list" class="recent-list"><div class="recent-empty">暂无近期记录</div></div>
     <span id="recent-status" class="status-text"></span>
@@ -228,7 +228,7 @@
         <div class="side-section">
           <h3 class="side-section-title">近期记录</h3>
           <label class="recent-option"><input type="checkbox" id="recent-auto-save"> 生成完成后自动保存记录</label>
-          <label class="recent-option"><input type="checkbox" id="recent-version-auto"> 每 5 分钟自动保存一个小版本</label>
+          <label class="recent-option"><input type="checkbox" id="recent-version-auto"> 启用自动保存版本</label>
           <div class="api-field">
             <label for="recent-interval">自动保存间隔（分钟，1-120）</label>
             <input type="number" id="recent-interval" min="1" max="120" step="1" value="5">
@@ -236,6 +236,10 @@
           <div class="api-field">
             <label for="recent-limit">最多保留记录数（10-500）</label>
             <input type="number" id="recent-limit" min="10" max="500" step="1" value="50">
+          </div>
+          <div class="api-field">
+            <label for="recent-version-limit">每个草稿最多保留版本数（5-200）</label>
+            <input type="number" id="recent-version-limit" min="5" max="200" step="1" value="50">
           </div>
           <div class="btn-row">
             <button type="button" id="btn-save-recent-settings" class="btn-secondary btn-small btn-flex">保存记录设置</button>
@@ -485,7 +489,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260822"></script>
+<script src="/static/app.js?v=20260823"></script>
 <script>
 (function () {
   var tips = [

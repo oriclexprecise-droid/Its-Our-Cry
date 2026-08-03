@@ -36,16 +36,18 @@ DEFAULT_INTERVAL = 0.5
 RECENT_LIMIT_MIN = 10
 RECENT_LIMIT_MAX = 500
 DEFAULT_RECENT_LIMIT = 50
-VERSION_LIMIT = 20
+VERSION_LIMIT_MIN = 5
+VERSION_LIMIT_MAX = 200
+DEFAULT_VERSION_LIMIT = 50
 AUTO_SAVE_INTERVAL_MIN = 1
 AUTO_SAVE_INTERVAL_MAX = 120
 DEFAULT_AUTO_SAVE_INTERVAL = 5
 
 
-def _recent_version_meta(record):
+def _recent_version_meta(record, limit=DEFAULT_VERSION_LIMIT):
     return [
-        {"id": v.get("id"), "saved_at": v.get("saved_at")}
-        for v in (record.get("versions") or [])[:VERSION_LIMIT]
+        {"id": v.get("id"), "saved_at": v.get("saved_at"), "source": v.get("source", "auto")}
+        for v in (record.get("versions") or [])[:limit]
     ]
 
 
@@ -505,11 +507,16 @@ def create_app(config_path="config.yaml"):
         auto_interval = int(user_settings.get("auto_save_interval") or DEFAULT_AUTO_SAVE_INTERVAL)
     except (TypeError, ValueError):
         auto_interval = DEFAULT_AUTO_SAVE_INTERVAL
+    try:
+        version_limit = int(user_settings.get("recent_version_limit") or DEFAULT_VERSION_LIMIT)
+    except (TypeError, ValueError):
+        version_limit = DEFAULT_VERSION_LIMIT
     recent_settings = {
         "limit": max(RECENT_LIMIT_MIN, min(RECENT_LIMIT_MAX, int(user_settings.get("recent_limit") or DEFAULT_RECENT_LIMIT))),
         "auto_save": recent_auto_save,
         "version_auto_save": version_auto_save,
         "auto_save_interval": max(AUTO_SAVE_INTERVAL_MIN, min(AUTO_SAVE_INTERVAL_MAX, auto_interval)),
+        "version_limit": max(VERSION_LIMIT_MIN, min(VERSION_LIMIT_MAX, version_limit)),
     }
 
     # Resolve all relative paths to absolute to survive cwd changes
@@ -640,7 +647,57 @@ def create_app(config_path="config.yaml"):
             with recent_lock:
                 data = json.loads(recent_path.read_text(encoding="utf-8"))
             records = data if isinstance(data, list) else []
-            return [r for r in records if isinstance(r, dict) and r.get("id")]
+            records = [r for r in records if isinstance(r, dict) and r.get("id")]
+            migrated = False
+            for record in records:
+                versions = record.get("versions") or []
+                if versions and all(isinstance(v, dict) and "generated" in v for v in versions):
+                    continue
+                migrated = True
+                old_versions = [v for v in versions if isinstance(v, dict)]
+                new_versions = []
+                for v in old_versions:
+                    cfg = v.get("config") if isinstance(v.get("config"), dict) else {}
+                    new_versions.append({
+                        "id": v.get("id") or uuid.uuid4().hex,
+                        "saved_at": v.get("saved_at") or record.get("saved_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "source": "auto",
+                        "script": v.get("script", record.get("script", "")),
+                        "lines": copy.deepcopy(v.get("lines", record.get("lines", []))),
+                        "lang": cfg.get("lang") or v.get("lang") or record.get("lang", "zh"),
+                        "generated": {},
+                        "failures": {},
+                        "merged_path": None,
+                        "srt_path": None,
+                        "time_info": [],
+                        "config": cfg or record.get("config") or {},
+                    })
+                base = {
+                    "id": str(record.get("id", "")) + "_base",
+                    "saved_at": record.get("saved_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "source": record.get("source", "auto"),
+                    "script": record.get("script", ""),
+                    "lines": copy.deepcopy(record.get("lines", [])),
+                    "lang": record.get("lang", "zh"),
+                    "generated": {},
+                    "failures": {},
+                    "merged_path": record.get("merged_path"),
+                    "srt_path": record.get("srt_path"),
+                    "time_info": copy.deepcopy(record.get("time_info", [])),
+                    "config": record.get("config") or {},
+                }
+                for idx, g in (record.get("generated") or {}).items():
+                    base["generated"][str(idx)] = {"path": g.get("path"), "duration": g.get("duration")}
+                for idx, msg in (record.get("failures") or {}).items():
+                    base["failures"][str(idx)] = str(msg)
+                if not any(v.get("saved_at") == base["saved_at"] and v.get("script") == base["script"] for v in new_versions):
+                    new_versions.insert(0, base)
+                record["versions"] = new_versions
+                record.setdefault("created_at", record.get("saved_at"))
+                record["updated_at"] = record.get("updated_at") or record.get("saved_at")
+            if migrated:
+                persist_recent_records(records)
+            return records
         except Exception:
             return []
 
@@ -667,6 +724,7 @@ def create_app(config_path="config.yaml"):
             settings["recent_auto_save"] = recent_settings["auto_save"]
             settings["recent_version_auto_save"] = recent_settings["version_auto_save"]
             settings["auto_save_interval"] = recent_settings["auto_save_interval"]
+            settings["recent_version_limit"] = recent_settings["version_limit"]
             user_settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:
             pass
@@ -677,33 +735,26 @@ def create_app(config_path="config.yaml"):
             "narration": config.get("narration", {}),
         }
 
-    def build_recent_record(source="auto"):
-        now = time.strftime("%Y-%m-%d %H:%M:%S")
+    def snapshot_current_workbench():
         generated = {}
         for idx, gen in (state.get("generated") or {}).items():
             generated[str(idx)] = {"path": gen.get("path"), "duration": gen.get("duration")}
         failures = {}
         for idx, msg in (state.get("failures") or {}).items():
-            failures[str(idx)] = msg
+            failures[str(idx)] = str(msg)
         return {
-            "id": uuid.uuid4().hex,
-            "saved_at": now,
-            "updated_at": now,
-            "source": source,
-            "lang": state.get("lang", "zh"),
             "script": state.get("script", ""),
             "lines": copy.deepcopy(state.get("lines", [])),
+            "lang": state.get("lang", "zh"),
             "generated": generated,
             "failures": failures,
             "merged_path": state.get("merged_path"),
             "srt_path": state.get("srt_path"),
             "time_info": copy.deepcopy(state.get("time_info", [])),
             "config": record_config_snapshot(),
-            "exports": [],
-            "versions": [],
         }
 
-    def upsert_current_record(source="auto"):
+    def save_current_version(source="auto", force=False):
         with recent_lock:
             records = load_recent_records()
             record_id = state.get("current_record_id")
@@ -713,32 +764,32 @@ def create_app(config_path="config.yaml"):
                     if r.get("id") == record_id:
                         record = r
                         break
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            snapshot = snapshot_current_workbench()
             if record is None:
-                record = build_recent_record(source)
+                record = {
+                    "id": uuid.uuid4().hex,
+                    "created_at": now,
+                    "updated_at": now,
+                    "versions": [],
+                    "exports": [],
+                }
                 state["current_record_id"] = record["id"]
                 records.insert(0, record)
-            else:
-                now = time.strftime("%Y-%m-%d %H:%M:%S")
-                record["updated_at"] = now
-                record["source"] = source
-                record["lang"] = state.get("lang", "zh")
-                record["script"] = state.get("script", "")
-                record["lines"] = copy.deepcopy(state.get("lines", []))
-                record["generated"] = {}
-                for idx, gen in (state.get("generated") or {}).items():
-                    record["generated"][str(idx)] = {"path": gen.get("path"), "duration": gen.get("duration")}
-                record["failures"] = {}
-                for idx, msg in (state.get("failures") or {}).items():
-                    record["failures"][str(idx)] = msg
-                record["merged_path"] = state.get("merged_path")
-                record["srt_path"] = state.get("srt_path")
-                record["time_info"] = copy.deepcopy(state.get("time_info", []))
-                record["config"] = record_config_snapshot()
-                records = [r for r in records if r.get("id") != record_id]
-                records.insert(0, record)
+            versions = record.setdefault("versions", [])
+            if not force and versions and _same_recent_version(versions[0], snapshot):
+                return record, None, False
+            version = {"id": uuid.uuid4().hex, "saved_at": now, "source": source}
+            version.update(copy.deepcopy(snapshot))
+            versions.insert(0, version)
+            version_limit = int(recent_settings.get("version_limit") or DEFAULT_VERSION_LIMIT)
+            del versions[version_limit:]
+            record["updated_at"] = now
+            records = [r for r in records if r.get("id") != record["id"]]
+            records.insert(0, record)
             enforce_recent_limit(records)
             persist_recent_records(records)
-        return record
+            return record, version, True
 
     def attach_export_to_record(export_info):
         with recent_lock:
@@ -751,7 +802,7 @@ def create_app(config_path="config.yaml"):
                         record = r
                         break
             if record is None:
-                upsert_current_record("auto")
+                save_current_version("auto", force=True)
                 records = load_recent_records()
                 record_id = state.get("current_record_id")
                 for r in records:
@@ -768,50 +819,64 @@ def create_app(config_path="config.yaml"):
             persist_recent_records(records)
 
     def recent_summary(record):
-        lines = record.get("lines") or []
+        versions = record.get("versions") or []
+        latest = versions[0] if versions else record
+        lines = latest.get("lines") or []
         exports = record.get("exports") or []
         first = ""
         if lines:
             l0 = lines[0]
             first = (str(l0.get("character") or "") + "：" + str(l0.get("text") or ""))[:80]
-        elif str(record.get("script") or "").strip():
-            first = str(record.get("script") or "").strip().split("\n")[0][:80]
+        elif str(latest.get("script") or "").strip():
+            first = str(latest.get("script") or "").strip().split("\n")[0][:80]
         return {
             "id": record.get("id"),
-            "saved_at": record.get("saved_at"),
-            "updated_at": record.get("updated_at"),
-            "source": record.get("source", "auto"),
+            "created_at": record.get("created_at") or record.get("saved_at"),
+            "saved_at": latest.get("saved_at") or record.get("saved_at"),
+            "updated_at": record.get("updated_at") or record.get("saved_at"),
+            "source": latest.get("source") or record.get("source", "auto"),
             "line_count": len(lines),
-            "voice_count": len(record.get("generated") or {}),
-            "fail_count": len(record.get("failures") or {}),
+            "voice_count": len(latest.get("generated") or {}),
+            "fail_count": len(latest.get("failures") or {}),
             "export_count": len(exports),
             "last_folder": exports[-1].get("folder") if exports else None,
             "first_line": first,
-            "script": str(record.get("script") or "")[:120],
-            "version_count": len(record.get("versions") or []),
-            "versions": _recent_version_meta(record),
-            "lang": record.get("lang", "zh"),
+            "script": str(latest.get("script") or "")[:120],
+            "version_count": len(versions),
+            "versions": _recent_version_meta(record, int(recent_settings.get("version_limit") or DEFAULT_VERSION_LIMIT)),
+            "lang": latest.get("lang", "zh"),
         }
 
-    def restore_workbench_from_record(record):
-        state["lines"] = copy.deepcopy(record.get("lines", []))
-        state["script"] = record.get("script", "")
+    def restore_workbench_from_version(record, version):
+        state["script"] = version.get("script", "")
+        state["lines"] = copy.deepcopy(version.get("lines", []))
         state["generated"] = {}
-        for k, v in (record.get("generated") or {}).items():
+        for k, v in (version.get("generated") or {}).items():
             try:
                 state["generated"][int(k)] = {"path": v.get("path"), "duration": v.get("duration")}
             except (TypeError, ValueError):
                 continue
         state["failures"] = {}
-        for k, v in (record.get("failures") or {}).items():
+        for k, v in (version.get("failures") or {}).items():
             state["failures"][int(k)] = str(v)
-        state["lang"] = record.get("lang", "zh")
-        state["merged_path"] = record.get("merged_path")
-        state["srt_path"] = record.get("srt_path")
-        state["time_info"] = copy.deepcopy(record.get("time_info", []))
+        cfg = version.get("config") or {}
+        lang = version.get("lang", "zh")
+        if isinstance(cfg, dict) and cfg.get("lang"):
+            lang = cfg["lang"]
+        state["lang"] = lang
+        if isinstance(cfg, dict) and isinstance(cfg.get("narration"), dict):
+            config["narration"] = {**config.get("narration", {}), **cfg["narration"]}
+        state["merged_path"] = version.get("merged_path")
+        state["srt_path"] = version.get("srt_path")
+        state["time_info"] = copy.deepcopy(version.get("time_info", []))
         state["progress"] = {"current": 0, "total": 0}
         state["srt_only"] = False
         state["current_record_id"] = record.get("id")
+
+    def restore_workbench_from_record(record):
+        versions = record.get("versions") or []
+        version = versions[0] if versions else record
+        restore_workbench_from_version(record, version)
 
     @app.route("/")
     def index():
@@ -1935,7 +2000,7 @@ def create_app(config_path="config.yaml"):
                 state["generating"] = False
                 if not state.get("cancelled") and recent_settings.get("auto_save", True):
                     try:
-                        upsert_current_record("auto")
+                        save_current_version("auto", force=True)
                     except Exception:
                         pass
 
@@ -2047,15 +2112,20 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/recent/save", methods=["POST"])
     def save_recent_record():
         if state.get("generating"):
-            return jsonify({"error": "生成中，请稍后再保存记录"}), 409
+            return jsonify({"error": "生成中，请稍后再保存草稿"}), 409
         if not state["lines"] and not str(state.get("script", "")).strip():
             return jsonify({"error": "还没有可保存的剧本"}), 400
         data = request.get_json(silent=True) or {}
         source = str(data.get("source") or "manual")
         if source not in ("manual", "auto"):
             source = "manual"
-        record = upsert_current_record(source)
-        return jsonify({"status": "ok", "record": recent_summary(record)})
+        record, version, created = save_current_version(source, force=(source == "manual"))
+        return jsonify({
+            "status": "ok",
+            "created": created,
+            "record": recent_summary(record),
+            "version": {"id": version["id"], "saved_at": version["saved_at"], "source": version["source"]} if version else None,
+        })
 
     @app.route("/api/recent/versions", methods=["POST"])
     def add_current_version():
@@ -2063,47 +2133,11 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "生成中，请稍后再保存自动版本"}), 409
         if not state["lines"] and not str(state.get("script", "")).strip():
             return jsonify({"error": "还没有可保存的内容"}), 400
-        with recent_lock:
-            record = upsert_current_record("auto")
-            versions = record.setdefault("versions", [])
-            now = time.strftime("%Y-%m-%d %H:%M:%S")
-            current = {
-                "script": state.get("script", ""),
-                "lines": copy.deepcopy(state.get("lines", [])),
-                "lang": state.get("lang", "zh"),
-                "config": record_config_snapshot(),
-            }
-            if versions and _same_recent_version(versions[0], current):
-                return jsonify({"status": "ok", "created": False, "record_id": record.get("id"), "versions": _recent_version_meta(record)})
-            versions.insert(0, {
-                "id": uuid.uuid4().hex,
-                "saved_at": now,
-                "script": current["script"],
-                "lines": current["lines"],
-                "lang": current["lang"],
-                "config": current["config"],
-            })
-            del versions[VERSION_LIMIT:]
-            record["updated_at"] = now
-            records = [r for r in load_recent_records() if r.get("id") != record.get("id")]
-            records.insert(0, record)
-            enforce_recent_limit(records)
-            persist_recent_records(records)
-            return jsonify({"status": "ok", "created": True, "record_id": record.get("id"), "versions": _recent_version_meta(record)})
-
-    @app.route("/api/recent/<record_id>/versions", methods=["DELETE"])
-    def clear_recent_versions(record_id):
-        records = load_recent_records()
-        record = next((r for r in records if r.get("id") == record_id), None)
-        if record is None:
-            return jsonify({"error": "记录不存在"}), 404
-        record["versions"] = []
-        record["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        records = [r for r in records if r.get("id") != record_id]
-        records.insert(0, record)
-        enforce_recent_limit(records)
-        persist_recent_records(records)
-        return jsonify({"status": "ok", "versions": []})
+        record, version, created = save_current_version("auto", force=False)
+        meta = _recent_version_meta(record, int(recent_settings.get("version_limit") or DEFAULT_VERSION_LIMIT))
+        if not created:
+            return jsonify({"status": "ok", "created": False, "record_id": record.get("id"), "versions": meta})
+        return jsonify({"status": "ok", "created": True, "record_id": record.get("id"), "versions": meta})
 
     @app.route("/api/recent/<record_id>/versions/<version_id>/load", methods=["POST"])
     def load_recent_version(record_id, version_id):
@@ -2115,28 +2149,17 @@ def create_app(config_path="config.yaml"):
         version = next((v for v in (record.get("versions") or []) if v.get("id") == version_id), None)
         if version is None:
             return jsonify({"error": "版本不存在"}), 404
-        push_history("载入自动保存版本")
-        state["script"] = version.get("script", "")
-        state["lines"] = copy.deepcopy(version.get("lines", []))
-        state["lang"] = version.get("lang", "zh")
-        cfg = version.get("config") or {}
-        if isinstance(cfg, dict) and cfg.get("lang"):
-            state["lang"] = cfg["lang"]
-        if isinstance(cfg, dict) and isinstance(cfg.get("narration"), dict):
-            config["narration"] = {**config.get("narration", {}), **cfg["narration"]}
-        state["generated"] = {}
-        state["failures"] = {}
-        state["merged_path"] = None
-        state["srt_path"] = None
-        state["time_info"] = []
-        state["progress"] = {"current": 0, "total": 0}
-        state["srt_only"] = False
-        state["current_record_id"] = record_id
+        push_history("载入版本")
+        restore_workbench_from_version(record, version)
+        record_event(
+            {"type": "recent_load", "message": "载入版本：" + str(version.get("saved_at")), "payload": {"id": record_id, "version": version_id, "line_count": len(state["lines"])}},
+            project_root=project_root,
+        )
         return jsonify({
             "status": "ok",
             "state": workbench_state(),
             "history": history_payload(),
-            "version": {"id": version.get("id"), "saved_at": version.get("saved_at")},
+            "version": {"id": version.get("id"), "saved_at": version.get("saved_at"), "source": version.get("source", "auto")},
         })
 
     @app.route("/api/recent/<record_id>/versions/<version_id>", methods=["DELETE"])
@@ -2145,8 +2168,11 @@ def create_app(config_path="config.yaml"):
         record = next((r for r in records if r.get("id") == record_id), None)
         if record is None:
             return jsonify({"error": "记录不存在"}), 404
-        before = len(record.get("versions") or [])
-        record["versions"] = [v for v in (record.get("versions") or []) if v.get("id") != version_id]
+        versions = record.get("versions") or []
+        if len(versions) <= 1:
+            return jsonify({"error": "每个草稿至少保留一个版本，删除整个草稿请点删除"}), 400
+        before = len(versions)
+        record["versions"] = [v for v in versions if v.get("id") != version_id]
         if len(record["versions"]) == before:
             return jsonify({"error": "版本不存在"}), 404
         record["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -2154,7 +2180,7 @@ def create_app(config_path="config.yaml"):
         records.insert(0, record)
         enforce_recent_limit(records)
         persist_recent_records(records)
-        return jsonify({"status": "ok", "versions": _recent_version_meta(record)})
+        return jsonify({"status": "ok", "versions": _recent_version_meta(record, int(recent_settings.get("version_limit") or DEFAULT_VERSION_LIMIT))})
 
     @app.route("/api/recent/<record_id>", methods=["GET"])
     def get_recent_record(record_id):
@@ -2215,9 +2241,19 @@ def create_app(config_path="config.yaml"):
             except (TypeError, ValueError):
                 return jsonify({"error": "自动保存间隔必须是数字"}), 400
             recent_settings["auto_save_interval"] = max(AUTO_SAVE_INTERVAL_MIN, min(AUTO_SAVE_INTERVAL_MAX, interval))
+        if "version_limit" in data:
+            try:
+                version_limit = int(data["version_limit"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "版本上限必须是数字"}), 400
+            recent_settings["version_limit"] = max(VERSION_LIMIT_MIN, min(VERSION_LIMIT_MAX, version_limit))
         persist_recent_settings()
         records = load_recent_records()
         enforce_recent_limit(records)
+        vlimit = int(recent_settings.get("version_limit") or DEFAULT_VERSION_LIMIT)
+        for record in records:
+            if len(record.get("versions") or []) > vlimit:
+                record["versions"] = (record.get("versions") or [])[:vlimit]
         persist_recent_records(records)
         return jsonify({"status": "ok", "settings": dict(recent_settings)})
 

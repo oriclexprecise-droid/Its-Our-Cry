@@ -597,10 +597,12 @@ async function refreshRecentList() {
     const limitEl = document.getElementById("recent-limit");
     const vAutoEl = document.getElementById("recent-version-auto");
     const intervalEl = document.getElementById("recent-interval");
+    const versionLimitEl = document.getElementById("recent-version-limit");
     if (autoEl) autoEl.checked = !!settings.auto_save;
     if (limitEl) limitEl.value = settings.limit || 50;
     if (vAutoEl) vAutoEl.checked = !!settings.version_auto_save;
     if (intervalEl) intervalEl.value = settings.auto_save_interval || 5;
+    if (versionLimitEl) versionLimitEl.value = settings.version_limit || 50;
     if (!records.length) {
       listEl.innerHTML = '<div class="recent-empty">暂无近期记录</div>';
       return;
@@ -610,12 +612,11 @@ async function refreshRecentList() {
       const meta = (r.line_count ? r.line_count + " 条" : "仅剧本") + " · " + r.voice_count + " 条语音" + (r.fail_count > 0 ? " · 仅字幕 " + r.fail_count + " 条" : "") + (r.export_count > 0 ? " · 已导出 " + r.export_count + " 次" : "");
       const versions = r.versions || [];
       const versionBtn = versions.length
-        ? '<button type="button" class="btn-line-action btn-recent-versions" data-id="' + esc(r.id) + '">小版本 ' + versions.length + '</button>'
+        ? '<button type="button" class="btn-line-action btn-recent-versions" data-id="' + esc(r.id) + '">版本 ' + versions.length + '</button>'
         : "";
       const versionPanel = versions.length
         ? '<div class="recent-versions-panel hidden" id="versions-panel-' + esc(r.id) + '">'
-          + versions.map(v => '<div class="recent-version-row"><span class="recent-version-time">' + esc(v.saved_at || "") + '</span><button type="button" class="btn-line-action btn-version-load" data-id="' + esc(r.id) + '" data-vid="' + esc(v.id) + '">载入</button><button type="button" class="btn-line-action btn-version-del" data-id="' + esc(r.id) + '" data-vid="' + esc(v.id) + '">删除</button></div>').join("")
-          + '<button type="button" class="btn-line-action btn-version-clear" data-id="' + esc(r.id) + '">删除全部小版本</button>'
+          + versions.map(v => '<div class="recent-version-row"><span class="recent-version-time">' + esc(v.saved_at || "") + '</span><span class="recent-badge">' + (v.source === "manual" ? "手动" : "自动") + '</span><button type="button" class="btn-line-action btn-version-load" data-id="' + esc(r.id) + '" data-vid="' + esc(v.id) + '">载入</button><button type="button" class="btn-line-action btn-version-del" data-id="' + esc(r.id) + '" data-vid="' + esc(v.id) + '">删除</button></div>').join("")
           + '</div>'
         : "";
       return '<div class="recent-item">'
@@ -639,7 +640,6 @@ async function refreshRecentList() {
     listEl.querySelectorAll(".btn-recent-versions").forEach(btn => btn.addEventListener("click", () => toggleRecentVersions(btn.dataset.id)));
     listEl.querySelectorAll(".btn-version-load").forEach(btn => btn.addEventListener("click", () => loadRecentVersion(btn.dataset.id, btn.dataset.vid)));
     listEl.querySelectorAll(".btn-version-del").forEach(btn => btn.addEventListener("click", () => deleteRecentVersion(btn.dataset.id, btn.dataset.vid)));
-    listEl.querySelectorAll(".btn-version-clear").forEach(btn => btn.addEventListener("click", () => clearRecentVersions(btn.dataset.id)));
   } catch (e) {}
 }
 
@@ -666,7 +666,7 @@ async function saveRecentRecord() {
   setRecentStatus("正在保存...", "");
   try {
     await api("/api/recent/save", { method: "POST" });
-    setRecentStatus("已保存为近期记录", "success");
+    setRecentStatus("已保存手动版本", "success");
     refreshRecentList();
   } catch (e) {
     setRecentStatus("保存失败: " + e.message, "error");
@@ -675,7 +675,7 @@ async function saveRecentRecord() {
 
 async function loadRecentRecord(id) {
   if (state.generating) { setRecentStatus("生成中，请稍后再载入记录", "error"); return; }
-  if (state.lines.length && !(await showConfirmModal("载入记录会覆盖当前工作台（可以用撤销恢复），确定继续吗？"))) return;
+  if (state.lines.length && !(await showConfirmModal("载入草稿会覆盖当前工作台（可以用撤销恢复），确定继续吗？"))) return;
   setRecentStatus("正在载入...", "");
   try {
     const res = await api("/api/recent/" + id + "/load", { method: "POST" });
@@ -702,7 +702,7 @@ async function loadRecentRecord(id) {
     const genBtn = document.getElementById("btn-generate");
     if (genBtn) genBtn.textContent = state.hasGenerated ? "重新生成" : "生成全部语音";
     updateHistoryButtons(res.history);
-    setRecentStatus("已载入记录" + (res.record && res.record.saved_at ? "：" + res.record.saved_at : ""), "success");
+    setRecentStatus("已载入草稿" + (res.record && res.record.saved_at ? "：" + res.record.saved_at : ""), "success");
     refreshRecentList();
   } catch (e) {
     setRecentStatus("载入失败: " + e.message, "error");
@@ -758,6 +758,7 @@ async function saveRecentSettings() {
   const auto = autoEl ? autoEl.checked : true;
   const vAutoEl = document.getElementById("recent-version-auto");
   const intervalEl = document.getElementById("recent-interval");
+  const versionLimitEl = document.getElementById("recent-version-limit");
   const vAuto = vAutoEl ? vAutoEl.checked : true;
   const intervalRaw = parseInt(intervalEl ? intervalEl.value : "5", 10);
   if (isNaN(intervalRaw) || intervalRaw < 1 || intervalRaw > 120) {
@@ -765,14 +766,21 @@ async function saveRecentSettings() {
     status.className = "status-text error";
     return;
   }
+  const versionLimitRaw = parseInt(versionLimitEl ? versionLimitEl.value : "50", 10);
+  if (isNaN(versionLimitRaw) || versionLimitRaw < 5 || versionLimitRaw > 200) {
+    status.textContent = "版本上限请输入 5-200 的数字";
+    status.className = "status-text error";
+    return;
+  }
   status.textContent = "正在保存记录设置...";
   status.className = "status-text";
   try {
-    const res = await api("/api/recent/settings", { method: "POST", body: JSON.stringify({ limit: limitRaw, auto_save: auto, version_auto_save: vAuto, auto_save_interval: intervalRaw }) });
+    const res = await api("/api/recent/settings", { method: "POST", body: JSON.stringify({ limit: limitRaw, auto_save: auto, version_auto_save: vAuto, auto_save_interval: intervalRaw, version_limit: versionLimitRaw }) });
     if (limitEl) limitEl.value = res.settings.limit;
     if (autoEl) autoEl.checked = !!res.settings.auto_save;
     if (intervalEl) intervalEl.value = res.settings.auto_save_interval;
     if (vAutoEl) vAutoEl.checked = !!res.settings.version_auto_save;
+    if (versionLimitEl) versionLimitEl.value = res.settings.version_limit;
     recentSettings = res.settings || recentSettings;
     lastAutoVersionAt = 0;
     status.textContent = "记录设置已保存";
@@ -791,8 +799,8 @@ function toggleRecentVersions(id) {
 
 async function loadRecentVersion(recordId, versionId) {
   if (state.generating) { setRecentStatus("生成中，请稍后再载入版本", "error"); return; }
-  if ((state.lines.length || (state.script || "").trim()) && !(await showConfirmModal("载入自动保存版本会覆盖当前工作台（可以用撤销恢复），确定继续吗？"))) return;
-  setRecentStatus("正在载入小版本...", "");
+  if ((state.lines.length || (state.script || "").trim()) && !(await showConfirmModal("载入版本会覆盖当前工作台（可以用撤销恢复），确定继续吗？"))) return;
+  setRecentStatus("正在载入版本...", "");
   try {
     const res = await api("/api/recent/" + recordId + "/versions/" + versionId + "/load", { method: "POST" });
     const s = res.state || {};
@@ -818,7 +826,7 @@ async function loadRecentVersion(recordId, versionId) {
     const genBtn = document.getElementById("btn-generate");
     if (genBtn) genBtn.textContent = state.hasGenerated ? "重新生成" : "生成全部语音";
     updateHistoryButtons(res.history);
-    setRecentStatus("已载入小版本" + (res.version && res.version.saved_at ? "：" + res.version.saved_at : ""), "success");
+    setRecentStatus("已载入版本" + (res.version && res.version.saved_at ? "：" + res.version.saved_at : ""), "success");
     refreshRecentList();
   } catch (e) {
     setRecentStatus("载入失败: " + e.message, "error");
@@ -826,24 +834,13 @@ async function loadRecentVersion(recordId, versionId) {
 }
 
 async function deleteRecentVersion(recordId, versionId) {
-  if (!(await showConfirmModal("确定删除这条自动保存版本？"))) return;
+  if (!(await showConfirmModal("确定删除这条版本？"))) return;
   try {
     await api("/api/recent/" + recordId + "/versions/" + versionId, { method: "DELETE" });
-    setRecentStatus("已删除小版本", "success");
+    setRecentStatus("已删除版本", "success");
     refreshRecentList();
   } catch (e) {
     setRecentStatus("删除失败: " + e.message, "error");
-  }
-}
-
-async function clearRecentVersions(recordId) {
-  if (!(await showConfirmModal("确定删除这条记录的全部自动保存版本？"))) return;
-  try {
-    await api("/api/recent/" + recordId + "/versions", { method: "DELETE" });
-    setRecentStatus("已清空小版本", "success");
-    refreshRecentList();
-  } catch (e) {
-    setRecentStatus("清空失败: " + e.message, "error");
   }
 }
 
