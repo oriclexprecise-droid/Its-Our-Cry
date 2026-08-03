@@ -1246,13 +1246,16 @@ def create_app(config_path="config.yaml"):
         ref_dir = Path(config["characters"][character]["ref_audio_dir"]) / emotion
         if not ref_dir.exists():
             ref_dir.mkdir(parents=True, exist_ok=True)
-        audio_exts = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+        audio_exts = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
         files = []
         for f in ref_dir.iterdir():
             if f.suffix.lower() in audio_exts and f.is_file():
-                files.append(str(f))
+                files.append(f)
         if not files:
             return None
+        chosen = random.choice(files)
+        return {"path": str(chosen), "prompt_text": _read_ref_prompt(chosen)}
+
     AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
 
     def _ref_audio_base(key):
@@ -1274,6 +1277,48 @@ def create_app(config_path="config.yaml"):
             return None
         return base / emotion / safe_name
 
+    def _ref_prompt_path(target):
+        return Path(str(target) + ".txt")
+
+    def _read_ref_prompt(target):
+        p = _ref_prompt_path(target)
+        if not p.exists():
+            return ""
+        try:
+            return p.read_text(encoding="utf-8", errors="replace").strip()
+        except Exception:
+            return ""
+
+    def _write_ref_prompt(target, text):
+        p = _ref_prompt_path(target)
+        text = (text or "").strip()
+        try:
+            if text:
+                p.write_text(text, encoding="utf-8")
+            elif p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+    def _remove_ref_prompt(target):
+        p = _ref_prompt_path(target)
+        if p.exists():
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+    def _detect_prompt_lang(text, fallback="zh"):
+        if not text:
+            return fallback
+        kana = sum(1 for ch in text if "\u3040" <= ch <= "\u30ff" or "\u31f0" <= ch <= "\u31ff")
+        han = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+        if kana > 0:
+            return "ja"
+        if han > 0:
+            return "zh"
+        return fallback
+
     @app.route("/api/reference/audio", methods=["GET"])
     def list_reference_audio():
         items = []
@@ -1293,7 +1338,7 @@ def create_app(config_path="config.yaml"):
                                 size = f.stat().st_size
                             except Exception:
                                 size = 0
-                            files.append({"name": f.name, "size": size})
+                            files.append({"name": f.name, "size": size, "prompt_text": _read_ref_prompt(f)})
                 files.sort(key=lambda x: str(x["name"]).lower())
                 emotions.append({"emotion": emo, "files": files})
             items.append({
@@ -1326,16 +1371,36 @@ def create_app(config_path="config.yaml"):
         while target.exists():
             target = target.with_name(stem + "_" + str(counter) + suffix)
             counter += 1
+        prompt_text = str(request.form.get("prompt_text") or "").strip()
         try:
             f.save(str(target))
         except Exception as e:
             return jsonify({"error": "保存失败: " + str(e)}), 500
+        _write_ref_prompt(target, prompt_text)
         record_event({
             "type": "ref_audio_upload",
             "message": "上传参考音频：" + key + "「" + emotion + "」",
             "payload": {"character": key, "emotion": emotion, "file": target.name},
         }, project_root)
-        return jsonify({"status": "ok", "name": target.name, "size": target.stat().st_size})
+        return jsonify({"status": "ok", "name": target.name, "size": target.stat().st_size, "prompt_text": prompt_text})
+
+    @app.route("/api/reference/audio/prompt", methods=["POST"])
+    def update_reference_audio_prompt():
+        data = request.get_json() or {}
+        key = str(data.get("key") or "").strip()
+        emotion = str(data.get("emotion") or "").strip()
+        name = str(data.get("name") or "").strip()
+        prompt_text = str(data.get("prompt_text") or "").strip()
+        target = _ref_audio_target(key, emotion, name)
+        if target is None or not target.exists() or not target.is_file():
+            return jsonify({"error": "文件不存在"}), 404
+        _write_ref_prompt(target, prompt_text)
+        record_event({
+            "type": "ref_audio_prompt",
+            "message": "更新参考音频字幕：" + key + "「" + emotion + "」" + name,
+            "payload": {"character": key, "emotion": emotion, "file": name},
+        }, project_root)
+        return jsonify({"status": "ok", "prompt_text": prompt_text})
 
     @app.route("/api/reference/audio/file", methods=["GET"])
     def play_reference_audio():
@@ -1364,6 +1429,7 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "非法路径"}), 400
         try:
             target.unlink()
+            _remove_ref_prompt(target)
         except Exception as e:
             return jsonify({"error": "删除失败: " + str(e)}), 500
         record_event({
@@ -1372,8 +1438,6 @@ def create_app(config_path="config.yaml"):
             "payload": {"character": key, "emotion": emotion, "file": name},
         }, project_root)
         return jsonify({"status": "ok"})
-
-        return random.choice(files)
 
     def narration_seconds(text):
         nr = config.get("narration", {})
@@ -1531,10 +1595,12 @@ def create_app(config_path="config.yaml"):
                             break
                         line = state["lines"][idx]
                         emotion = line.get("emotion", "thinking")
-                        ref_audio = pick_ref_audio(char, emotion)
-                        if ref_audio is None:
+                        ref = pick_ref_audio(char, emotion)
+                        if ref is None:
                             fail(idx, f"缺少参考音频：{char}「{emotion}」，仅保留字幕，请先在语音库该情绪文件夹放入音频")
                             continue
+                        ref_audio = ref["path"]
+                        ref_prompt = ref.get("prompt_text") or ""
 
                         output_dir = Path(config["output_dir"]) / "segments"
                         output_path = output_dir / f"{idx:04d}_{char}_{emotion}.wav"
@@ -1552,9 +1618,10 @@ def create_app(config_path="config.yaml"):
                             duration = engine.synthesize_to_file(
                                 text=tts_text,
                                 ref_audio_path=ref_audio,
+                                prompt_text=ref_prompt,
                                 output_path=str(output_path),
                                 text_lang=tts_lang,
-                                prompt_lang=tts_lang,
+                                prompt_lang=_detect_prompt_lang(ref_prompt, tts_lang),
                                 text_split_method=tts_cfg.get("text_split_method", "cut5"),
                                 batch_size=tts_cfg.get("batch_size", 1),
                                 speed_factor=tts_cfg.get("speed_factor", 1.0),

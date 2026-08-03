@@ -2453,6 +2453,12 @@ function initReferenceLibrary() {
       }
     });
   }
+  const promptOk = document.getElementById("btn-ref-prompt-ok");
+  if (promptOk) promptOk.addEventListener("click", confirmRefPrompt);
+  const promptCancel = document.getElementById("btn-ref-prompt-cancel");
+  if (promptCancel) promptCancel.addEventListener("click", closeRefPromptModal);
+  const promptModal = document.getElementById("ref-prompt-modal");
+  if (promptModal) promptModal.addEventListener("click", (e) => { if (e.target === promptModal) closeRefPromptModal(); });
   loadReferenceLibrary();
 }
 

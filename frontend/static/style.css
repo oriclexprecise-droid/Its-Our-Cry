@@ -676,3 +676,28 @@ textarea { min-height: 240px; line-height: 1.6; }
   .ref-emotions { grid-template-columns: 1fr; }
   .ref-char-head { flex-direction: column; align-items: flex-start; }
 }
+.ref-prompt-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.ref-prompt-form input[type="file"] {
+  padding: 8px 10px;
+  background: #0f3460;
+  border: 1px solid #1a4a7a;
+  border-radius: 6px;
+  color: #cbd8f0;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.ref-prompt-textarea {
+  min-height: 90px !important;
+  max-height: 180px;
+  resize: vertical;
+}
+.ref-file-prompt {
+  width: 100%;
+  color: #8fb3d9;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+  padding-left: 2px;
+}
+.ref-file-prompt.empty { color: #6b84ad; }
