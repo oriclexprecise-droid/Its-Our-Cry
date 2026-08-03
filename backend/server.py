@@ -2192,7 +2192,8 @@ def create_app(config_path="config.yaml"):
         data = request.get_json(silent=True) or {}
         text = str(data.get("text") or "")
         if text != state.get("script", ""):
-            push_history("修改剧本")
+            if state.get("script"):
+                push_history("修改剧本")
             state["script"] = text
         return jsonify({"status": "ok", "history": history_payload()})
 
