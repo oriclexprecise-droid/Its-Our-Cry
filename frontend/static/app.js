@@ -19,6 +19,7 @@ async function loadConfig() {
   setNarrationInputs(cfg.narration || {});
   loadDeployPath(cfg);
   loadCleanPath(cfg);
+  updateDeployBanner(cfg.gptsovits_path);
   const savedAi = loadAIConfigFromStorage();
   if (savedAi) {
     applyAIConfig(savedAi);
@@ -592,6 +593,7 @@ async function scanDeploy() {
     const data = await api("/api/deploy/scan", { method: "POST", body: JSON.stringify({ gptsovits_path: path }) });
     localStorage.setItem("mygo_deploy_gs_path", path);
     renderDeployScan(data);
+    updateDeployBanner();
     status.textContent = "扫描完成";
     status.className = "status-text success";
   } catch (e) {
@@ -1071,20 +1073,25 @@ function initDeployFlow() {
   document.getElementById("btn-deploy-has").addEventListener("click", () => {
     localStorage.setItem("mygo_deploy_installed", "yes");
     showDeployFlow("has");
+    updateDeployBanner();
   });
   document.getElementById("btn-deploy-no").addEventListener("click", () => {
     localStorage.setItem("mygo_deploy_installed", "no");
     showDeployFlow("no");
+    updateDeployBanner();
   });
   document.getElementById("btn-deploy-back-has").addEventListener("click", () => {
     localStorage.removeItem("mygo_deploy_installed");
     showDeployFlow(null);
+    updateDeployBanner();
   });
   document.getElementById("btn-deploy-back-no").addEventListener("click", () => {
     localStorage.removeItem("mygo_deploy_installed");
     showDeployFlow(null);
+    updateDeployBanner();
   });
   initDeployDownload();
+  updateDeployBanner();
 }
 
 let deployDownloadOptions = [];
@@ -1179,6 +1186,7 @@ async function syncDeployDownloadState() {
       localStorage.setItem("mygo_deploy_gs_path", gsPath);
       localStorage.setItem("mygo_deploy_installed", "yes");
       showDeployFlow("has");
+      updateDeployBanner();
     } else if (st.cancelled) {
       statusEl.textContent = "已取消下载";
       statusEl.className = "status-text";
@@ -1256,6 +1264,7 @@ async function pollDeployDownload() {
       localStorage.setItem("mygo_deploy_gs_path", gsPath);
       localStorage.setItem("mygo_deploy_installed", "yes");
       showDeployFlow("has");
+      updateDeployBanner();
     } else if (st.cancelled) {
       statusEl.textContent = "已取消下载";
       statusEl.className = "status-text";
@@ -1294,49 +1303,68 @@ initDeployFlow();
 initCleanSpace();
 loadConfig();
 initBackgroundSettings();
-function initPanelCollapse() {
-  const specs = [
-    { btn: "btn-collapse-settings", key: "mygo_panel_settings_collapsed" },
-    { btn: "btn-collapse-models", key: "mygo_panel_models_collapsed" },
-    { btn: "btn-collapse-deploy", key: "mygo_panel_deploy_collapsed" },
-    { btn: "btn-collapse-clean", key: "mygo_panel_clean_collapsed" },
-    { btn: "btn-collapse-log", key: "mygo_panel_log_collapsed" },
-    { btn: "btn-collapse-legal", key: "mygo_panel_legal_collapsed" }
-  ];
-  const registry = {};
-  specs.forEach(spec => {
-    const btn = document.getElementById(spec.btn);
-    const panel = btn ? btn.closest(".panel") : null;
-    if (!btn || !panel) return;
-    registry[spec.btn] = { btn, panel };
-    const apply = (collapsed) => {
-      panel.classList.toggle("collapsed", collapsed);
-      btn.textContent = collapsed ? "▴" : "▾";
-      btn.title = collapsed ? "展开面板" : "收起面板";
-    };
-    apply(true);
-    localStorage.setItem(spec.key, "1");
-    btn.addEventListener("click", () => {
-      const next = !panel.classList.contains("collapsed");
-      apply(next);
-      localStorage.setItem(spec.key, next ? "1" : "0");
-      if (!next) {
-        Object.keys(registry).forEach(otherBtn => {
-          if (otherBtn === spec.btn) return;
-          const other = registry[otherBtn];
-          if (other && !other.panel.classList.contains("collapsed")) {
-            other.panel.classList.add("collapsed");
-            other.btn.textContent = "▴";
-            other.btn.title = "展开面板";
-            const otherSpec = specs.find(s => s.btn === otherBtn);
-            if (otherSpec) localStorage.setItem(otherSpec.key, "1");
-          }
-        });
-      }
-    });
-  });
+function updateDeployBanner(cfgPath) {
+  const banner = document.getElementById("deploy-banner");
+  if (!banner) return;
+  const installed = localStorage.getItem("mygo_deploy_installed") === "yes";
+  const path = localStorage.getItem("mygo_deploy_gs_path") || cfgPath || "";
+  banner.classList.toggle("hidden", !!(installed || path));
 }
-initPanelCollapse();
+
+const SETTINGS_TAB_KEY = "mygo_settings_tab";
+
+function openSettingsTab(tab) {
+  document.querySelectorAll(".settings-tab").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.settingsTab === tab);
+  });
+  document.querySelectorAll(".settings-page").forEach(page => {
+    page.classList.toggle("active", page.dataset.settingsPage === tab);
+  });
+  if (tab) localStorage.setItem(SETTINGS_TAB_KEY, tab);
+}
+
+function showSettings(tab) {
+  const workbench = document.getElementById("view-workbench");
+  const settings = document.getElementById("view-settings");
+  if (!workbench || !settings) return;
+  workbench.classList.add("hidden");
+  settings.classList.remove("hidden");
+  document.getElementById("btn-back-workbench").classList.remove("hidden");
+  document.getElementById("btn-settings").classList.add("hidden");
+  if (!tab) {
+    const installed = localStorage.getItem("mygo_deploy_installed") === "yes";
+    const saved = localStorage.getItem(SETTINGS_TAB_KEY);
+    const savedValid = saved && document.querySelector('.settings-tab[data-settings-tab="' + saved + '"]');
+    tab = savedValid ? saved : (installed ? "general" : "deploy");
+  }
+  openSettingsTab(tab);
+}
+
+function showWorkbench() {
+  const workbench = document.getElementById("view-workbench");
+  const settings = document.getElementById("view-settings");
+  if (!workbench || !settings) return;
+  workbench.classList.remove("hidden");
+  settings.classList.add("hidden");
+  document.getElementById("btn-back-workbench").classList.add("hidden");
+  document.getElementById("btn-settings").classList.remove("hidden");
+}
+
+function initSettingsNav() {
+  document.getElementById("btn-settings").addEventListener("click", () => showSettings(null));
+  document.getElementById("btn-back-workbench").addEventListener("click", showWorkbench);
+  document.querySelectorAll(".settings-tab").forEach(btn => {
+    btn.addEventListener("click", () => showSettings(btn.dataset.settingsTab));
+  });
+  const goDeploy = document.getElementById("btn-go-deploy");
+  if (goDeploy) goDeploy.addEventListener("click", () => showSettings("deploy"));
+  const installed = localStorage.getItem("mygo_deploy_installed") === "yes";
+  const saved = localStorage.getItem(SETTINGS_TAB_KEY);
+  const savedValid = saved && document.querySelector('.settings-tab[data-settings-tab="' + saved + '"]');
+  openSettingsTab(savedValid ? saved : (installed ? "general" : "deploy"));
+  updateDeployBanner();
+}
+initSettingsNav();
 function fmtLogEvent(ev) {
   if (!ev || !ev.ts) return "";
   const d = new Date(ev.ts);

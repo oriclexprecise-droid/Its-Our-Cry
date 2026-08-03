@@ -49,9 +49,18 @@
   <header>
     <div id="creator-tip" class="creator-tip"></div>
     <h1>It 's Our Cry!!!!!</h1>
-    <div class="header-meta"><span class="version-tag">Version 1.0.0</span><button id="btn-refresh" class="btn-secondary btn-small" title="刷新界面">刷新</button></div>
+    <div class="header-meta">
+      <span class="version-tag">Version 1.1.0</span>
+      <button id="btn-settings" class="btn-secondary btn-small" title="打开设置">设置</button>
+      <button id="btn-back-workbench" class="btn-secondary btn-small hidden" title="返回工作台">返回工作台</button>
+      <button id="btn-refresh" class="btn-secondary btn-small" title="刷新界面">刷新</button>
+    </div>
   </header>
-  <div class="layout">
+  <div id="deploy-banner" class="deploy-banner hidden">
+    <span>还没配置 GPT-SoVITS，配音前需要先完成部署</span>
+    <button type="button" id="btn-go-deploy" class="btn-secondary btn-small">去部署</button>
+  </div>
+  <div id="view-workbench">
   <main>
     <section id="step-input" class="panel">
       <div class="panel-header"><h2>1. 输入剧本</h2></div>
@@ -117,10 +126,21 @@
       </div>
     </section>
   </main>
+  </div>
 
-  <aside class="side-panels">
-    <section class="panel side-panel">
-      <div class="panel-header"><h2>设置</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-settings" title="收起面板">▾</button></div>
+  <div id="view-settings" class="hidden">
+    <div class="settings-shell">
+      <nav class="settings-nav">
+        <button type="button" class="settings-tab active" data-settings-tab="deploy">部署</button>
+        <button type="button" class="settings-tab" data-settings-tab="models">模型配置</button>
+        <button type="button" class="settings-tab" data-settings-tab="clean">清理空间</button>
+        <button type="button" class="settings-tab" data-settings-tab="log">日志</button>
+        <button type="button" class="settings-tab" data-settings-tab="legal">声明</button>
+        <button type="button" class="settings-tab" data-settings-tab="general">通用设置</button>
+      </nav>
+      <div class="settings-content">
+    <section class="panel settings-page" data-settings-page="general">
+      <div class="panel-header"><h2>通用设置</h2></div>
       <div class="panel-body">
         <div class="side-section">
           <h3 class="side-section-title">API 设置</h3>
@@ -199,8 +219,8 @@
           <p class="bg-disclaimer">背景图片版权归原作者所有，仅供本地个人创作使用，请勿用于商业发布或未经授权的公开传播。</p>
         </div>      </div>
     </section>
-                <section class="panel side-panel">
-      <div class="panel-header"><h2>模型配置</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-models" title="收起面板">▾</button></div>
+    <section class="panel settings-page" data-settings-page="models">
+      <div class="panel-header"><h2>模型配置</h2></div>
       <div class="panel-body">
         <div class="side-section">
           <h3 class="side-section-title">角色模型（激活词可增删）</h3>
@@ -208,8 +228,8 @@
         </div>
       </div>
     </section>
-<section class="panel side-panel">
-      <div class="panel-header"><h2>部署</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-deploy" title="收起面板">▾</button></div>
+    <section class="panel settings-page" data-settings-page="deploy">
+      <div class="panel-header"><h2>部署</h2></div>
       <div class="panel-body deploy-body">
         <div id="deploy-question">
           <p class="deploy-question-text">是否已安装 GPT-SoVITS？</p>
@@ -250,8 +270,8 @@
         </div>
       </div>
     </section>
-    <section class="panel side-panel">
-      <div class="panel-header"><h2>清理空间</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-clean" title="收起面板">▾</button></div>
+    <section class="panel settings-page" data-settings-page="clean">
+      <div class="panel-header"><h2>清理空间</h2></div>
       <div class="panel-body clean-body">
         <div class="side-section">
           <h3 class="side-section-title">空间清理</h3>
@@ -266,8 +286,8 @@
         </div>
       </div>
     </section>
-    <section class="panel side-panel">
-      <div class="panel-header"><h2>日志</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-log" title="收起面板">▾</button></div>
+    <section class="panel settings-page" data-settings-page="log">
+      <div class="panel-header"><h2>日志</h2></div>
       <div class="panel-body log-body">
         <pre id="log-view" class="log-view"></pre>
         <div class="log-actions">
@@ -276,8 +296,8 @@
         </div>
       </div>
     </section>
-    <section class="panel side-panel">
-      <div class="panel-header"><h2>声明</h2><button type="button" class="panel-collapse-btn" id="btn-collapse-legal" title="收起面板">▾</button></div>
+    <section class="panel settings-page" data-settings-page="legal">
+      <div class="panel-header"><h2>声明</h2></div>
       <div class="panel-body legal-body">
         <h3 class="side-section-title">免责声明</h3>
         <p class="legal-text">本工具仅用于个人学习、创作与研究。请勿用于商业用途、诽谤、诈骗或任何违法场景。</p>
@@ -287,13 +307,14 @@
         <h3 class="side-section-title">数据与隐私</h3>
         <p class="legal-text">本程序仅在本地记录情绪修正等匿名日志用于改进 AI 效果，日志可随时查看、下载与重置，不会上传剧本内容和 API Key。</p>
         <h3 class="side-section-title">版本信息</h3>
-        <p class="legal-text">版本：1.0.0</p>
+        <p class="legal-text">版本：1.1.0</p>
         <p class="legal-text">开发者：ORiCale</p>
         <h3 class="side-section-title">联系与支持</h3>
         <p class="legal-text">Bilibili：<a href="https://space.bilibili.com/3493294730381924" target="_blank" rel="noopener">访问我的主页</a></p>
       </div>
     </section>
-  </aside>
+      </div>
+    </div>
   </div>
 </div>
 <a id="bili-float" class="bili-float" href="https://space.bilibili.com/3493294730381924" target="_blank" rel="noopener">Bilibili</a>
