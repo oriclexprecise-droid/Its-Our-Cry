@@ -96,6 +96,7 @@ async function runAnalyze() {
     const cancelBtnReset = document.getElementById("btn-cancel-generate");
     if (cancelBtnReset) cancelBtnReset.classList.add("hidden");
     document.getElementById("progress-text").classList.add("hidden");
+    refreshHistory();
     const issues = data.proofread || [];
     if (issues.length) showProofreadModal(issues);
   } catch (e) {
@@ -121,6 +122,22 @@ document.getElementById("btn-stop-analyze").addEventListener("click", () => {
 document.getElementById("btn-stop-line-analyze").addEventListener("click", () => {
   if (analysisController) analysisController.abort();
   api("/api/analyze/cancel", { method: "POST" }).catch(() => {});
+});
+
+const btnUndoEl = document.getElementById("btn-undo");
+const btnRedoEl = document.getElementById("btn-redo");
+if (btnUndoEl) btnUndoEl.addEventListener("click", () => runHistory("undo"));
+if (btnRedoEl) btnRedoEl.addEventListener("click", () => runHistory("redo"));
+
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+    const el = document.activeElement;
+    const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+    if (typing) return;
+    e.preventDefault();
+    if (e.shiftKey) runHistory("redo");
+    else runHistory("undo");
+  }
 });
 
 function showProofreadModal(issues) {
@@ -169,6 +186,7 @@ if (proofreadModalEl) {
     if (Object.keys(fixedChars).length) {
       try {
         await api("/api/lines/characters", { method: "POST", body: JSON.stringify({ fixes: fixedChars }) });
+        refreshHistory();
       } catch (e) {}
     }
     const status = document.getElementById("analyze-status");
@@ -227,6 +245,7 @@ function renderLines() {
         state.lines[idx] = res.line;
         delete state.failures[idx];
         renderLines();
+        refreshHistory();
         if (res.had_generated) {
           status.textContent = "情绪已更新，正在重新生成该句...";
           status.className = "status-text";
@@ -275,6 +294,7 @@ function renderLines() {
       progressText.className = "status-text";
       try {
         await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ interval }) });
+        refreshHistory();
         if (state.hasGenerated && !state.generating) {
           await api("/api/merge", { method: "POST" });
           progressText.textContent = "间隔已更新，字幕已同步";
@@ -325,12 +345,14 @@ function renderLines() {
         if (res.reanalyze_cancelled) {
           state.lines[idx] = res.line;
           renderLines();
+          refreshHistory();
           status.textContent = "已停止分析，文本已保留，情绪未重新分析";
           status.className = "status-text";
           return;
         }
         state.lines[idx] = res.line;
         delete state.failures[idx];
+        refreshHistory();
         if (res.reanalyze_error) {
           state.failures[idx] = "文本已修改，情绪重新分析失败：" + res.reanalyze_error;
         }
@@ -366,6 +388,7 @@ function renderLines() {
           state.lines[idx].text = newText;
           state.lines[idx].emotion = prevEmotion;
           renderLines();
+          refreshHistory();
           status.textContent = "已停止分析，文本已保留，情绪未重新分析";
           status.className = "status-text";
         } else {
@@ -399,6 +422,7 @@ function renderLines() {
         state.lines[idx] = res.line;
         delete state.failures[idx];
         renderLines();
+        refreshHistory();
         const needsVoice = res.line.character !== "旁白";
         const wasSilent = prevChar === "旁白" || !state.chars.includes(prevChar);
         if (res.had_generated || (needsVoice && wasSilent)) {
@@ -485,9 +509,71 @@ function refreshGenerated(p) {
       btn.disabled = !(ready || state.failures[idx]);
     }
   });
+  refreshHistory();
 }
 
 function esc(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+function updateHistoryButtons(h) {
+  const undoBtn = document.getElementById("btn-undo");
+  const redoBtn = document.getElementById("btn-redo");
+  if (!undoBtn || !redoBtn) return;
+  const uc = h ? h.undo_count : 0;
+  const rc = h ? h.redo_count : 0;
+  undoBtn.disabled = uc === 0;
+  redoBtn.disabled = rc === 0;
+  undoBtn.title = uc ? "撤销 " + (h.undo_label || "") + " (Ctrl+Z)" : "撤销 (Ctrl+Z)";
+  redoBtn.title = rc ? "重做 " + (h.redo_label || "") + " (Ctrl+Shift+Z)" : "重做 (Ctrl+Shift+Z)";
+}
+
+async function refreshHistory() {
+  try {
+    const h = await api("/api/history");
+    updateHistoryButtons(h);
+  } catch (e) {}
+}
+
+async function runHistory(dir) {
+  if (state.generating) return;
+  const status = document.getElementById("progress-text");
+  if (status) {
+    status.classList.remove("hidden");
+    status.textContent = dir === "undo" ? "正在撤销..." : "正在重做...";
+    status.className = "status-text";
+  }
+  try {
+    const res = await api("/api/" + dir, { method: "POST" });
+    const s = res.state || {};
+    state.lines = s.lines || [];
+    state.failures = s.failures || {};
+    state.hasGenerated = Object.keys(s.generated || {}).length > 0;
+    state.selected = new Set();
+    state.selectMode = false;
+    const selBtn = document.getElementById("btn-select-mode");
+    if (selBtn) {
+      selBtn.textContent = "选择模式";
+      selBtn.classList.remove("active");
+    }
+    const selBar = document.getElementById("selection-toolbar");
+    if (selBar) selBar.classList.add("hidden");
+    renderLines();
+    refreshGenerated({ generated_indices: Object.keys(s.generated || {}).map(Number), failures: state.failures });
+    const downloadPanel = document.getElementById("step-download");
+    if (downloadPanel) downloadPanel.classList.toggle("hidden", !state.hasGenerated && !s.merged_path);
+    const genBtn = document.getElementById("btn-generate");
+    if (genBtn) genBtn.textContent = state.hasGenerated ? "重新生成" : "生成全部语音";
+    if (status) {
+      status.textContent = (dir === "undo" ? "已撤销：" : "已重做：") + (res.label || "");
+      status.className = "status-text success";
+    }
+    updateHistoryButtons(res.history);
+  } catch (e) {
+    if (status) {
+      status.textContent = (dir === "undo" ? "撤销失败: " : "重做失败: ") + e.message;
+      status.className = "status-text error";
+    }
+  }
+}
 
 
 document.getElementById("btn-merge").addEventListener("click", async () => {
@@ -556,6 +642,7 @@ document.getElementById("btn-apply-interval").addEventListener("click", async ()
   try {
     const res = await api("/api/lines/interval", { method: "POST", body: JSON.stringify({ indices, interval }) });
     for (const idx of res.indices) state.lines[idx].interval = interval;
+    refreshHistory();
     if (state.hasGenerated && !state.generating) {
       await api("/api/merge", { method: "POST" });
       statusEl.textContent = "已更新 " + res.updated + " 条，字幕已同步";
@@ -636,6 +723,7 @@ async function startGeneration(indices, srtOnly) {
     if (srtOnly) payload.srt_only = true;
     const body = JSON.stringify(payload);
     await api("/api/generate", { method: "POST", body });
+    refreshHistory();
     pollProgress(btn, progressText, barFill);
   } catch (e) {
     progressText.textContent = e.message;
@@ -1509,6 +1597,7 @@ initSplash();
 initDeployFlow();
 initCleanSpace();
 loadConfig();
+refreshHistory();
 initBackgroundSettings();
 function updateDeployBanner(cfgPath) {
   const banner = document.getElementById("deploy-banner");

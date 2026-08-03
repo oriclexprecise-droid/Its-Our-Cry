@@ -12,6 +12,7 @@ import traceback
 import urllib.request
 import wave
 import zipfile
+import copy
 from pathlib import Path
 from typing import Optional
 
@@ -454,12 +455,66 @@ def create_app(config_path="config.yaml"):
         "progress": {"current": 0, "total": 0},
         "failures": {},
         "time_info": [],
+        "history_undo": [],
+        "history_redo": [],
+        "history_limit": 50,
         "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
         "deploy_model_copy": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total": 0, "current": ""},
         "deploy_clone": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target_dir": ""},
         "deploy_download": {"running": False, "done": False, "success": None, "cancelled": False, "cancel_requested": False, "log": [], "progress": 0, "target_dir": "", "extracted_path": ""},
         "deploy_ffmpeg": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target": ""}
     }
+
+    def take_snapshot():
+        return {
+            "lines": copy.deepcopy(state.get("lines", [])),
+            "generated": copy.deepcopy(state.get("generated", {})),
+            "failures": copy.deepcopy(state.get("failures", {})),
+            "merged_path": state.get("merged_path"),
+            "srt_path": state.get("srt_path"),
+            "time_info": copy.deepcopy(state.get("time_info", [])),
+            "lang": state.get("lang", "zh"),
+        }
+
+    def push_history(label):
+        undo = state.setdefault("history_undo", [])
+        undo.append({"label": label, "snapshot": take_snapshot()})
+        limit = state.get("history_limit", 50)
+        if len(undo) > limit:
+            del undo[:len(undo) - limit]
+        state["history_redo"] = []
+
+    def restore_snapshot(snap):
+        state["lines"] = copy.deepcopy(snap.get("lines", []))
+        state["generated"] = copy.deepcopy(snap.get("generated", {}))
+        state["failures"] = copy.deepcopy(snap.get("failures", {}))
+        state["merged_path"] = snap.get("merged_path")
+        state["srt_path"] = snap.get("srt_path")
+        state["time_info"] = copy.deepcopy(snap.get("time_info", []))
+        state["lang"] = snap.get("lang", "zh")
+        state["progress"] = {"current": 0, "total": 0}
+        state["srt_only"] = False
+
+    def workbench_state():
+        return {
+            "lines": copy.deepcopy(state.get("lines", [])),
+            "generated": copy.deepcopy(state.get("generated", {})),
+            "failures": copy.deepcopy(state.get("failures", {})),
+            "merged_path": state.get("merged_path"),
+            "srt_path": state.get("srt_path"),
+            "time_info": copy.deepcopy(state.get("time_info", [])),
+            "lang": state.get("lang", "zh"),
+        }
+
+    def history_payload():
+        undo = state.get("history_undo", [])
+        redo = state.get("history_redo", [])
+        return {
+            "undo_count": len(undo),
+            "redo_count": len(redo),
+            "undo_label": undo[-1]["label"] if undo else None,
+            "redo_label": redo[-1]["label"] if redo else None,
+        }
 
     @app.route("/")
     def index():
@@ -709,6 +764,7 @@ def create_app(config_path="config.yaml"):
             if raw.strip() and skipped_no not in parsed_line_nos:
                 skipped.append({"line_no": skipped_no, "text": raw.strip()[:100]})
 
+        push_history("重新分析剧本")
         state["lines"] = lines
         state["emotions"] = emotions
         state["lang"] = lang
@@ -736,6 +792,13 @@ def create_app(config_path="config.yaml"):
         had_generated = False
         reanalyze_error = None
         reanalyze_cancelled = False
+        history_pushed = False
+
+        def record_history(label):
+            nonlocal history_pushed
+            if not history_pushed:
+                push_history(label)
+                history_pushed = True
 
         def invalidate_segment():
             nonlocal had_generated
@@ -757,6 +820,7 @@ def create_app(config_path="config.yaml"):
             old_emotion = line.get("emotion")
             new_emotion = data["emotion"]
             if old_emotion and old_emotion != new_emotion:
+                record_history("修改情绪")
                 record_event(
                     {
                         "type": "emotion_correction",
@@ -773,6 +837,7 @@ def create_app(config_path="config.yaml"):
                 return jsonify({"error": "台词不能为空"}), 400
             new_text = new_text.strip()
             if new_text != line.get("text"):
+                record_history("修改台词")
                 old_text = line.get("text")
                 old_emotion = line.get("emotion")
                 line["text"] = new_text
@@ -858,6 +923,7 @@ def create_app(config_path="config.yaml"):
                 return jsonify({"error": "角色名不能为空"}), 400
             new_char = new_char.strip()
             if new_char != line.get("character"):
+                record_history("修改角色")
                 old_char = line.get("character")
                 line["character"] = new_char
                 invalidate_segment()
@@ -876,7 +942,10 @@ def create_app(config_path="config.yaml"):
                 return jsonify({"error": "间隔时间必须是数字"}), 400
             if not 0 <= interval <= 10:
                 return jsonify({"error": "间隔时间需在 0-10 秒之间"}), 400
-            line["interval"] = round(interval, 3)
+            interval = round(interval, 3)
+            if line.get("interval") != interval:
+                record_history("修改间隔")
+                line["interval"] = interval
         resp = {"status": "ok", "line": line, "had_generated": had_generated}
         if reanalyze_error:
             resp["reanalyze_error"] = reanalyze_error
@@ -904,9 +973,12 @@ def create_app(config_path="config.yaml"):
         if not valid:
             return jsonify({"error": "没有有效的台词索引"}), 400
         interval = round(interval, 3)
-        for idx in valid:
-            state["lines"][idx]["interval"] = interval
-        return jsonify({"status": "ok", "updated": len(valid), "indices": valid})
+        changed = [idx for idx in valid if state["lines"][idx].get("interval") != interval]
+        if changed:
+            push_history("批量修改间隔")
+            for idx in changed:
+                state["lines"][idx]["interval"] = interval
+        return jsonify({"status": "ok", "updated": len(changed), "indices": changed})
 
     @app.route("/api/lines/characters", methods=["POST"])
     def update_lines_characters():
@@ -914,14 +986,17 @@ def create_app(config_path="config.yaml"):
         fixes = data.get("fixes") or {}
         if not isinstance(fixes, dict):
             return jsonify({"error": "无效的修正数据"}), 400
-        updated = 0
+        pending = []
         for line in state["lines"]:
             old = line.get("character")
             new = fixes.get(old)
             if isinstance(new, str) and new.strip() and new.strip() != old:
-                line["character"] = new.strip()
-                updated += 1
-        return jsonify({"status": "ok", "updated": updated})
+                pending.append((line, new.strip()))
+        if pending:
+            push_history("批量修改角色")
+            for line, new in pending:
+                line["character"] = new
+        return jsonify({"status": "ok", "updated": len(pending)})
 
     @app.route("/api/logs", methods=["GET"])
     def get_logs():
@@ -1079,6 +1154,7 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "没有可生成的台词"}), 400
         srt_only = bool(data.get("srt_only"))
 
+        push_history("生成字幕" if srt_only else "生成语音")
         state["generating"] = True
         state["cancel_requested"] = False
         state["cancelled"] = False
@@ -1253,7 +1329,44 @@ def create_app(config_path="config.yaml"):
             "srt_only": bool(state.get("srt_only")),
             "cancel_requested": bool(state.get("cancel_requested")),
             "cancelled": bool(state.get("cancelled")),
+            "history": history_payload(),
         })
+
+    @app.route("/api/history", methods=["GET"])
+    def get_history():
+        return jsonify(history_payload())
+
+    @app.route("/api/undo", methods=["POST"])
+    def undo_action():
+        if state.get("generating"):
+            return jsonify({"error": "generation in progress"}), 409
+        undo = state.get("history_undo", [])
+        if not undo:
+            return jsonify({"error": "没有可撤销的操作"}), 400
+        entry = undo.pop()
+        state.setdefault("history_redo", []).append({"label": entry["label"], "snapshot": take_snapshot()})
+        restore_snapshot(entry["snapshot"])
+        record_event(
+            {"type": "undo", "message": "撤销：" + entry["label"], "payload": {"label": entry["label"]}},
+            project_root=project_root,
+        )
+        return jsonify({"status": "ok", "label": entry["label"], "state": workbench_state(), "history": history_payload()})
+
+    @app.route("/api/redo", methods=["POST"])
+    def redo_action():
+        if state.get("generating"):
+            return jsonify({"error": "generation in progress"}), 409
+        redo = state.get("history_redo", [])
+        if not redo:
+            return jsonify({"error": "没有可重做的操作"}), 400
+        entry = redo.pop()
+        state.setdefault("history_undo", []).append({"label": entry["label"], "snapshot": take_snapshot()})
+        restore_snapshot(entry["snapshot"])
+        record_event(
+            {"type": "redo", "message": "重做：" + entry["label"], "payload": {"label": entry["label"]}},
+            project_root=project_root,
+        )
+        return jsonify({"status": "ok", "label": entry["label"], "state": workbench_state(), "history": history_payload()})
 
     @app.route("/api/download/<path:file_type>", methods=["GET"])
     def download_file(file_type):
