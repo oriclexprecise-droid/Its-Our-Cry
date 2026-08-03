@@ -159,6 +159,7 @@ async function runAnalyze() {
     if (cancelBtnReset) cancelBtnReset.classList.add("hidden");
     document.getElementById("progress-text").classList.add("hidden");
     refreshHistory();
+    suggestEmotionParams();
     const issues = data.proofread || [];
     if (issues.length) showProofreadModal(issues);
   } catch (e) {
@@ -2600,6 +2601,8 @@ async function resetEmotions() {
 }
 
 let emotionParams = {};
+let emotionParamsEnabled = true;
+let emotionPresets = [];
 
 function initEmotionParams() {
   const suggestBtn = document.getElementById("btn-suggest-params");
@@ -2608,6 +2611,14 @@ function initEmotionParams() {
   if (saveBtn) saveBtn.addEventListener("click", saveEmotionParams);
   const resetBtn = document.getElementById("btn-reset-params");
   if (resetBtn) resetBtn.addEventListener("click", resetEmotionParams);
+  const toggleEl = document.getElementById("cb-enable-emotion-params");
+  if (toggleEl) toggleEl.addEventListener("change", toggleEmotionParamsEnabled);
+  const savePresetBtn = document.getElementById("btn-save-emotion-preset");
+  if (savePresetBtn) savePresetBtn.addEventListener("click", saveEmotionPreset);
+  const loadPresetBtn = document.getElementById("btn-load-emotion-preset");
+  if (loadPresetBtn) loadPresetBtn.addEventListener("click", loadEmotionPreset);
+  const deletePresetBtn = document.getElementById("btn-delete-emotion-preset");
+  if (deletePresetBtn) deletePresetBtn.addEventListener("click", deleteEmotionPreset);
   loadEmotionParams();
 }
 
@@ -2620,10 +2631,29 @@ async function loadEmotionParams() {
       api("/api/emotions"),
     ]);
     emotionParams = pRes.params || {};
+    emotionParamsEnabled = pRes.enabled !== false;
+    const toggleEl = document.getElementById("cb-enable-emotion-params");
+    if (toggleEl) toggleEl.checked = emotionParamsEnabled;
     state.emotions = eRes.emotions || [];
     renderEmotionParams();
+    loadEmotionPresets();
   } catch (e) {
     body.innerHTML = '<tr><td colspan="6" class="model-empty">加载失败: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+async function toggleEmotionParamsEnabled() {
+  const toggleEl = document.getElementById("cb-enable-emotion-params");
+  const enabled = toggleEl ? toggleEl.checked : true;
+  emotionParamsEnabled = enabled;
+  const statusEl = document.getElementById("emotion-params-status");
+  try {
+    await api("/api/emotion_params", { method: "POST", body: JSON.stringify({ enabled }) });
+    if (statusEl) { statusEl.textContent = enabled ? "已启用 AI 情绪参数" : "已停用 AI 情绪参数（生成时使用 SoVITS 默认参数）"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (toggleEl) toggleEl.checked = !enabled;
+    emotionParamsEnabled = !enabled;
+    if (statusEl) { statusEl.textContent = "设置失败: " + e.message; statusEl.className = "status-text error"; }
   }
 }
 
@@ -2675,7 +2705,13 @@ async function suggestEmotionParams() {
       emotionParams[name] = { ...(emotionParams[name] || {}), ...params[name] };
     }
     renderEmotionParams();
-    if (statusEl) { statusEl.textContent = "已填入 AI 建议，确认后点“保存模板”"; statusEl.className = "status-text success"; }
+    const saveRes = await api("/api/emotion_params", { method: "POST", body: JSON.stringify({ params: collectEmotionParams(), enabled: emotionParamsEnabled }) });
+    emotionParams = saveRes.params || {};
+    emotionParamsEnabled = saveRes.enabled !== false;
+    const toggleEl = document.getElementById("cb-enable-emotion-params");
+    if (toggleEl) toggleEl.checked = emotionParamsEnabled;
+    renderEmotionParams();
+    if (statusEl) { statusEl.textContent = "已填入并应用 AI 情绪参数建议"; statusEl.className = "status-text success"; }
   } catch (e) {
     if (statusEl) { statusEl.textContent = "生成建议失败: " + e.message; statusEl.className = "status-text error"; }
   }
@@ -2685,8 +2721,11 @@ async function saveEmotionParams() {
   const statusEl = document.getElementById("emotion-params-status");
   if (statusEl) { statusEl.textContent = "正在保存..."; statusEl.className = "status-text"; }
   try {
-    const res = await api("/api/emotion_params", { method: "POST", body: JSON.stringify({ params: collectEmotionParams() }) });
+    const res = await api("/api/emotion_params", { method: "POST", body: JSON.stringify({ params: collectEmotionParams(), enabled: emotionParamsEnabled }) });
     emotionParams = res.params || {};
+    emotionParamsEnabled = res.enabled !== false;
+    const toggleEl = document.getElementById("cb-enable-emotion-params");
+    if (toggleEl) toggleEl.checked = emotionParamsEnabled;
     renderEmotionParams();
     if (statusEl) { statusEl.textContent = "已保存情绪参数模板"; statusEl.className = "status-text success"; }
   } catch (e) {
@@ -2699,12 +2738,77 @@ async function resetEmotionParams() {
   const statusEl = document.getElementById("emotion-params-status");
   if (statusEl) { statusEl.textContent = "正在清空..."; statusEl.className = "status-text"; }
   try {
-    const res = await api("/api/emotion_params", { method: "POST", body: JSON.stringify({ params: {} }) });
+    const res = await api("/api/emotion_params", { method: "POST", body: JSON.stringify({ params: {}, enabled: emotionParamsEnabled }) });
     emotionParams = res.params || {};
+    emotionParamsEnabled = res.enabled !== false;
+    const toggleEl = document.getElementById("cb-enable-emotion-params");
+    if (toggleEl) toggleEl.checked = emotionParamsEnabled;
     renderEmotionParams();
     if (statusEl) { statusEl.textContent = "已清空模板"; statusEl.className = "status-text success"; }
   } catch (e) {
     if (statusEl) { statusEl.textContent = "清空失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+function renderEmotionPresets() {
+  const sel = document.getElementById("emotion-preset-select");
+  if (!sel) return;
+  sel.innerHTML = emotionPresets.map(p => '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>').join("");
+}
+
+async function loadEmotionPresets() {
+  try {
+    const res = await api("/api/emotion_params/presets");
+    emotionPresets = res.presets || [];
+    renderEmotionPresets();
+  } catch (e) {}
+}
+
+async function saveEmotionPreset() {
+  const nameEl = document.getElementById("emotion-preset-name");
+  const statusEl = document.getElementById("emotion-presets-status");
+  const name = nameEl ? nameEl.value.trim() : "";
+  if (!name) { if (statusEl) { statusEl.textContent = "请输入预设名称"; statusEl.className = "status-text error"; } return; }
+  try {
+    await api("/api/emotion_params/presets", { method: "POST", body: JSON.stringify({ action: "save", name, params: collectEmotionParams(), enabled: emotionParamsEnabled }) });
+    if (nameEl) nameEl.value = "";
+    await loadEmotionPresets();
+    if (statusEl) { statusEl.textContent = "已保存预设"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "保存失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+async function loadEmotionPreset() {
+  const sel = document.getElementById("emotion-preset-select");
+  const statusEl = document.getElementById("emotion-presets-status");
+  const name = sel ? sel.value : "";
+  if (!name) { if (statusEl) { statusEl.textContent = "请先选择一个预设"; statusEl.className = "status-text error"; } return; }
+  try {
+    const res = await api("/api/emotion_params/presets", { method: "POST", body: JSON.stringify({ action: "load", name }) });
+    emotionParams = res.params || {};
+    emotionParamsEnabled = res.enabled !== false;
+    const toggleEl = document.getElementById("cb-enable-emotion-params");
+    if (toggleEl) toggleEl.checked = emotionParamsEnabled;
+    renderEmotionParams();
+    if (statusEl) { statusEl.textContent = "已载入预设"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "载入失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+async function deleteEmotionPreset() {
+  const sel = document.getElementById("emotion-preset-select");
+  const statusEl = document.getElementById("emotion-presets-status");
+  const name = sel ? sel.value : "";
+  if (!name) { if (statusEl) { statusEl.textContent = "请先选择一个预设"; statusEl.className = "status-text error"; } return; }
+  if (!(await showConfirmModal("确定删除预设「" + name + "」吗？"))) return;
+  try {
+    await api("/api/emotion_params/presets", { method: "POST", body: JSON.stringify({ action: "delete", name }) });
+    await loadEmotionPresets();
+    if (statusEl) { statusEl.textContent = "已删除预设"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "删除失败: " + e.message; statusEl.className = "status-text error"; }
   }
 }
 

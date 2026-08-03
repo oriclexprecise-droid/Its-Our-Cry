@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260818">
+<link rel="stylesheet" href="/static/style.css?v=20260819">
 <style>
 .creator-tip {
   position: fixed;
@@ -306,6 +306,7 @@
         <div class="side-section">
           <h3 class="side-section-title">情绪参数模板（SoVITS）</h3>
           <p class="side-hint">按情绪保存 GPT-SoVITS 合成参数，生成时会自动应用到对应情绪的台词。留空表示使用 SoVITS 默认参数。</p>
+          <label class="emo-param-toggle"><input type="checkbox" id="cb-enable-emotion-params"> 启用 AI 情绪参数</label>
           <div class="btn-row">
             <button type="button" id="btn-suggest-params" class="btn-secondary btn-small">AI 生成建议</button>
             <button type="button" id="btn-save-params" class="btn-secondary btn-small btn-flex">保存模板</button>
@@ -319,6 +320,18 @@
               </thead>
               <tbody id="emotion-params-body"><tr><td colspan="6" class="model-empty">加载中...</td></tr></tbody>
             </table>
+          </div>
+          <div class="emotion-preset-block">
+            <div class="preset-save-row">
+              <input type="text" id="emotion-preset-name" placeholder="预设名称，例如：温柔系" maxlength="30" autocomplete="off">
+              <button type="button" id="btn-save-emotion-preset" class="btn-secondary btn-small">保存当前预设</button>
+            </div>
+            <div class="preset-load-row">
+              <select id="emotion-preset-select"></select>
+              <button type="button" id="btn-load-emotion-preset" class="btn-secondary btn-small">载入预设</button>
+              <button type="button" id="btn-delete-emotion-preset" class="btn-secondary btn-small">删除</button>
+            </div>
+            <span id="emotion-presets-status" class="status-text"></span>
           </div>
         </div>
       </div>
@@ -467,7 +480,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260818"></script>
+<script src="/static/app.js?v=20260819"></script>
 <script>
 (function () {
   var tips = [

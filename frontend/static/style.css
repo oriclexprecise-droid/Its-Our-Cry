@@ -789,3 +789,12 @@ textarea { min-height: 240px; line-height: 1.6; }
 .emotion-params-table .param-name { color: #dbe7f8; }
 .emotion-params-table input { width: 84px; padding: 6px 8px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 6px; color: #e6edf7; font-size: 13px; outline: none; }
 .emotion-params-table input:focus { border-color: #ff6b9d; }
+.emo-param-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #ccc; margin-bottom: 10px; cursor: pointer; }
+.emo-param-toggle input { accent-color: #ff6b9d; }
+.emotion-preset-block { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.preset-save-row, .preset-load-row { display: flex; gap: 8px; align-items: center; }
+.preset-save-row input { flex: 1; min-width: 0; padding: 7px 9px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 6px; color: #e0e0e0; font-size: 13px; font-family: inherit; outline: none; }
+.preset-save-row input:focus { border-color: #4ecca3; }
+.preset-load-row select { flex: 1; min-width: 0; padding: 7px 9px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 6px; color: #e0e0e0; font-size: 13px; font-family: inherit; outline: none; }
+.preset-load-row select:focus { border-color: #ff6b9d; }
+.preset-load-row .btn-secondary { flex: none; }

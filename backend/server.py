@@ -70,6 +70,36 @@ def correct_pronunciation(text, pronunciation):
     return None
 
 
+def _clean_emotion_params(raw):
+    """Clamp a raw emotion param dict to valid SoVITS ranges."""
+    def _clamp_f(v, lo, hi, default):
+        try:
+            val = float(v)
+        except (TypeError, ValueError):
+            return default
+        return max(lo, min(hi, val))
+
+    def _clamp_i(v, lo, hi, default):
+        try:
+            val = int(float(v))
+        except (TypeError, ValueError):
+            return default
+        return max(lo, min(hi, val))
+
+    cleaned = {}
+    for name, p in raw.items():
+        if not isinstance(p, dict):
+            continue
+        cleaned[str(name).strip()] = {
+            "temperature": _clamp_f(p.get("temperature"), 0.1, 1.5, 1.0),
+            "top_k": _clamp_i(p.get("top_k"), 1, 50, 15),
+            "top_p": _clamp_f(p.get("top_p"), 0.1, 1.0, 1.0),
+            "speed_factor": _clamp_f(p.get("speed_factor"), 0.5, 1.5, 1.0),
+            "seed": _clamp_i(p.get("seed"), -1, 2147483647, -1),
+        }
+    return cleaned
+
+
 def _deploy_target_error(target_path, project_root):
     """Return an error message when a deploy target could erase the app itself."""
     try:
@@ -267,6 +297,8 @@ def _persist_user_settings(project_root, config):
             settings[key] = deepseek.get(field, "")
         settings["emotions"] = list(config.get("emotions", []))
         settings["emotion_params"] = config.get("emotion_params", {})
+        settings["use_emotion_params"] = bool(config.get("use_emotion_params", True))
+        settings["emotion_param_presets"] = config.get("emotion_param_presets", {})
         settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -386,6 +418,8 @@ def create_app(config_path="config.yaml"):
     })
 
     config.setdefault("emotion_params", {})
+    config.setdefault("use_emotion_params", True)
+    config.setdefault("emotion_param_presets", {})
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
     user_settings = {}
     user_settings_path = project_root / "user_settings.json"
@@ -413,6 +447,12 @@ def create_app(config_path="config.yaml"):
     if isinstance(user_settings.get("emotion_params"), dict):
         config["emotion_params"] = {
             str(k).strip(): dict(v) for k, v in user_settings["emotion_params"].items() if isinstance(v, dict)
+        }
+    if "use_emotion_params" in user_settings:
+        config["use_emotion_params"] = bool(user_settings["use_emotion_params"])
+    if isinstance(user_settings.get("emotion_param_presets"), dict):
+        config["emotion_param_presets"] = {
+            str(k).strip(): dict(v) for k, v in user_settings["emotion_param_presets"].items() if isinstance(v, dict)
         }
     if "pronunciation" in user_settings and isinstance(user_settings["pronunciation"], list):
         config["pronunciation"] = [
@@ -815,43 +855,27 @@ def create_app(config_path="config.yaml"):
 
     @app.route("/api/emotion_params", methods=["GET"])
     def get_emotion_params():
-        return jsonify({"params": config.get("emotion_params", {})})
+        return jsonify({
+            "params": config.get("emotion_params", {}),
+            "enabled": bool(config.get("use_emotion_params", True)),
+        })
 
     @app.route("/api/emotion_params", methods=["POST"])
     def save_emotion_params():
         data = request.get_json(silent=True) or {}
+        if "enabled" in data:
+            config["use_emotion_params"] = bool(data.get("enabled"))
         raw = data.get("params")
-        if not isinstance(raw, dict):
+        if raw is not None and not isinstance(raw, dict):
             return jsonify({"error": "参数格式错误"}), 400
-
-        def _clamp_f(v, lo, hi, default):
-            try:
-                val = float(v)
-            except (TypeError, ValueError):
-                return default
-            return max(lo, min(hi, val))
-
-        def _clamp_i(v, lo, hi, default):
-            try:
-                val = int(float(v))
-            except (TypeError, ValueError):
-                return default
-            return max(lo, min(hi, val))
-
-        cleaned = {}
-        for name, p in raw.items():
-            if not isinstance(p, dict):
-                continue
-            cleaned[str(name).strip()] = {
-                "temperature": _clamp_f(p.get("temperature"), 0.1, 1.5, 1.0),
-                "top_k": _clamp_i(p.get("top_k"), 1, 50, 15),
-                "top_p": _clamp_f(p.get("top_p"), 0.1, 1.0, 1.0),
-                "speed_factor": _clamp_f(p.get("speed_factor"), 0.5, 1.5, 1.0),
-                "seed": _clamp_i(p.get("seed"), -1, 2147483647, -1),
-            }
-        config["emotion_params"] = cleaned
+        if isinstance(raw, dict):
+            config["emotion_params"] = _clean_emotion_params(raw)
         _persist_user_settings(project_root, config)
-        return jsonify({"status": "ok", "params": cleaned})
+        return jsonify({
+            "status": "ok",
+            "params": config.get("emotion_params", {}),
+            "enabled": bool(config.get("use_emotion_params", True)),
+        })
 
     @app.route("/api/emotion_params/suggest", methods=["POST"])
     def suggest_emotion_params():
@@ -861,13 +885,9 @@ def create_app(config_path="config.yaml"):
         model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
         if not api_key:
             return jsonify({"error": "请先配置 DeepSeek API Key"}), 400
-        used = []
-        for line in state.get("lines", []):
-            e = str(line.get("emotion") or "").strip()
-            if e and e not in used:
-                used.append(e)
+        used = [str(e).strip() for e in config.get("emotions") or [] if str(e).strip()]
         if not used:
-            return jsonify({"error": "请先分析剧本，才能按台词情绪生成参数建议"}), 400
+            used = list(DEFAULT_EMOTIONS)
         try:
             suggestions = suggest_params(
                 emotions=used,
@@ -879,6 +899,70 @@ def create_app(config_path="config.yaml"):
             traceback.print_exc()
             return jsonify({"error": "参数建议失败: " + str(e)}), 500
         return jsonify({"params": suggestions, "emotions": used})
+
+    @app.route("/api/emotion_params/presets", methods=["GET"])
+    def get_emotion_presets():
+        presets = config.get("emotion_param_presets", {})
+        items = [
+            {
+                "name": str(name),
+                "params": dict(data.get("params") or {}),
+                "enabled": bool(data.get("enabled", True)),
+                "updated_at": str(data.get("updated_at") or ""),
+            }
+            for name, data in presets.items()
+            if isinstance(data, dict)
+        ]
+        return jsonify({"presets": items})
+
+    @app.route("/api/emotion_params/presets", methods=["POST"])
+    def manage_emotion_presets():
+        data = request.get_json(silent=True) or {}
+        action = str(data.get("action") or "").strip()
+        presets = config.setdefault("emotion_param_presets", {})
+        if action == "save":
+            name = str(data.get("name") or "").strip()
+            if not name:
+                return jsonify({"error": "请输入预设名称"}), 400
+            raw = data.get("params")
+            if not isinstance(raw, dict):
+                return jsonify({"error": "参数格式错误"}), 400
+            presets[name] = {
+                "params": _clean_emotion_params(raw),
+                "enabled": bool(data.get("enabled", config.get("use_emotion_params", True))),
+                "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        elif action == "load":
+            name = str(data.get("name") or "").strip()
+            preset = presets.get(name)
+            if not isinstance(preset, dict):
+                return jsonify({"error": "预设不存在"}), 404
+            config["emotion_params"] = _clean_emotion_params(preset.get("params") or {})
+            config["use_emotion_params"] = bool(preset.get("enabled", True))
+        elif action == "delete":
+            name = str(data.get("name") or "").strip()
+            if name not in presets:
+                return jsonify({"error": "预设不存在"}), 404
+            del presets[name]
+        else:
+            return jsonify({"error": "未知操作"}), 400
+        _persist_user_settings(project_root, config)
+        items = [
+            {
+                "name": str(name),
+                "params": dict(preset.get("params") or {}),
+                "enabled": bool(preset.get("enabled", True)),
+                "updated_at": str(preset.get("updated_at") or ""),
+            }
+            for name, preset in presets.items()
+            if isinstance(preset, dict)
+        ]
+        return jsonify({
+            "status": "ok",
+            "presets": items,
+            "params": config.get("emotion_params", {}),
+            "enabled": bool(config.get("use_emotion_params", True)),
+        })
 
     @app.route("/api/models", methods=["GET"])
     def list_models():
@@ -1734,7 +1818,9 @@ def create_app(config_path="config.yaml"):
                         output_path = output_dir / f"{idx:04d}_{char}_{emotion}.wav"
 
                         tts_cfg = config["tts"]
-                        emo_params = config.get("emotion_params", {}).get(emotion) or {}
+                        emo_params = {}
+                        if config.get("use_emotion_params", True):
+                            emo_params = config.get("emotion_params", {}).get(emotion) or {}
 
                         def _param(key, default):
                             v = emo_params.get(key)
