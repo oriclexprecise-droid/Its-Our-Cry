@@ -325,7 +325,7 @@ function renderLines() {
         if (res.reanalyze_cancelled) {
           state.lines[idx] = res.line;
           renderLines();
-          status.textContent = "已停止分析，本次修改未保存";
+          status.textContent = "已停止分析，文本已保留，情绪未重新分析";
           status.className = "status-text";
           return;
         }
@@ -361,12 +361,12 @@ function renderLines() {
       } catch (err) {
         if (err.name === "AbortError") {
           try {
-            await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ text: prevText, emotion: prevEmotion, reanalyze: false }) });
+            await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ text: newText, emotion: prevEmotion, reanalyze: false }) });
           } catch (e2) {}
-          state.lines[idx].text = prevText;
+          state.lines[idx].text = newText;
           state.lines[idx].emotion = prevEmotion;
           renderLines();
-          status.textContent = "已停止分析，本次修改未保存";
+          status.textContent = "已停止分析，文本已保留，情绪未重新分析";
           status.className = "status-text";
         } else {
           edit.textContent = esc(prevText);

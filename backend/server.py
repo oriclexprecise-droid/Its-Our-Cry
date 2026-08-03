@@ -774,6 +774,7 @@ def create_app(config_path="config.yaml"):
             new_text = new_text.strip()
             if new_text != line.get("text"):
                 old_text = line.get("text")
+                old_emotion = line.get("emotion")
                 line["text"] = new_text
                 if data.get("reanalyze", True):
                     try:
@@ -791,12 +792,13 @@ def create_app(config_path="config.yaml"):
                             lang=state.get("lang", "zh"),
                         )
                         if state.get("analysis_cancel_seq", -1) >= seq:
-                            line["text"] = old_text
+                            invalidate_segment()
+                            line["emotion"] = old_emotion
                             reanalyze_cancelled = True
                             record_event(
                                 {
                                     "type": "line_edit",
-                                    "message": f"台词修改：第{index + 1}行 已停止重新分析，文本未保存",
+                                    "message": f"台词修改：第{index + 1}行 已停止重新分析，文本已保存",
                                     "payload": {"index": index},
                                 },
                                 project_root=project_root,
@@ -840,6 +842,16 @@ def create_app(config_path="config.yaml"):
                             },
                             project_root=project_root,
                         )
+                else:
+                    invalidate_segment()
+                    record_event(
+                        {
+                            "type": "line_edit",
+                            "message": f"台词修改：第{index + 1}行 文本已保存（未重新分析）",
+                            "payload": {"index": index},
+                        },
+                        project_root=project_root,
+                    )
         if "character" in data:
             new_char = data["character"]
             if not isinstance(new_char, str) or not new_char.strip():
