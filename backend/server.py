@@ -767,8 +767,14 @@ def create_app(config_path="config.yaml"):
             now = time.strftime("%Y-%m-%d %H:%M:%S")
             snapshot = snapshot_current_workbench()
             if record is None:
+                first_name = ""
+                for ln in str(snapshot.get("script") or "").splitlines():
+                    if ln.strip():
+                        first_name = ln.strip()[:60]
+                        break
                 record = {
                     "id": uuid.uuid4().hex,
+                    "name": first_name or "?????",
                     "created_at": now,
                     "updated_at": now,
                     "versions": [],
@@ -831,6 +837,7 @@ def create_app(config_path="config.yaml"):
             first = str(latest.get("script") or "").strip().split("\n")[0][:80]
         return {
             "id": record.get("id"),
+            "name": str(record.get("name") or ""),
             "created_at": record.get("created_at") or record.get("saved_at"),
             "saved_at": latest.get("saved_at") or record.get("saved_at"),
             "updated_at": record.get("updated_at") or record.get("saved_at"),
@@ -2135,6 +2142,44 @@ def create_app(config_path="config.yaml"):
         state["srt_only"] = False
         state["analysis_cancel_seq"] = state.get("analysis_seq", 0)
         return jsonify({"status": "ok"})
+
+    @app.route("/api/recent/create", methods=["POST"])
+    def create_recent_project():
+        if state.get("generating"):
+            return jsonify({"error": "????????????"}), 409
+        data = request.get_json(silent=True) or {}
+        name = str(data.get("name") or "").strip()[:60] or "?????"
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        record = {
+            "id": uuid.uuid4().hex,
+            "name": name,
+            "saved_at": now,
+            "created_at": now,
+            "updated_at": now,
+            "versions": [],
+            "exports": [],
+        }
+        with recent_lock:
+            records = load_recent_records()
+            records.insert(0, record)
+            enforce_recent_limit(records)
+            persist_recent_records(records)
+        state["current_record_id"] = record["id"]
+        state["lang"] = "zh"
+        state["script"] = ""
+        state["lines"] = []
+        state["emotions"] = []
+        state["generated"] = {}
+        state["failures"] = {}
+        state["merged_path"] = None
+        state["srt_path"] = None
+        state["time_info"] = []
+        state["history_undo"] = []
+        state["history_redo"] = []
+        state["progress"] = {"current": 0, "total": 0}
+        state["srt_only"] = False
+        state["analysis_cancel_seq"] = state.get("analysis_seq", 0)
+        return jsonify({"status": "ok", "record": recent_summary(record)})
 
     @app.route("/api/script", methods=["POST"])
     def save_script_draft():

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260825">
+<link rel="stylesheet" href="/static/style.css?v=20260826">
 <style>
 .creator-tip {
   position: fixed;
@@ -498,6 +498,20 @@
     </div>
   </div>
 </div>
+<div id="new-project-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3>新建项目</h3>
+    <div class="api-field">
+      <label for="new-project-name">项目名称</label>
+      <input type="text" id="new-project-name" maxlength="60" placeholder="输入项目名称，例如：练习室日常">
+    </div>
+    <span id="new-project-status" class="status-text"></span>
+    <div class="modal-actions">
+      <button id="btn-new-project-cancel" class="btn-secondary">取消</button>
+      <button id="btn-new-project-ok" class="btn-primary">创建并进入</button>
+    </div>
+  </div>
+</div>
 <div id="projects-modal" class="modal-overlay hidden">
   <div class="modal-box">
     <h3>往期项目</h3>
@@ -518,7 +532,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260825"></script>
+<script src="/static/app.js?v=20260826"></script>
 <script>
 (function () {
   var tips = [

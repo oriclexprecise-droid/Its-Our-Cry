@@ -620,10 +620,39 @@ function showProjectPicker() {
   if (banner) banner.classList.add("hidden");
 }
 
-async function createNewProject() {
+function createNewProject() {
   if (state.generating) { toast("生成中，请稍后再新建项目", "error"); return; }
+  const modal = document.getElementById("new-project-modal");
+  const input = document.getElementById("new-project-name");
+  const status = document.getElementById("new-project-status");
+  if (!modal || !input) return;
+  input.value = "";
+  if (status) { status.textContent = ""; status.className = "status-text"; }
+  modal.classList.remove("hidden");
+  setTimeout(() => input.focus(), 30);
+}
+
+function closeNewProjectModal() {
+  const modal = document.getElementById("new-project-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function confirmNewProject() {
+  const modal = document.getElementById("new-project-modal");
+  const input = document.getElementById("new-project-name");
+  const status = document.getElementById("new-project-status");
+  const btn = document.getElementById("btn-new-project-ok");
+  if (!modal || !input) return;
+  const name = input.value.trim();
+  if (!name) {
+    if (status) { status.textContent = "请输入项目名称"; status.className = "status-text error"; }
+    input.focus();
+    return;
+  }
+  if (state.generating) { toast("生成中，请稍后再新建项目", "error"); return; }
+  if (btn) btn.disabled = true;
   try {
-    await api("/api/recent/new", { method: "POST" });
+    await api("/api/recent/create", { method: "POST", body: JSON.stringify({ name }) });
     state.lines = [];
     state.script = "";
     state.failures = {};
@@ -649,11 +678,14 @@ async function createNewProject() {
     renderLines();
     refreshGenerated({ generated_indices: [], failures: {} });
     refreshHistory();
-    refreshRecentList();
+    closeNewProjectModal();
     showWorkbench();
-    toast("已新建项目，撤销/重做已重置");
+    refreshRecentList();
+    toast("已创建项目“" + name + "”，撤销/重做已重置");
   } catch (e) {
-    toast("新建项目失败: " + e.message, "error");
+    if (status) { status.textContent = "创建失败: " + e.message; status.className = "status-text error"; }
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -678,11 +710,13 @@ async function openProjectsModal() {
       return;
     }
     list.innerHTML = records.map(r => {
+      const projectName = r.name || r.first_line || "未命名项目";
       const first = r.first_line ? '<div class="recent-preview" title="' + esc(r.first_line) + '">' + esc(r.first_line) + '</div>' : "";
       const meta = (r.line_count ? r.line_count + " 条" : "仅剧本") + " · " + r.voice_count + " 条语音" + (r.fail_count > 0 ? " · 仅字幕 " + r.fail_count + " 条" : "") + " · " + (r.version_count || 0) + " 个小版本";
       return '<div class="project-item">'
         + '<div class="project-item-main">'
-        + '<div class="project-item-head"><span class="project-item-time">' + esc(r.saved_at || "") + '</span><span class="recent-badge">' + (r.source === "manual" ? "手动" : "自动") + " · " + (r.lang === "ja" ? "日语" : "中文") + "</span></div>"
+        + '<div class="project-item-head"><span class="project-item-name">' + esc(projectName) + '</span><span class="recent-badge">' + (r.source === "manual" ? "手动" : "自动") + " · " + (r.lang === "ja" ? "日语" : "中文") + "</span></div>"
+        + '<div class="project-item-time">' + esc(r.saved_at || "") + '</div>'
         + first
         + '<div class="recent-meta">' + esc(meta) + "</div>"
         + '</div>'
@@ -723,7 +757,8 @@ async function refreshRecentList() {
     const cur = await api("/api/recent/current");
     const record = cur.record;
     if (titleEl) {
-      titleEl.textContent = record ? ("当前项目：" + (record.first_line || "未命名项目")) : "当前项目：未命名";
+      const projectName = record ? (record.name || record.first_line || "未命名项目") : "未命名项目";
+      titleEl.textContent = "当前项目：" + projectName;
     }
     const versions = (record && record.versions) || [];
     if (!versions.length) {
@@ -993,6 +1028,22 @@ function initRecentRecords() {
   if (clearBtn) clearBtn.addEventListener("click", clearRecentRecords);
   const newBtn = document.getElementById("btn-new-project");
   if (newBtn) newBtn.addEventListener("click", createNewProject);
+  const newOk = document.getElementById("btn-new-project-ok");
+  if (newOk) newOk.addEventListener("click", confirmNewProject);
+  const newCancel = document.getElementById("btn-new-project-cancel");
+  if (newCancel) newCancel.addEventListener("click", closeNewProjectModal);
+  const newName = document.getElementById("new-project-name");
+  if (newName) {
+    newName.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); confirmNewProject(); }
+    });
+  }
+  const newProjectModal = document.getElementById("new-project-modal");
+  if (newProjectModal) {
+    newProjectModal.addEventListener("click", (e) => {
+      if (e.target === newProjectModal) closeNewProjectModal();
+    });
+  }
   const openBtn = document.getElementById("btn-open-projects");
   if (openBtn) openBtn.addEventListener("click", openProjectsModal);
   const closeBtn = document.getElementById("btn-projects-close");
