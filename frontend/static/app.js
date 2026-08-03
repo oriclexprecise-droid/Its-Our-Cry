@@ -1207,7 +1207,8 @@ async function refreshHistory() {
 }
 
 async function runHistory(dir) {
-  if (state.generating) { toast("生成中，请稍后再撤销/重做", "error"); return; }
+  if (state.generating) { toast("生成中，请取消后再撤销/重做", "error"); return; }
+  if (analysisController) { toast("分析中，请取消后再撤销/重做", "error"); return; }
   try {
     const res = await api("/api/" + dir, { method: "POST" });
     const s = res.state || {};
