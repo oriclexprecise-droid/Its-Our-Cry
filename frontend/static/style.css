@@ -581,20 +581,20 @@ textarea { min-height: 240px; line-height: 1.6; }
 
 .recent-list { display: flex; flex-direction: column; gap: 10px; }
 .recent-empty { color: #7a8bb0; font-size: 13px; padding: 10px 0; }
-.recent-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; background: rgba(15, 52, 96, 0.45); border: 1px solid #1a4a7a; border-radius: 6px; }
+.recent-item { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; background: rgba(15, 52, 96, 0.45); border: 1px solid #1a4a7a; border-radius: 6px; }
 .recent-item-main { flex: 1; min-width: 0; }
 .recent-item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
 .recent-time { color: #8ab4f8; font-size: 13px; font-weight: 600; }
 .recent-badge { font-size: 11px; color: #a9c9ff; background: rgba(138,180,248,0.12); border: 1px solid rgba(138,180,248,0.35); border-radius: 999px; padding: 2px 8px; }
-.recent-preview { font-size: 13px; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
-.recent-meta { font-size: 12px; color: #a9b8d8; }
-.recent-actions { display: flex; gap: 6px; flex: none; }
+.recent-preview { font-size: 13px; color: #e0e0e0; white-space: normal; overflow: visible; overflow-wrap: anywhere; margin-bottom: 4px; }
+.recent-meta { font-size: 12px; color: #a9b8d8; white-space: normal; }
+.recent-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; flex: none; }
 .recent-actions .btn-line-action { padding: 5px 10px; font-size: 12px; }
 .recent-option { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #dbe6f5; margin-bottom: 10px; cursor: pointer; }
 .recent-option input { width: auto; }
 .recent-versions-panel { margin-top: 8px; border-top: 1px solid rgba(26,74,122,0.7); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-.recent-version-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #a9b8d8; }
-.recent-version-time { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent-version-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #a9b8d8; flex-wrap: wrap; }
+.recent-version-time { flex: 1; min-width: 0; white-space: normal; overflow: visible; }
 .recent-version-row .btn-line-action, .recent-versions-panel > .btn-line-action { padding: 4px 8px; font-size: 11px; }
 @media (max-width: 640px) {
   .recent-item { flex-direction: column; align-items: stretch; }
