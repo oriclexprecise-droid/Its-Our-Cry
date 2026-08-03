@@ -595,6 +595,19 @@ async function startGeneration(indices, srtOnly) {
   }
 }
 
+function summarizeFailures(failures) {
+  const counts = {};
+  Object.values(failures || {}).forEach(msg => {
+    let key = "其他原因";
+    if (msg.indexOf("缺少参考音频") === 0) key = "缺少参考音频";
+    else if (msg.indexOf("没有配音模型") >= 0 || msg.indexOf("角色模型加载失败") >= 0) key = "角色模型不可用";
+    else if (msg.indexOf("情绪重新分析失败") >= 0) key = "情绪重新分析失败";
+    else if (msg.indexOf("生成失败") >= 0) key = "语音合成失败";
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  return Object.keys(counts).map(k => k + "（" + counts[k] + " 条）").join("、");
+}
+
 async function pollProgress(btn, progressText, barFill) {
   try {
     const p = await api("/api/progress");
@@ -629,7 +642,7 @@ async function pollProgress(btn, progressText, barFill) {
     if (!p.generating && p.merged_path) {
       const failCount = Object.keys(p.failures || {}).length;
       if (failCount > 0) {
-        progressText.textContent = "生成完成：语音 " + p.generated_count + " 条，另有 " + failCount + " 条仅保留字幕";
+        progressText.textContent = "生成完成：语音 " + p.generated_count + " 条，另有 " + failCount + " 条仅保留字幕。原因：" + summarizeFailures(p.failures);
         progressText.className = "status-text success";
       } else if (p.generated_count > 0) {
         progressText.textContent = "生成完成：语音 " + p.generated_count + " 条";
