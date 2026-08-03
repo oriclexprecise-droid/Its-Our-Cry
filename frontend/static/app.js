@@ -194,13 +194,22 @@ if (btnUndoEl) btnUndoEl.addEventListener("click", () => runHistory("undo"));
 if (btnRedoEl) btnRedoEl.addEventListener("click", () => runHistory("redo"));
 
 document.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && (e.key === "z" || e.key === "Z")) {
     const el = document.activeElement;
     const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
-    if (typing) return;
+    if (typing) {
+      if (!e.shiftKey) return;
+      e.preventDefault();
+      runHistory("redo");
+      return;
+    }
     e.preventDefault();
     if (e.shiftKey) runHistory("redo");
     else runHistory("undo");
+  } else if (mod && (e.key === "y" || e.key === "Y")) {
+    e.preventDefault();
+    runHistory("redo");
   }
 });
 
