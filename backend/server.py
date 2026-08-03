@@ -646,6 +646,23 @@ def create_app(config_path="config.yaml"):
         if index < 0 or index >= len(state["lines"]):
             return jsonify({"error": "invalid index"}), 400
         line = state["lines"][index]
+        had_generated = False
+        reanalyze_error = None
+
+        def invalidate_segment():
+            nonlocal had_generated
+            if index in state["generated"]:
+                had_generated = True
+                gen = state["generated"].pop(index, None)
+                if gen:
+                    try:
+                        old_path = Path(gen["path"])
+                        if old_path.exists():
+                            old_path.unlink()
+                    except Exception:
+                        pass
+            state["failures"].pop(index, None)
+
         if "emotion" in data:
             if data["emotion"] not in config["emotions"]:
                 return jsonify({"error": "invalid emotion"}), 400
@@ -660,9 +677,8 @@ def create_app(config_path="config.yaml"):
                     },
                     project_root=project_root,
                 )
+                invalidate_segment()
             line["emotion"] = new_emotion
-        had_generated = False
-        reanalyze_error = None
         if "text" in data:
             new_text = data["text"]
             if not isinstance(new_text, str) or not new_text.strip():
@@ -670,17 +686,7 @@ def create_app(config_path="config.yaml"):
             new_text = new_text.strip()
             if new_text != line.get("text"):
                 line["text"] = new_text
-                # 旧音频作废，只重新分析这一句
-                had_generated = index in state["generated"]
-                gen = state["generated"].pop(index, None)
-                if gen:
-                    try:
-                        old_path = Path(gen["path"])
-                        if old_path.exists():
-                            old_path.unlink()
-                    except Exception:
-                        pass
-                state["failures"].pop(index, None)
+                invalidate_segment()
                 try:
                     api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
                     base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
@@ -728,6 +734,23 @@ def create_app(config_path="config.yaml"):
                         },
                         project_root=project_root,
                     )
+        if "character" in data:
+            new_char = data["character"]
+            if not isinstance(new_char, str) or not new_char.strip():
+                return jsonify({"error": "角色名不能为空"}), 400
+            new_char = new_char.strip()
+            if new_char != line.get("character"):
+                old_char = line.get("character")
+                line["character"] = new_char
+                invalidate_segment()
+                record_event(
+                    {
+                        "type": "character_edit",
+                        "message": f"角色名修改：第{index + 1}行 {old_char} → {new_char}",
+                        "payload": {"index": index, "old": old_char, "new": new_char},
+                    },
+                    project_root=project_root,
+                )
         if "interval" in data:
             try:
                 interval = float(data["interval"])
@@ -838,14 +861,6 @@ def create_app(config_path="config.yaml"):
         for f in ref_dir.iterdir():
             if f.suffix.lower() in audio_exts and f.is_file():
                 files.append(str(f))
-        if not files:
-            # fallback: any audio from this character's directories
-            parent_dir = ref_dir.parent
-            if parent_dir.exists():
-                for root, dirs, filenames in os.walk(str(parent_dir)):
-                    for fn in filenames:
-                        if Path(fn).suffix.lower() in audio_exts:
-                            files.append(os.path.join(root, fn))
         if not files:
             return None
         return random.choice(files)
@@ -1007,7 +1022,7 @@ def create_app(config_path="config.yaml"):
                         emotion = line.get("emotion", "thinking")
                         ref_audio = pick_ref_audio(char, emotion)
                         if ref_audio is None:
-                            fail(idx, f"缺少参考音频：{char}/{emotion}，仅保留字幕，请先在语音库放入音频")
+                            fail(idx, f"缺少参考音频：{char}「{emotion}」，仅保留字幕，请先在语音库该情绪文件夹放入音频")
                             continue
 
                         output_dir = Path(config["output_dir"]) / "segments"

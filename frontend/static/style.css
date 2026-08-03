@@ -525,3 +525,21 @@ textarea { min-height: 240px; line-height: 1.6; }
 .line-item .line-text-edit:hover { background: rgba(138, 180, 248, 0.08); }
 .line-item .line-text-edit:focus { background: rgba(15, 52, 96, 0.85); box-shadow: 0 0 0 1px #4ecca3; }
 .line-item .line-text-edit[contenteditable="false"] { cursor: default; opacity: 0.72; }
+
+
+/* 单条角色名编辑 */
+.line-item .char-input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  background: #0f3460;
+  border: 1px solid #1a4a7a;
+  border-radius: 4px;
+  color: #ff6b9d;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  outline: none;
+}
+.line-item .char-input:focus { border-color: #4ecca3; }
+.line-item .char-input:disabled { opacity: 0.6; cursor: not-allowed; }

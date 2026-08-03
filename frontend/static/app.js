@@ -16,6 +16,10 @@ async function loadConfig() {
   const cfg = await api("/api/config");
   state.chars = cfg.characters;
   state.emotions = cfg.emotions;
+  const charDatalist = document.getElementById("char-suggestions");
+  if (charDatalist) {
+    charDatalist.innerHTML = (cfg.characters || []).concat(["旁白"]).map(c => '<option value="' + esc(c) + '"></option>').join("");
+  }
   setNarrationInputs(cfg.narration || {});
   loadDeployPath(cfg);
   loadCleanPath(cfg);
@@ -169,7 +173,7 @@ function renderLines() {
     const isNarration = line.character === "旁白";
     return '<div class="line-item">'
       + idxCell
-      + '<span class="char">' + esc(line.character) + '</span>'
+      + '<input type="text" class="char char-input" list="char-suggestions" value="' + esc(line.character) + '" data-index="' + i + '" title="点击修改角色名，回车保存" autocomplete="off">'
       + '<span class="line-texts">'
       + '<div class="text line-text-edit" contenteditable="true" spellcheck="false" title="点击修改台词，回车保存" data-index="' + i + '">' + esc(line.text) + '</div>'
       + (line.translated_text ? '<span class="translated" title="' + esc(line.translated_text) + '">日语：' + esc(line.translated_text) + '</span>' : '')
@@ -188,8 +192,36 @@ function renderLines() {
   container.querySelectorAll(".emotion-select").forEach(sel => {
     sel.addEventListener("change", async (e) => {
       const idx = parseInt(e.target.dataset.index);
-      state.lines[idx].emotion = e.target.value;
-      try { await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ emotion: e.target.value }) }); } catch (err) {}
+      const oldEmotion = state.lines[idx].emotion;
+      const newEmotion = e.target.value;
+      if (newEmotion === oldEmotion) return;
+      const status = document.getElementById("progress-text");
+      status.classList.remove("hidden");
+      status.textContent = "正在更新情绪...";
+      status.className = "status-text";
+      try {
+        const res = await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ emotion: newEmotion }) });
+        state.lines[idx] = res.line;
+        delete state.failures[idx];
+        renderLines();
+        if (res.had_generated) {
+          status.textContent = "情绪已更新，正在重新生成该句...";
+          status.className = "status-text";
+          startGeneration([idx]);
+        } else if (state.hasGenerated && !state.generating) {
+          await api("/api/merge", { method: "POST" });
+          status.textContent = "情绪已更新，字幕已同步";
+          status.className = "status-text success";
+        } else {
+          status.textContent = "情绪已更新";
+          status.className = "status-text success";
+        }
+      } catch (err) {
+        state.lines[idx].emotion = oldEmotion;
+        renderLines();
+        status.textContent = "情绪保存失败: " + err.message;
+        status.className = "status-text error";
+      }
     });
   });
   container.querySelectorAll(".line-check").forEach(cb => {
@@ -297,6 +329,52 @@ function renderLines() {
       }
     });
   });
+  container.querySelectorAll(".char-input").forEach(inp => {
+    const idx = parseInt(inp.dataset.index);
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); inp.blur(); }
+    });
+    inp.addEventListener("change", async () => {
+      if (state.generating) { inp.value = state.lines[idx].character; return; }
+      const prevChar = state.lines[idx].character;
+      const newChar = inp.value.trim();
+      if (!newChar || newChar === prevChar) { inp.value = prevChar; return; }
+      inp.disabled = true;
+      const status = document.getElementById("progress-text");
+      status.classList.remove("hidden");
+      status.textContent = "正在更新第 " + (idx + 1) + " 行角色...";
+      status.className = "status-text";
+      try {
+        const res = await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ character: newChar }) });
+        state.lines[idx] = res.line;
+        delete state.failures[idx];
+        renderLines();
+        const needsVoice = res.line.character !== "旁白";
+        const wasSilent = prevChar === "旁白" || !state.chars.includes(prevChar);
+        if (res.had_generated || (needsVoice && wasSilent)) {
+          status.textContent = "角色已更新，正在重新生成该句...";
+          status.className = "status-text";
+          startGeneration([idx]);
+        } else if (state.hasGenerated && !state.generating) {
+          try {
+            await api("/api/merge", { method: "POST" });
+            status.textContent = "角色已更新，字幕已同步";
+            status.className = "status-text success";
+          } catch (err) {
+            status.textContent = "角色已更新，字幕同步失败：" + err.message;
+            status.className = "status-text error";
+          }
+        } else {
+          status.textContent = "角色已更新";
+          status.className = "status-text success";
+        }
+      } catch (err) {
+        inp.value = prevChar;
+        status.textContent = "角色保存失败: " + err.message;
+        status.className = "status-text error";
+      }
+    });
+  });
   container.querySelectorAll(".btn-play").forEach(btn => {
     btn.addEventListener("click", () => {
       const idx = parseInt(btn.dataset.index);
@@ -338,6 +416,7 @@ function setLineButtonsDisabled(disabled) {
   document.querySelectorAll(".btn-line-action").forEach(b => { b.disabled = disabled; });
   document.querySelectorAll(".interval-input").forEach(inp => { inp.disabled = disabled; });
   document.querySelectorAll(".line-text-edit").forEach(el => { el.contentEditable = disabled ? "false" : "true"; });
+  document.querySelectorAll(".char-input").forEach(el => { el.disabled = disabled; });
   document.querySelectorAll(".line-check, #select-all, #btn-apply-interval, #batch-interval, #btn-select-mode").forEach(el => { el.disabled = disabled; });
 }
 
