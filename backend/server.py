@@ -93,6 +93,11 @@ def _deploy_target_error(target_path, project_root):
 
 
 
+DEFAULT_EMOTIONS = [
+    "生气", "告别", "哭泣", "感动", "决心",
+    "悲伤", "认真", "害羞", "微笑", "惊讶", "思考",
+]
+
 DEFAULT_MODEL_ALIASES = {
     "MyGO_千早爱音_v2pp": "千早爱音",
     "MyGO_要乐奈_v2pp": "要乐奈",
@@ -260,6 +265,7 @@ def _persist_user_settings(project_root, config):
         deepseek = config.get("deepseek", {})
         for field, key in (("base_url", "deepseek_base_url"), ("model", "deepseek_model"), ("name", "deepseek_name")):
             settings[key] = deepseek.get(field, "")
+        settings["emotions"] = list(config.get("emotions", []))
         settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -398,6 +404,10 @@ def create_app(config_path="config.yaml"):
         config["gptsovits_path"] = user_settings["gptsovits_path"]
     if user_settings.get("narration"):
         config["narration"] = {**config.get("narration", {}), **user_settings["narration"]}
+    if "emotions" in user_settings and isinstance(user_settings["emotions"], list):
+        custom_emotions = [str(e).strip() for e in user_settings["emotions"] if str(e).strip()]
+        if custom_emotions:
+            config["emotions"] = custom_emotions
     if "pronunciation" in user_settings and isinstance(user_settings["pronunciation"], list):
         config["pronunciation"] = [
             {"zh": str(p.get("zh", "")).strip(), "ja": str(p.get("ja", "")).strip()}
@@ -754,6 +764,49 @@ def create_app(config_path="config.yaml"):
         _persist_user_settings(project_root, config)
         return jsonify({"status": "ok"})
 
+    @app.route("/api/emotions", methods=["GET"])
+    def get_emotions():
+        return jsonify({"emotions": config["emotions"], "defaults": DEFAULT_EMOTIONS})
+
+    @app.route("/api/emotions", methods=["POST"])
+    def update_emotions():
+        data = request.get_json() or {}
+        action = str(data.get("action") or "").strip()
+        name = str(data.get("name") or "").strip()
+        if action == "add":
+            if not name:
+                return jsonify({"error": "情绪名不能为空"}), 400
+            if name == "旁白":
+                return jsonify({"error": "不能添加“旁白”"}), 400
+            if "/" in name or "\\" in name or name in (".", ".."):
+                return jsonify({"error": "情绪名不能包含路径分隔符"}), 400
+            if name in config["emotions"]:
+                return jsonify({"error": "情绪已存在"}), 400
+            config["emotions"].append(name)
+            for mkey in models:
+                base = _ref_audio_base(mkey)
+                if base is not None:
+                    try:
+                        (base / name).mkdir(parents=True, exist_ok=True)
+                    except Exception:
+                        pass
+        elif action == "delete":
+            if name not in config["emotions"]:
+                return jsonify({"error": "情绪不存在"}), 404
+            if len(config["emotions"]) <= 1:
+                return jsonify({"error": "至少保留一个情绪"}), 400
+            config["emotions"].remove(name)
+        else:
+            return jsonify({"error": "未知操作"}), 400
+        _persist_user_settings(project_root, config)
+        return jsonify({"status": "ok", "emotions": config["emotions"]})
+
+    @app.route("/api/emotions/reset", methods=["POST"])
+    def reset_emotions():
+        config["emotions"] = list(DEFAULT_EMOTIONS)
+        _persist_user_settings(project_root, config)
+        return jsonify({"status": "ok", "emotions": config["emotions"]})
+
     @app.route("/api/models", methods=["GET"])
     def list_models():
         items = []
@@ -899,6 +952,7 @@ def create_app(config_path="config.yaml"):
                 base_url=base_url,
                 model=model,
                 lang=lang,
+                emotions=config["emotions"],
             )
         except Exception as e:
             traceback.print_exc()
@@ -1050,6 +1104,7 @@ def create_app(config_path="config.yaml"):
                             base_url=base_url,
                             model=model,
                             lang=state.get("lang", "zh"),
+                            emotions=config["emotions"],
                         )
                         if state.get("analysis_cancel_seq", -1) >= seq:
                             invalidate_segment()

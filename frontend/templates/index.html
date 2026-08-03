@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260814">
+<link rel="stylesheet" href="/static/style.css?v=20260815">
 <style>
 .creator-tip {
   position: fixed;
@@ -153,6 +153,7 @@
       <nav class="settings-nav">
         <button type="button" class="settings-tab active" data-settings-tab="deploy">部署</button>
         <button type="button" class="settings-tab" data-settings-tab="models">模型配置</button>
+        <button type="button" class="settings-tab" data-settings-tab="emotions">情绪管理</button>
         <button type="button" class="settings-tab" data-settings-tab="refs">语音库</button>
         <button type="button" class="settings-tab" data-settings-tab="clean">清理空间</button>
         <button type="button" class="settings-tab" data-settings-tab="log">日志</button>
@@ -274,6 +275,24 @@
         <div class="side-section">
           <h3 class="side-section-title">角色模型（激活词可增删）</h3>
           <div id="model-list" class="model-list"><div class="model-empty">加载中...</div></div>
+        </div>
+      </div>
+    </section>
+    <section class="panel settings-page" data-settings-page="emotions">
+      <div class="panel-header"><h2>情绪管理</h2></div>
+      <div class="panel-body">
+        <div class="side-section">
+          <h3 class="side-section-title">自定义情绪</h3>
+          <p class="side-hint">增删情绪会同步 AI 情绪分析的可选范围，并同步显示到语音库中。</p>
+          <div id="emotions-list" class="emotions-list"><div class="model-empty">加载中...</div></div>
+          <div class="emotion-add-row">
+            <input type="text" id="emotion-name" class="emotion-name-input" placeholder="输入新情绪，例如：无奈" maxlength="20" autocomplete="off">
+            <button type="button" id="btn-add-emotion" class="btn-secondary btn-small">添加情绪</button>
+          </div>
+          <div class="emotion-actions">
+            <button type="button" id="btn-reset-emotions" class="btn-secondary btn-small">恢复系统默认</button>
+            <span id="emotions-status" class="status-text"></span>
+          </div>
         </div>
       </div>
     </section>
@@ -436,7 +455,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260814"></script>
+<script src="/static/app.js?v=20260815"></script>
 <script>
 (function () {
   var tips = [

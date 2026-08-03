@@ -2498,6 +2498,104 @@ async function deleteRefAudio(key, emotion, name) {
   }
 }
 
+
+function initEmotions() {
+  const addBtn = document.getElementById("btn-add-emotion");
+  if (addBtn) addBtn.addEventListener("click", addEmotion);
+  const resetBtn = document.getElementById("btn-reset-emotions");
+  if (resetBtn) resetBtn.addEventListener("click", resetEmotions);
+  const input = document.getElementById("emotion-name");
+  if (input) input.addEventListener("keydown", (e) => { if (e.key === "Enter") addEmotion(); });
+  loadEmotions();
+}
+
+async function loadEmotions() {
+  const listEl = document.getElementById("emotions-list");
+  const statusEl = document.getElementById("emotions-status");
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="model-empty">加载中...</div>';
+  try {
+    const data = await api("/api/emotions");
+    state.emotions = data.emotions || [];
+    renderEmotions(state.emotions);
+    if (statusEl) { statusEl.textContent = ""; statusEl.className = "status-text"; }
+  } catch (e) {
+    listEl.innerHTML = '<div class="model-empty">加载失败: ' + esc(e.message) + '</div>';
+    if (statusEl) { statusEl.textContent = "加载失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+function renderEmotions(list) {
+  const listEl = document.getElementById("emotions-list");
+  if (!listEl) return;
+  if (!list.length) {
+    listEl.innerHTML = '<div class="model-empty">暂无情绪</div>';
+    return;
+  }
+  listEl.innerHTML = list.map(e => (
+    '<span class="emotion-chip">' + esc(e)
+    + '<button type="button" class="emotion-chip-del" data-name="' + esc(e) + '" title="删除">×</button>'
+    + '</span>'
+  )).join("");
+  listEl.querySelectorAll(".emotion-chip-del").forEach(btn => {
+    btn.addEventListener("click", () => deleteEmotion(btn.dataset.name));
+  });
+}
+
+async function addEmotion() {
+  const input = document.getElementById("emotion-name");
+  const statusEl = document.getElementById("emotions-status");
+  const name = input ? input.value.trim() : "";
+  if (!name) {
+    if (statusEl) { statusEl.textContent = "请输入情绪名"; statusEl.className = "status-text error"; }
+    return;
+  }
+  if (statusEl) { statusEl.textContent = "正在添加..."; statusEl.className = "status-text"; }
+  try {
+    const res = await api("/api/emotions", { method: "POST", body: JSON.stringify({ action: "add", name }) });
+    if (input) input.value = "";
+    state.emotions = res.emotions || [];
+    renderEmotions(state.emotions);
+    if (statusEl) { statusEl.textContent = "已添加情绪"; statusEl.className = "status-text success"; }
+    loadReferenceLibrary();
+    renderLines();
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "添加失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+async function deleteEmotion(name) {
+  if (!(await showConfirmModal("确定删除情绪“" + name + "”吗？已有参考音频文件夹会保留。"))) return;
+  const statusEl = document.getElementById("emotions-status");
+  if (statusEl) { statusEl.textContent = "正在删除..."; statusEl.className = "status-text"; }
+  try {
+    const res = await api("/api/emotions", { method: "POST", body: JSON.stringify({ action: "delete", name }) });
+    state.emotions = res.emotions || [];
+    renderEmotions(state.emotions);
+    if (statusEl) { statusEl.textContent = "已删除情绪"; statusEl.className = "status-text success"; }
+    loadReferenceLibrary();
+    renderLines();
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "删除失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+async function resetEmotions() {
+  if (!(await showConfirmModal("确定恢复系统默认情绪吗？自定义情绪会被移除，对应文件夹保留。"))) return;
+  const statusEl = document.getElementById("emotions-status");
+  if (statusEl) { statusEl.textContent = "正在重置..."; statusEl.className = "status-text"; }
+  try {
+    const res = await api("/api/emotions/reset", { method: "POST" });
+    state.emotions = res.emotions || [];
+    renderEmotions(state.emotions);
+    if (statusEl) { statusEl.textContent = "已恢复系统默认"; statusEl.className = "status-text success"; }
+    loadReferenceLibrary();
+    renderLines();
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "重置失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
 function initReferenceLibrary() {
   const openBtn = document.getElementById("btn-ref-open-root");
   if (openBtn) {
@@ -2535,6 +2633,7 @@ initAIConfig();
 initNarrationConfig();
 initPronunciationConfig();
 initModelConfig();
+initEmotions();
 initReferenceLibrary();
 const refreshBtn = document.getElementById("btn-refresh");
 const refreshModal = document.getElementById("refresh-modal");

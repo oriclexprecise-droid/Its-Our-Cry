@@ -744,3 +744,41 @@ textarea { min-height: 240px; line-height: 1.6; }
   padding-left: 2px;
 }
 .ref-file-prompt.empty { color: #6b84ad; }
+.emotions-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.emotion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(15, 52, 96, 0.55);
+  border: 1px solid #1a4a7a;
+  border-radius: 6px;
+  color: #cbd8f0;
+  font-size: 13px;
+}
+.emotion-chip-del {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: rgba(255, 107, 157, 0.18);
+  color: #ff8a80;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.emotion-chip-del:hover { background: rgba(255, 107, 157, 0.4); color: #fff; }
+.emotion-add-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.emotion-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  background: #0f3460;
+  border: 1px solid #1a4a7a;
+  border-radius: 6px;
+  color: #e6edf7;
+  font-size: 13px;
+  outline: none;
+}
+.emotion-name-input:focus { border-color: #ff6b9d; }
+.emotion-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
