@@ -1253,6 +1253,7 @@ async function runHistory(dir) {
 document.getElementById("btn-merge").addEventListener("click", async () => {
   const btn = document.getElementById("btn-merge");
   const progressText = document.getElementById("progress-text");
+  if (!(await ensureServerLines())) return;
   btn.disabled = true;
   btn.textContent = "合并中...";
   progressText.textContent = "正在合并音频并生成字幕...";
@@ -1347,8 +1348,36 @@ document.getElementById("btn-cancel-generate").addEventListener("click", async (
   }
 });
 
+async function ensureServerLines() {
+  if (!state.lines.length) return true;
+  try {
+    const s = await api("/api/state");
+    if (s && Array.isArray(s.lines) && s.lines.length) return true;
+  } catch (e) {}
+  state.lines = [];
+  state.script = "";
+  state.hasGenerated = false;
+  state.failures = {};
+  state.selected = new Set();
+  state.selectMode = false;
+  renderLines();
+  const review = document.getElementById("step-review");
+  if (review) review.classList.add("hidden");
+  const download = document.getElementById("step-download");
+  if (download) download.classList.add("hidden");
+  const genBtn = document.getElementById("btn-generate");
+  if (genBtn) { genBtn.disabled = true; genBtn.textContent = "生成全部语音"; }
+  const progressText = document.getElementById("progress-text");
+  if (progressText) {
+    progressText.textContent = "检测到服务已重启，分析结果已失效，请重新分析";
+    progressText.className = "status-text error";
+    progressText.classList.remove("hidden");
+  }
+  return false;
+}
 async function startGeneration(indices, srtOnly) {
   if (state.generating) return;
+  if (!(await ensureServerLines())) return;
   const btn = document.getElementById("btn-generate");
   const progressText = document.getElementById("progress-text");
   const targets = indices ? indices.map(i => state.lines[i]) : state.lines;

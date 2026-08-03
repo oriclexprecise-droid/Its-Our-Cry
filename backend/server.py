@@ -2068,6 +2068,12 @@ def create_app(config_path="config.yaml"):
             "history": history_payload(),
         })
 
+    @app.route("/api/state", methods=["GET"])
+    def get_state():
+        payload = workbench_state()
+        payload["generating"] = bool(state.get("generating"))
+        return jsonify(payload)
+
     @app.route("/api/history", methods=["GET"])
     def get_history():
         return jsonify(history_payload())

@@ -13,6 +13,7 @@
 - 服务入口：`main.py`，端口 `5123`，地址 `http://127.0.0.1:5123`。
 - 使用 GPT-SoVITS 自带 Python 启动：`E:\GPT-SoVITS-v2pro-20250604-nvidia50\GPT-SoVITS-v2pro-20250604-nvidia50\runtime\python.exe main.py`。
 - 手动启动也可以双击 `start.bat`。
+- 助手只负责清理 5123 上所有残留的 main.py 实例；服务由用户自己启动，不要自动拉起服务。
 
 ## 关键状态
 - 当前基线提交：`d3dc8f6 restore from 2026-07-26 backup`，这是已验证可用的版本。
