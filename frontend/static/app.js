@@ -13,6 +13,68 @@ async function api(url, opts = {}) {
   return res.json();
 }
 
+function showConfirmModal(message, options) {
+  options = options || {};
+  return new Promise(resolve => {
+    const modal = document.getElementById("confirm-modal");
+    if (!modal) { resolve(window.confirm(message)); return; }
+    const titleEl = document.getElementById("confirm-modal-title");
+    const msgEl = document.getElementById("confirm-modal-message");
+    const okBtn = document.getElementById("btn-modal-ok");
+    const cancelBtn = document.getElementById("btn-modal-cancel");
+    titleEl.textContent = options.title || "确认操作";
+    msgEl.textContent = message;
+    okBtn.textContent = options.okText || "确定";
+    cancelBtn.textContent = options.cancelText || "取消";
+    cancelBtn.classList.remove("hidden");
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      modal.classList.add("hidden");
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      modal.onclick = null;
+      resolve(value);
+    };
+    okBtn.onclick = () => finish(true);
+    cancelBtn.onclick = () => finish(false);
+    modal.onclick = (e) => { if (e.target === modal) finish(false); };
+    modal.classList.remove("hidden");
+  });
+}
+
+function showAlertModal(message, options) {
+  options = options || {};
+  return new Promise(resolve => {
+    const modal = document.getElementById("confirm-modal");
+    if (!modal) { window.alert(message); resolve(); return; }
+    const titleEl = document.getElementById("confirm-modal-title");
+    const msgEl = document.getElementById("confirm-modal-message");
+    const okBtn = document.getElementById("btn-modal-ok");
+    const cancelBtn = document.getElementById("btn-modal-cancel");
+    titleEl.textContent = options.title || "提示";
+    msgEl.textContent = message;
+    okBtn.textContent = options.okText || "知道了";
+    cancelBtn.classList.add("hidden");
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      modal.classList.add("hidden");
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      modal.onclick = null;
+      cancelBtn.classList.remove("hidden");
+      resolve();
+    };
+    okBtn.onclick = finish;
+    modal.onclick = (e) => { if (e.target === modal) finish(); };
+    modal.classList.remove("hidden");
+  });
+}
+
+
 async function loadConfig() {
   const cfg = await api("/api/config");
   state.chars = cfg.characters;
@@ -575,7 +637,7 @@ async function saveRecentRecord() {
 
 async function loadRecentRecord(id) {
   if (state.generating) { setRecentStatus("生成中，请稍后再载入记录", "error"); return; }
-  if (state.lines.length && !confirm("载入记录会覆盖当前工作台（可以用撤销恢复），确定继续吗？")) return;
+  if (state.lines.length && !(await showConfirmModal("载入记录会覆盖当前工作台（可以用撤销恢复），确定继续吗？"))) return;
   setRecentStatus("正在载入...", "");
   try {
     const res = await api("/api/recent/" + id + "/load", { method: "POST" });
@@ -614,12 +676,12 @@ async function openRecentFolder(id) {
     if (!folder) return;
     await api("/api/open_folder", { method: "POST", body: JSON.stringify({ path: folder }) });
   } catch (e) {
-    alert("打开失败: " + e.message);
+    await showAlertModal("打开失败: " + e.message);
   }
 }
 
 async function deleteRecentRecord(id) {
-  if (!confirm("确定删除这条近期记录？")) return;
+  if (!(await showConfirmModal("确定删除这条近期记录？"))) return;
   try {
     await api("/api/recent/" + id, { method: "DELETE" });
     setRecentStatus("已删除记录", "success");
@@ -630,7 +692,7 @@ async function deleteRecentRecord(id) {
 }
 
 async function clearRecentRecords() {
-  if (!confirm("确定清空全部近期记录？此操作不可恢复。")) return;
+  if (!(await showConfirmModal("确定清空全部近期记录？此操作不可恢复。"))) return;
   const status = document.getElementById("recent-settings-status");
   try {
     await api("/api/recent/clear", { method: "POST" });
@@ -1032,7 +1094,7 @@ document.getElementById("btn-open-export").addEventListener("click", async () =>
   try {
     await api("/api/open_folder", { method: "POST", body: JSON.stringify({ path: lastExportFolder }) });
   } catch (e) {
-    alert("打开失败: " + e.message);
+    await showAlertModal("打开失败: " + e.message);
   }
 });
 
@@ -1180,14 +1242,14 @@ async function runClean() {
   const input = document.getElementById("clean-gs-path");
   if (!btn || !statusEl) return;
   const keys = selectedCleanKeys();
-  if (!keys.length) { alert("请先勾选要清理的项目"); return; }
+  if (!keys.length) { await showAlertModal("请先勾选要清理的项目"); return; }
   const groups = (cleanScanData && cleanScanData.groups) || [];
   const total = groups.filter(g => keys.indexOf(g.key) >= 0).reduce((sum, g) => sum + (g.size || 0), 0);
   const missing = (cleanScanData && cleanScanData.missing_models) || [];
   const names = keys.map(k => { const g = groups.find(x => x.key === k); return g ? g.label + "（" + fmtSize(g.size) + "）" : k; });
   const msg = "即将删除以下内容：\n" + names.join("\n") + "\n\n共 " + fmtSize(total) + "，删除后不可恢复。确定继续吗？";
-  if (keys.indexOf("model_weights") >= 0 && missing.length && !confirm("SoVITS 中缺少部分模型，继续清理可能导致这些角色无法生成语音。确定仍要清理吗？")) return;
-  if (!confirm(msg)) return;
+  if (keys.indexOf("model_weights") >= 0 && missing.length && !(await showConfirmModal("SoVITS 中缺少部分模型，继续清理可能导致这些角色无法生成语音。确定仍要清理吗？"))) return;
+  if (!(await showConfirmModal(msg))) return;
   btn.disabled = true;
   statusEl.textContent = "正在清理...";
   statusEl.className = "status-text";
@@ -1870,7 +1932,7 @@ if (logDownloadBtn) {
 const logResetBtn = document.getElementById("btn-log-reset");
 if (logResetBtn) {
   logResetBtn.addEventListener("click", async () => {
-    if (!confirm("确定清空全部日志吗？")) return;
+    if (!(await showConfirmModal("确定清空全部日志吗？"))) return;
     try {
       await api("/api/logs/reset", { method: "POST" });
       refreshLogs();
@@ -1989,7 +2051,7 @@ function initPronunciationConfig() {
   });
   saveBtn.addEventListener("click", savePronunciation);
   resetBtn.addEventListener("click", async () => {
-    if (!confirm("恢复默认纠音词典？当前修改会被覆盖。")) return;
+    if (!(await showConfirmModal("恢复默认纠音词典？当前修改会被覆盖。"))) return;
     state.pronunciation = (state.pronunciationDefaults || []).map(e => ({ zh: e.zh, ja: e.ja }));
     renderPronunciation();
     await savePronunciation();
@@ -2225,20 +2287,20 @@ async function addModelAlias(key, input, btn) {
     await loadModels();
     await loadConfig();
   } catch (e) {
-    alert("添加激活词失败: " + e.message);
+    await showAlertModal("添加激活词失败: " + e.message);
   } finally {
     btn.disabled = false;
   }
 }
 
 async function deleteModelAlias(key, alias) {
-  if (!confirm("确定删除激活词“" + alias + "”吗？")) return;
+  if (!(await showConfirmModal("确定删除激活词“" + alias + "”吗？"))) return;
   try {
     await api("/api/models/" + encodeURIComponent(key) + "/aliases/" + encodeURIComponent(alias), { method: "DELETE" });
     await loadModels();
     await loadConfig();
   } catch (e) {
-    alert("删除激活词失败: " + e.message);
+    await showAlertModal("删除激活词失败: " + e.message);
   }
 }
 

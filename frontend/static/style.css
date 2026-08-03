@@ -647,3 +647,6 @@ textarea { min-height: 240px; line-height: 1.6; }
   .recent-float svg { width: 18px; height: 18px; }
   .recent-dropdown { top: 102px; right: 12px; }
 }
+/* Styled confirm/alert modal */
+#confirm-modal .modal-summary { white-space: pre-line; }
+#confirm-modal .btn-secondary.hidden { display: none; }
