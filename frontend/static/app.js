@@ -693,34 +693,40 @@ async function deleteRecentRecord(id) {
 
 async function clearRecentRecords() {
   if (!(await showConfirmModal("确定清空全部近期记录？此操作不可恢复。"))) return;
+  const status = document.getElementById("recent-settings-status");
   try {
     await api("/api/recent/clear", { method: "POST" });
-    setRecentStatus("已清空全部记录", "success");
+    if (status) { status.textContent = "已清空全部记录"; status.className = "status-text success"; }
     refreshRecentList();
   } catch (e) {
-    setRecentStatus("清空失败: " + e.message, "error");
+    if (status) { status.textContent = "清空失败: " + e.message; status.className = "status-text error"; }
   }
 }
 
 async function saveRecentSettings() {
+  const status = document.getElementById("recent-settings-status");
   const limitEl = document.getElementById("recent-limit");
-  if (!limitEl) return;
+  if (!status || !limitEl) return;
   const limitRaw = parseInt(limitEl.value, 10);
   if (isNaN(limitRaw) || limitRaw < 10 || limitRaw > 500) {
-    setRecentStatus("记录上限请输入 10-500 的数字", "error");
+    status.textContent = "记录上限请输入 10-500 的数字";
+    status.className = "status-text error";
     return;
   }
   const autoEl = document.getElementById("recent-auto-save");
   const auto = autoEl ? autoEl.checked : true;
-  setRecentStatus("正在保存记录设置...", "");
+  status.textContent = "正在保存记录设置...";
+  status.className = "status-text";
   try {
     const res = await api("/api/recent/settings", { method: "POST", body: JSON.stringify({ limit: limitRaw, auto_save: auto }) });
     if (limitEl) limitEl.value = res.settings.limit;
     if (autoEl) autoEl.checked = !!res.settings.auto_save;
-    setRecentStatus("记录设置已保存", "success");
+    status.textContent = "记录设置已保存";
+    status.className = "status-text success";
     refreshRecentList();
   } catch (e) {
-    setRecentStatus("保存失败: " + e.message, "error");
+    status.textContent = "保存失败: " + e.message;
+    status.className = "status-text error";
   }
 }
 
@@ -1862,6 +1868,8 @@ function showSettings(tab) {
   if (!workbench || !settings) return;
   const recentDropdown = document.getElementById("recent-dropdown");
   if (recentDropdown) recentDropdown.classList.add("hidden");
+  const recentBtn = document.getElementById("btn-recent");
+  if (recentBtn) recentBtn.classList.add("hidden");
   workbench.classList.add("hidden");
   settings.classList.remove("hidden");
   document.getElementById("btn-back-workbench").classList.remove("hidden");
@@ -1882,6 +1890,8 @@ function showWorkbench() {
   settings.classList.add("hidden");
   document.getElementById("btn-back-workbench").classList.add("hidden");
   document.getElementById("btn-settings").classList.remove("hidden");
+  const recentBtn = document.getElementById("btn-recent");
+  if (recentBtn) recentBtn.classList.remove("hidden");
 }
 
 function initSettingsNav() {
