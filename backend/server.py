@@ -30,6 +30,38 @@ from .cleanup import clean_items, scan_cleanable
 
 DEFAULT_INTERVAL = 0.5
 
+DEFAULT_PRONUNCIATION = [
+    {"zh": "长崎素世", "ja": "長崎そよ"},
+    {"zh": "soyo", "ja": "そよ"},
+    {"zh": "soyorin", "ja": "そよりん"},
+    {"zh": "soyo酱", "ja": "そよちゃん"},
+    {"zh": "高松灯", "ja": "たかまつともり"},
+    {"zh": "灯", "ja": "ともり"},
+    {"zh": "tomorin", "ja": "ともりん"},
+    {"zh": "小灯", "ja": "ともりちゃん"},
+    {"zh": "千早爱音", "ja": "ちはやあのん"},
+    {"zh": "爱音", "ja": "あのん"},
+    {"zh": "小爱音", "ja": "あのんちゃん"},
+    {"zh": "椎名立希", "ja": "しいなたき"},
+    {"zh": "立希", "ja": "たき"},
+    {"zh": "小立希", "ja": "たきちゃん"},
+    {"zh": "rikki~", "ja": "りっきー"},
+    {"zh": "要乐奈", "ja": "かなめらーな"},
+    {"zh": "乐奈", "ja": "らーな"},
+    {"zh": "小乐奈", "ja": "らーなちゃん"},
+]
+
+
+def correct_pronunciation(text, pronunciation):
+    """整句完全等于词条中文时，返回对应的日文假名。"""
+    if not text:
+        return None
+    key = str(text).strip()
+    for entry in pronunciation or []:
+        if str(entry.get("zh", "")).strip() == key:
+            return str(entry.get("ja", "")).strip()
+    return None
+
 
 def _deploy_target_error(target_path, project_root):
     """Return an error message when a deploy target could erase the app itself."""
@@ -359,6 +391,14 @@ def create_app(config_path="config.yaml"):
         config["gptsovits_path"] = user_settings["gptsovits_path"]
     if user_settings.get("narration"):
         config["narration"] = {**config.get("narration", {}), **user_settings["narration"]}
+    if "pronunciation" in user_settings and isinstance(user_settings["pronunciation"], list):
+        config["pronunciation"] = [
+            {"zh": str(p.get("zh", "")).strip(), "ja": str(p.get("ja", "")).strip()}
+            for p in user_settings["pronunciation"]
+            if isinstance(p, dict) and str(p.get("zh", "")).strip() and str(p.get("ja", "")).strip()
+        ]
+    else:
+        config["pronunciation"] = [dict(x) for x in DEFAULT_PRONUNCIATION]
     dpapi_ok = _dpapi_encrypt("probe") is not None
 
     # Resolve all relative paths to absolute to survive cwd changes
@@ -518,6 +558,36 @@ def create_app(config_path="config.yaml"):
         rebuild_characters()
         return jsonify({"status": "ok", "aliases": models[key]["aliases"]})
 
+    @app.route("/api/pronunciation", methods=["GET"])
+    def get_pronunciation():
+        return jsonify({"entries": config.get("pronunciation", []), "defaults": DEFAULT_PRONUNCIATION})
+
+    @app.route("/api/pronunciation", methods=["PUT"])
+    def save_pronunciation():
+        data = request.get_json() or {}
+        entries = data.get("entries")
+        if not isinstance(entries, list):
+            return jsonify({"error": "无效的纠音词典数据"}), 400
+        cleaned = []
+        for p in entries:
+            if not isinstance(p, dict):
+                continue
+            zh = str(p.get("zh", "")).strip()
+            ja = str(p.get("ja", "")).strip()
+            if zh and ja:
+                cleaned.append({"zh": zh, "ja": ja})
+        config["pronunciation"] = cleaned
+        try:
+            settings = {}
+            settings_path = project_root / "user_settings.json"
+            if settings_path.exists():
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            settings["pronunciation"] = cleaned
+            settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return jsonify({"status": "ok", "entries": cleaned})
+
     @app.route("/api/settings/narration", methods=["PUT"])
     def save_narration_settings():
         data = request.get_json() or {}
@@ -617,7 +687,8 @@ def create_app(config_path="config.yaml"):
                 if idx is not None:
                     translation_map[idx] = t.get("translation", "")
             for line in lines:
-                line["translated_text"] = (
+                corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
+                line["translated_text"] = corrected or (
                     translation_map.get(line["index"], "").strip() or line["text"]
                 )
 
@@ -745,7 +816,8 @@ def create_app(config_path="config.yaml"):
                                     model=config["deepseek"].get("model", "deepseek-v4-flash"),
                                 )
                                 translated = next((t.get("translation", "") for t in translations if t.get("index") == 0), "").strip()
-                                line["translated_text"] = translated or line["text"]
+                                corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
+                                line["translated_text"] = corrected or translated or line["text"]
                             invalidate_segment()
                             record_event(
                                 {
@@ -1069,8 +1141,13 @@ def create_app(config_path="config.yaml"):
                         if tts_lang not in ("zh", "ja"):
                             tts_lang = "zh"
                         try:
+                            tts_text = line.get("translated_text") or line["text"]
+                            if tts_lang == "ja":
+                                corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
+                                if corrected:
+                                    tts_text = corrected
                             duration = engine.synthesize_to_file(
-                                text=line.get("translated_text") or line["text"],
+                                text=tts_text,
                                 ref_audio_path=ref_audio,
                                 output_path=str(output_path),
                                 text_lang=tts_lang,

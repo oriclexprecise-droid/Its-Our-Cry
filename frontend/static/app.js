@@ -1,4 +1,4 @@
-const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {} };
+const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [] };
 let audioPlayer = null;
 let analysisController = null;
 
@@ -21,6 +21,7 @@ async function loadConfig() {
   loadDeployPath(cfg);
   loadCleanPath(cfg);
   updateDeployBanner(cfg.gptsovits_path);
+  loadPronunciation();
   const savedAi = loadAIConfigFromStorage();
   if (savedAi) {
     applyAIConfig(savedAi);
@@ -1637,6 +1638,94 @@ function saveAIConfigToStorage() {
   return cfg;
 }
 
+async function loadPronunciation() {
+  try {
+    const data = await api("/api/pronunciation");
+    state.pronunciation = (data.entries || []).map(e => ({ zh: e.zh || "", ja: e.ja || "" }));
+    state.pronunciationDefaults = (data.defaults || []).map(e => ({ zh: e.zh || "", ja: e.ja || "" }));
+    renderPronunciation();
+  } catch (e) {}
+}
+
+function renderPronunciation() {
+  const list = document.getElementById("pronunciation-list");
+  if (!list) return;
+  list.innerHTML = state.pronunciation.map((entry, i) =>
+    '<div class="pron-row">'
+    + '<input type="text" class="pron-zh-input" data-index="' + i + '" value="' + esc(entry.zh) + '" placeholder="中文 / 昵称" autocomplete="off">'
+    + '<input type="text" class="pron-ja-input" data-index="' + i + '" value="' + esc(entry.ja) + '" placeholder="日文发音" autocomplete="off">'
+    + '<button type="button" class="btn-secondary btn-small btn-pron-del" data-index="' + i + '">删除</button>'
+    + '</div>'
+  ).join("");
+  list.querySelectorAll(".pron-zh-input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const idx = parseInt(inp.dataset.index);
+      state.pronunciation[idx].zh = inp.value;
+    });
+  });
+  list.querySelectorAll(".pron-ja-input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const idx = parseInt(inp.dataset.index);
+      state.pronunciation[idx].ja = inp.value;
+    });
+  });
+  list.querySelectorAll(".btn-pron-del").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.index);
+      state.pronunciation.splice(idx, 1);
+      renderPronunciation();
+    });
+  });
+}
+
+async function savePronunciation() {
+  const status = document.getElementById("pronunciation-config-status");
+  const entries = state.pronunciation.filter(e => (e.zh || "").trim() && (e.ja || "").trim())
+    .map(e => ({ zh: e.zh.trim(), ja: e.ja.trim() }));
+  status.textContent = "正在保存纠音词典...";
+  status.className = "status-text";
+  try {
+    const res = await api("/api/pronunciation", { method: "PUT", body: JSON.stringify({ entries }) });
+    state.pronunciation = res.entries;
+    renderPronunciation();
+    status.textContent = "纠音词典已保存，重新生成语音时生效";
+    status.className = "status-text success";
+  } catch (err) {
+    status.textContent = "保存失败: " + err.message;
+    status.className = "status-text error";
+  }
+}
+
+function initPronunciationConfig() {
+  const addBtn = document.getElementById("btn-add-pronunciation");
+  const saveBtn = document.getElementById("btn-save-pronunciation");
+  const resetBtn = document.getElementById("btn-reset-pronunciation");
+  if (!addBtn || !saveBtn || !resetBtn) return;
+  addBtn.addEventListener("click", () => {
+    const zh = document.getElementById("pron-zh").value.trim();
+    const ja = document.getElementById("pron-ja").value.trim();
+    const status = document.getElementById("pronunciation-config-status");
+    if (!zh || !ja) {
+      status.textContent = "中文和日文发音都要填写";
+      status.className = "status-text error";
+      return;
+    }
+    state.pronunciation.push({ zh, ja });
+    document.getElementById("pron-zh").value = "";
+    document.getElementById("pron-ja").value = "";
+    renderPronunciation();
+    status.textContent = "已添加到列表，记得保存";
+    status.className = "status-text";
+  });
+  saveBtn.addEventListener("click", savePronunciation);
+  resetBtn.addEventListener("click", async () => {
+    if (!confirm("恢复默认纠音词典？当前修改会被覆盖。")) return;
+    state.pronunciation = (state.pronunciationDefaults || []).map(e => ({ zh: e.zh, ja: e.ja }));
+    renderPronunciation();
+    await savePronunciation();
+  });
+}
+
 function setNarrationMode(mode) {
   const autoBtn = document.getElementById("narration-mode-auto");
   const fixedBtn = document.getElementById("narration-mode-fixed");
@@ -1889,6 +1978,7 @@ function initModelConfig() {
 
 initAIConfig();
 initNarrationConfig();
+initPronunciationConfig();
 initModelConfig();
 const refreshBtn = document.getElementById("btn-refresh");
 const refreshModal = document.getElementById("refresh-modal");

@@ -207,6 +207,21 @@
           <span id="narration-config-status" class="status-text"></span>
         </div>
         <div class="side-section">
+          <h3 class="side-section-title">纠音词典（日语模式）</h3>
+          <p class="side-hint">台词整句与左侧中文完全相等时，日语合成直接使用右侧假名。</p>
+          <div id="pronunciation-list" class="pron-list"></div>
+          <div class="pron-add-row">
+            <input type="text" id="pron-zh" placeholder="中文 / 昵称" autocomplete="off">
+            <input type="text" id="pron-ja" placeholder="日文发音" autocomplete="off">
+            <button type="button" id="btn-add-pronunciation" class="btn-secondary btn-small">添加</button>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="btn-save-pronunciation" class="btn-secondary btn-small btn-flex">保存纠音词典</button>
+            <button type="button" id="btn-reset-pronunciation" class="btn-secondary btn-small">恢复默认</button>
+          </div>
+          <span id="pronunciation-config-status" class="status-text"></span>
+        </div>
+        <div class="side-section">
           <h3 class="side-section-title">外观</h3>
           <div class="api-field">
             <label for="bg-select">背景图</label>
