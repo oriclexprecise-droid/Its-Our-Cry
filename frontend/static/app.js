@@ -576,7 +576,7 @@ function refreshGenerated(p) {
   refreshHistory();
 }
 
-function esc(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function esc(s) { s = (s === null || s === undefined) ? "" : String(s); return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
 async function refreshRecentList() {
   const listEl = document.getElementById("recent-list");
