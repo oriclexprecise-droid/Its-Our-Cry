@@ -111,6 +111,7 @@ async function loadConfig() {
 
 async function runAnalyze() {
   const text = document.getElementById("script-input").value.trim();
+  state.script = text;
   const apiKey = document.getElementById("api-key").value.trim();
   const lang = document.getElementById("script-lang").value;
   const status = document.getElementById("analyze-status");
@@ -579,6 +580,11 @@ function refreshGenerated(p) {
 
 function esc(s) { s = (s === null || s === undefined) ? "" : String(s); return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
+let recentSettings = {};
+let lastAutoVersionAt = 0;
+let lastAutoHash = "";
+let scriptSyncTimer = null;
+
 async function refreshRecentList() {
   const listEl = document.getElementById("recent-list");
   if (!listEl) return;
@@ -586,26 +592,43 @@ async function refreshRecentList() {
     const data = await api("/api/recent");
     const records = data.records || [];
     const settings = data.settings || {};
+    recentSettings = settings;
     const autoEl = document.getElementById("recent-auto-save");
     const limitEl = document.getElementById("recent-limit");
+    const vAutoEl = document.getElementById("recent-version-auto");
+    const intervalEl = document.getElementById("recent-interval");
     if (autoEl) autoEl.checked = !!settings.auto_save;
     if (limitEl) limitEl.value = settings.limit || 50;
+    if (vAutoEl) vAutoEl.checked = !!settings.version_auto_save;
+    if (intervalEl) intervalEl.value = settings.auto_save_interval || 5;
     if (!records.length) {
       listEl.innerHTML = '<div class="recent-empty">暂无近期记录</div>';
       return;
     }
     listEl.innerHTML = records.map(r => {
       const first = r.first_line ? '<div class="recent-preview" title="' + esc(r.first_line) + '">' + esc(r.first_line) + '</div>' : "";
-      const meta = r.line_count + " 条 · " + r.voice_count + " 条语音" + (r.fail_count > 0 ? " · 仅字幕 " + r.fail_count + " 条" : "") + (r.export_count > 0 ? " · 已导出 " + r.export_count + " 次" : "");
+      const meta = (r.line_count ? r.line_count + " 条" : "仅剧本") + " · " + r.voice_count + " 条语音" + (r.fail_count > 0 ? " · 仅字幕 " + r.fail_count + " 条" : "") + (r.export_count > 0 ? " · 已导出 " + r.export_count + " 次" : "");
+      const versions = r.versions || [];
+      const versionBtn = versions.length
+        ? '<button type="button" class="btn-line-action btn-recent-versions" data-id="' + esc(r.id) + '">小版本 ' + versions.length + '</button>'
+        : "";
+      const versionPanel = versions.length
+        ? '<div class="recent-versions-panel hidden" id="versions-panel-' + esc(r.id) + '">'
+          + versions.map(v => '<div class="recent-version-row"><span class="recent-version-time">' + esc(v.saved_at || "") + '</span><button type="button" class="btn-line-action btn-version-load" data-id="' + esc(r.id) + '" data-vid="' + esc(v.id) + '">载入</button><button type="button" class="btn-line-action btn-version-del" data-id="' + esc(r.id) + '" data-vid="' + esc(v.id) + '">删除</button></div>').join("")
+          + '<button type="button" class="btn-line-action btn-version-clear" data-id="' + esc(r.id) + '">删除全部小版本</button>'
+          + '</div>'
+        : "";
       return '<div class="recent-item">'
         + '<div class="recent-item-main">'
         + '<div class="recent-item-head"><span class="recent-time">' + esc(r.saved_at || "") + '</span><span class="recent-badge">' + (r.source === "manual" ? "手动" : "自动") + " · " + (r.lang === "ja" ? "日语" : "中文") + "</span></div>"
         + first
         + '<div class="recent-meta">' + esc(meta) + "</div>"
+        + versionPanel
         + '</div>'
         + '<div class="recent-actions">'
         + '<button type="button" class="btn-line-action btn-recent-load" data-id="' + esc(r.id) + '">载入</button>'
         + (r.last_folder ? '<button type="button" class="btn-line-action btn-recent-open" data-id="' + esc(r.id) + '">打开文件夹</button>' : "")
+        + versionBtn
         + '<button type="button" class="btn-line-action btn-recent-del" data-id="' + esc(r.id) + '">删除</button>'
         + '</div>'
         + '</div>';
@@ -613,6 +636,10 @@ async function refreshRecentList() {
     listEl.querySelectorAll(".btn-recent-load").forEach(btn => btn.addEventListener("click", () => loadRecentRecord(btn.dataset.id)));
     listEl.querySelectorAll(".btn-recent-open").forEach(btn => btn.addEventListener("click", () => openRecentFolder(btn.dataset.id)));
     listEl.querySelectorAll(".btn-recent-del").forEach(btn => btn.addEventListener("click", () => deleteRecentRecord(btn.dataset.id)));
+    listEl.querySelectorAll(".btn-recent-versions").forEach(btn => btn.addEventListener("click", () => toggleRecentVersions(btn.dataset.id)));
+    listEl.querySelectorAll(".btn-version-load").forEach(btn => btn.addEventListener("click", () => loadRecentVersion(btn.dataset.id, btn.dataset.vid)));
+    listEl.querySelectorAll(".btn-version-del").forEach(btn => btn.addEventListener("click", () => deleteRecentVersion(btn.dataset.id, btn.dataset.vid)));
+    listEl.querySelectorAll(".btn-version-clear").forEach(btn => btn.addEventListener("click", () => clearRecentVersions(btn.dataset.id)));
   } catch (e) {}
 }
 
@@ -623,9 +650,19 @@ function setRecentStatus(msg, kind) {
   el.className = "status-text" + (kind === "error" ? " error" : kind === "success" ? " success" : "");
 }
 
+async function syncScriptDraft() {
+  const scriptEl = document.getElementById("script-input");
+  const text = scriptEl ? scriptEl.value : state.script || "";
+  state.script = text;
+  try {
+    await api("/api/script", { method: "POST", body: JSON.stringify({ text }) });
+  } catch (e) {}
+}
+
 async function saveRecentRecord() {
   if (state.generating) { setRecentStatus("生成中，请稍后再保存记录", "error"); return; }
-  if (!state.lines.length) { setRecentStatus("还没有可保存的剧本", "error"); return; }
+  await syncScriptDraft();
+  if (!state.lines.length && !(state.script || "").trim()) { setRecentStatus("还没有可保存的剧本", "error"); return; }
   setRecentStatus("正在保存...", "");
   try {
     await api("/api/recent/save", { method: "POST" });
@@ -644,6 +681,9 @@ async function loadRecentRecord(id) {
     const res = await api("/api/recent/" + id + "/load", { method: "POST" });
     const s = res.state || {};
     state.lines = s.lines || [];
+    state.script = s.script || "";
+    const scriptEl = document.getElementById("script-input");
+    if (scriptEl) scriptEl.value = state.script;
     state.failures = s.failures || {};
     state.hasGenerated = Object.keys(s.generated || {}).length > 0;
     state.selected = new Set();
@@ -716,18 +756,120 @@ async function saveRecentSettings() {
   }
   const autoEl = document.getElementById("recent-auto-save");
   const auto = autoEl ? autoEl.checked : true;
+  const vAutoEl = document.getElementById("recent-version-auto");
+  const intervalEl = document.getElementById("recent-interval");
+  const vAuto = vAutoEl ? vAutoEl.checked : true;
+  const intervalRaw = parseInt(intervalEl ? intervalEl.value : "5", 10);
+  if (isNaN(intervalRaw) || intervalRaw < 1 || intervalRaw > 120) {
+    status.textContent = "自动保存间隔请输入 1-120 的数字";
+    status.className = "status-text error";
+    return;
+  }
   status.textContent = "正在保存记录设置...";
   status.className = "status-text";
   try {
-    const res = await api("/api/recent/settings", { method: "POST", body: JSON.stringify({ limit: limitRaw, auto_save: auto }) });
+    const res = await api("/api/recent/settings", { method: "POST", body: JSON.stringify({ limit: limitRaw, auto_save: auto, version_auto_save: vAuto, auto_save_interval: intervalRaw }) });
     if (limitEl) limitEl.value = res.settings.limit;
     if (autoEl) autoEl.checked = !!res.settings.auto_save;
+    if (intervalEl) intervalEl.value = res.settings.auto_save_interval;
+    if (vAutoEl) vAutoEl.checked = !!res.settings.version_auto_save;
+    recentSettings = res.settings || recentSettings;
+    lastAutoVersionAt = 0;
     status.textContent = "记录设置已保存";
     status.className = "status-text success";
     refreshRecentList();
   } catch (e) {
     status.textContent = "保存失败: " + e.message;
     status.className = "status-text error";
+  }
+}
+
+function toggleRecentVersions(id) {
+  const panel = document.getElementById("versions-panel-" + id);
+  if (panel) panel.classList.toggle("hidden");
+}
+
+async function loadRecentVersion(recordId, versionId) {
+  if (state.generating) { setRecentStatus("生成中，请稍后再载入版本", "error"); return; }
+  if ((state.lines.length || (state.script || "").trim()) && !(await showConfirmModal("载入自动保存版本会覆盖当前工作台（可以用撤销恢复），确定继续吗？"))) return;
+  setRecentStatus("正在载入小版本...", "");
+  try {
+    const res = await api("/api/recent/" + recordId + "/versions/" + versionId + "/load", { method: "POST" });
+    const s = res.state || {};
+    state.lines = s.lines || [];
+    state.script = s.script || "";
+    const scriptEl = document.getElementById("script-input");
+    if (scriptEl) scriptEl.value = state.script;
+    state.failures = s.failures || {};
+    state.hasGenerated = Object.keys(s.generated || {}).length > 0;
+    state.selected = new Set();
+    state.selectMode = false;
+    const selBtn = document.getElementById("btn-select-mode");
+    if (selBtn) {
+      selBtn.textContent = "选择模式";
+      selBtn.classList.remove("active");
+    }
+    const selBar = document.getElementById("selection-toolbar");
+    if (selBar) selBar.classList.add("hidden");
+    renderLines();
+    refreshGenerated({ generated_indices: Object.keys(s.generated || {}).map(Number), failures: state.failures });
+    const downloadPanel = document.getElementById("step-download");
+    if (downloadPanel) downloadPanel.classList.toggle("hidden", !state.hasGenerated && !s.merged_path);
+    const genBtn = document.getElementById("btn-generate");
+    if (genBtn) genBtn.textContent = state.hasGenerated ? "重新生成" : "生成全部语音";
+    updateHistoryButtons(res.history);
+    setRecentStatus("已载入小版本" + (res.version && res.version.saved_at ? "：" + res.version.saved_at : ""), "success");
+    refreshRecentList();
+  } catch (e) {
+    setRecentStatus("载入失败: " + e.message, "error");
+  }
+}
+
+async function deleteRecentVersion(recordId, versionId) {
+  if (!(await showConfirmModal("确定删除这条自动保存版本？"))) return;
+  try {
+    await api("/api/recent/" + recordId + "/versions/" + versionId, { method: "DELETE" });
+    setRecentStatus("已删除小版本", "success");
+    refreshRecentList();
+  } catch (e) {
+    setRecentStatus("删除失败: " + e.message, "error");
+  }
+}
+
+async function clearRecentVersions(recordId) {
+  if (!(await showConfirmModal("确定删除这条记录的全部自动保存版本？"))) return;
+  try {
+    await api("/api/recent/" + recordId + "/versions", { method: "DELETE" });
+    setRecentStatus("已清空小版本", "success");
+    refreshRecentList();
+  } catch (e) {
+    setRecentStatus("清空失败: " + e.message, "error");
+  }
+}
+
+function currentContentHash() {
+  try {
+    return JSON.stringify({ script: state.script || "", lines: state.lines || [] });
+  } catch (e) { return ""; }
+}
+
+async function maybeAutoSaveVersion() {
+  if (!recentSettings.version_auto_save) return;
+  if (state.generating || analysisController) return;
+  const now = Date.now();
+  const intervalMs = (Math.max(1, parseInt(recentSettings.auto_save_interval, 10) || 5)) * 60000;
+  if (now - lastAutoVersionAt < intervalMs) return;
+  await syncScriptDraft();
+  const hash = currentContentHash();
+  if (!hash) { lastAutoVersionAt = now; return; }
+  if (hash === lastAutoHash) { lastAutoVersionAt = now; return; }
+  try {
+    const res = await api("/api/recent/versions", { method: "POST", body: JSON.stringify({}) });
+    lastAutoVersionAt = now;
+    lastAutoHash = hash;
+    if (res.created) refreshRecentList();
+  } catch (e) {
+    lastAutoVersionAt = now;
   }
 }
 
@@ -738,6 +880,16 @@ function initRecentRecords() {
   if (saveSettingsBtn) saveSettingsBtn.addEventListener("click", saveRecentSettings);
   const clearBtn = document.getElementById("btn-clear-recent");
   if (clearBtn) clearBtn.addEventListener("click", clearRecentRecords);
+  const scriptEl = document.getElementById("script-input");
+  if (scriptEl) scriptEl.addEventListener("input", () => {
+    state.script = scriptEl.value;
+    clearTimeout(scriptSyncTimer);
+    scriptSyncTimer = setTimeout(() => {
+      api("/api/script", { method: "POST", body: JSON.stringify({ text: scriptEl.value }) }).catch(() => {});
+    }, 800);
+  });
+  setInterval(maybeAutoSaveVersion, 30000);
+  maybeAutoSaveVersion();
   const recentBtn = document.getElementById("btn-recent");
   const dropdown = document.getElementById("recent-dropdown");
   if (recentBtn && dropdown) {
@@ -785,6 +937,9 @@ async function runHistory(dir) {
     const res = await api("/api/" + dir, { method: "POST" });
     const s = res.state || {};
     state.lines = s.lines || [];
+    state.script = s.script || "";
+    const scriptEl = document.getElementById("script-input");
+    if (scriptEl) scriptEl.value = state.script;
     state.failures = s.failures || {};
     state.hasGenerated = Object.keys(s.generated || {}).length > 0;
     state.selected = new Set();
