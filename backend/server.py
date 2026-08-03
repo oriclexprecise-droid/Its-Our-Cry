@@ -642,27 +642,92 @@ def create_app(config_path="config.yaml"):
 
     @app.route("/api/line/<int:index>", methods=["PUT"])
     def update_line(index):
-        data = request.get_json()
+        data = request.get_json() or {}
         if index < 0 or index >= len(state["lines"]):
             return jsonify({"error": "invalid index"}), 400
+        line = state["lines"][index]
         if "emotion" in data:
             if data["emotion"] not in config["emotions"]:
                 return jsonify({"error": "invalid emotion"}), 400
-            old_emotion = state["lines"][index].get("emotion")
+            old_emotion = line.get("emotion")
             new_emotion = data["emotion"]
             if old_emotion and old_emotion != new_emotion:
-                line_info = state["lines"][index]
                 record_event(
                     {
                         "type": "emotion_correction",
-                        "message": f"情绪修正：第{index + 1}行 {line_info['character']} {old_emotion} → {new_emotion}",
-                        "payload": {"index": index, "character": line_info["character"], "old": old_emotion, "new": new_emotion},
+                        "message": f"情绪修正：第{index + 1}行 {line['character']} {old_emotion} → {new_emotion}",
+                        "payload": {"index": index, "character": line["character"], "old": old_emotion, "new": new_emotion},
                     },
                     project_root=project_root,
                 )
-            state["lines"][index]["emotion"] = new_emotion
+            line["emotion"] = new_emotion
+        had_generated = False
+        reanalyze_error = None
         if "text" in data:
-            state["lines"][index]["text"] = data["text"]
+            new_text = data["text"]
+            if not isinstance(new_text, str) or not new_text.strip():
+                return jsonify({"error": "台词不能为空"}), 400
+            new_text = new_text.strip()
+            if new_text != line.get("text"):
+                line["text"] = new_text
+                # 旧音频作废，只重新分析这一句
+                had_generated = index in state["generated"]
+                gen = state["generated"].pop(index, None)
+                if gen:
+                    try:
+                        old_path = Path(gen["path"])
+                        if old_path.exists():
+                            old_path.unlink()
+                    except Exception:
+                        pass
+                state["failures"].pop(index, None)
+                try:
+                    api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
+                    base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
+                    model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+                    single = {**line, "index": 0}
+                    emotions = analyze_emotions(
+                        lines=[single],
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=model,
+                        lang=state.get("lang", "zh"),
+                    )
+                    emotion = "思考"
+                    for e in emotions:
+                        if e.get("index") == 0:
+                            emotion = e.get("emotion") or "思考"
+                            break
+                    line["emotion"] = emotion
+                    if state.get("lang") == "ja":
+                        translations = translate_lines(
+                            lines=[single],
+                            api_key=api_key,
+                            base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
+                            model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                        )
+                        translated = next((t.get("translation", "") for t in translations if t.get("index") == 0), "").strip()
+                        line["translated_text"] = translated or line["text"]
+                    record_event(
+                        {
+                            "type": "line_edit",
+                            "message": f"台词修改：第{index + 1}行 {line['character']} 已重新分析情绪",
+                            "payload": {"index": index, "text": line["text"], "emotion": line["emotion"]},
+                        },
+                        project_root=project_root,
+                    )
+                except Exception as e:
+                    traceback.print_exc()
+                    reanalyze_error = str(e)
+                    state["failures"][index] = "文本已修改，情绪重新分析失败：" + str(e)[-200:]
+                    record_event(
+                        {
+                            "type": "line_edit",
+                            "message": f"台词修改：第{index + 1}行 文本已保存，情绪重分析失败",
+                            "payload": {"index": index, "error": str(e)[-200:]},
+                        },
+                        project_root=project_root,
+                    )
         if "interval" in data:
             try:
                 interval = float(data["interval"])
@@ -670,8 +735,11 @@ def create_app(config_path="config.yaml"):
                 return jsonify({"error": "间隔时间必须是数字"}), 400
             if not 0 <= interval <= 10:
                 return jsonify({"error": "间隔时间需在 0-10 秒之间"}), 400
-            state["lines"][index]["interval"] = round(interval, 3)
-        return jsonify({"status": "ok", "line": state["lines"][index]})
+            line["interval"] = round(interval, 3)
+        resp = {"status": "ok", "line": line, "had_generated": had_generated}
+        if reanalyze_error:
+            resp["reanalyze_error"] = reanalyze_error
+        return jsonify(resp)
 
     @app.route("/api/lines/interval", methods=["POST"])
     def update_lines_interval():

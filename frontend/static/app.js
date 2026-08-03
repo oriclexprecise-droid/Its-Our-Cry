@@ -171,7 +171,7 @@ function renderLines() {
       + idxCell
       + '<span class="char">' + esc(line.character) + '</span>'
       + '<span class="line-texts">'
-      + '<span class="text" title="' + esc(line.text) + '">' + esc(line.text) + '</span>'
+      + '<div class="text line-text-edit" contenteditable="true" spellcheck="false" title="点击修改台词，回车保存" data-index="' + i + '">' + esc(line.text) + '</div>'
       + (line.translated_text ? '<span class="translated" title="' + esc(line.translated_text) + '">日语：' + esc(line.translated_text) + '</span>' : '')
       + (state.failures[i] && !isNarration ? '<span class="line-fail" title="' + esc(state.failures[i]) + '">' + esc(state.failures[i]) + '</span>' : '')
       + '</span>'
@@ -233,6 +233,70 @@ function renderLines() {
       }
     });
   });
+  container.querySelectorAll(".line-text-edit").forEach(edit => {
+    const idx = parseInt(edit.dataset.index);
+    edit.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        edit.blur();
+      }
+    });
+    edit.addEventListener("blur", async () => {
+      if (state.generating) { edit.textContent = esc(state.lines[idx].text); return; }
+      const prevText = state.lines[idx].text;
+      let newText = (edit.textContent || "").replace(/\s*\n+\s*/g, " ").replace(/[ \t]{2,}/g, " ").trim();
+      if (!newText || newText === prevText) {
+        edit.textContent = esc(prevText);
+        return;
+      }
+      edit.contentEditable = "false";
+      const status = document.getElementById("progress-text");
+      status.classList.remove("hidden");
+      status.textContent = "正在重新分析第 " + (idx + 1) + " 行情绪...";
+      status.className = "status-text";
+      try {
+        const res = await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({
+          text: newText,
+          api_key: document.getElementById("api-key").value.trim(),
+          base_url: document.getElementById("ai-base-url").value.trim(),
+          model: document.getElementById("ai-model").value.trim()
+        }) });
+        state.lines[idx] = res.line;
+        delete state.failures[idx];
+        if (res.reanalyze_error) {
+          state.failures[idx] = "文本已修改，情绪重新分析失败：" + res.reanalyze_error;
+        }
+        renderLines();
+        if (res.reanalyze_error) {
+          status.textContent = "文本已保存，情绪重新分析失败，请手动选择情绪后重新生成";
+          status.className = "status-text error";
+          if (state.hasGenerated && !state.generating) {
+            try { await api("/api/merge", { method: "POST" }); } catch (e) {}
+          }
+        } else if (res.had_generated) {
+          status.textContent = "文本已更新，正在重新生成该句...";
+          status.className = "status-text";
+          startGeneration([idx]);
+        } else if (state.hasGenerated && !state.generating) {
+          try {
+            await api("/api/merge", { method: "POST" });
+            status.textContent = "文本与情绪已更新，字幕已同步";
+            status.className = "status-text success";
+          } catch (err) {
+            status.textContent = "文本与情绪已更新，字幕同步失败：" + err.message;
+            status.className = "status-text error";
+          }
+        } else {
+          status.textContent = "文本与情绪已更新";
+          status.className = "status-text success";
+        }
+      } catch (err) {
+        edit.textContent = esc(prevText);
+        status.textContent = "文本保存失败: " + err.message;
+        status.className = "status-text error";
+      }
+    });
+  });
   container.querySelectorAll(".btn-play").forEach(btn => {
     btn.addEventListener("click", () => {
       const idx = parseInt(btn.dataset.index);
@@ -273,6 +337,7 @@ function updateSelectionUI() {
 function setLineButtonsDisabled(disabled) {
   document.querySelectorAll(".btn-line-action").forEach(b => { b.disabled = disabled; });
   document.querySelectorAll(".interval-input").forEach(inp => { inp.disabled = disabled; });
+  document.querySelectorAll(".line-text-edit").forEach(el => { el.contentEditable = disabled ? "false" : "true"; });
   document.querySelectorAll(".line-check, #select-all, #btn-apply-interval, #batch-interval, #btn-select-mode").forEach(el => { el.disabled = disabled; });
 }
 

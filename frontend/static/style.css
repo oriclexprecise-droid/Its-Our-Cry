@@ -506,3 +506,22 @@ textarea { min-height: 240px; line-height: 1.6; }
   .settings-nav { width: 100%; position: static; flex-direction: row; flex-wrap: wrap; }
   .settings-tab { width: auto; flex: 1 1 120px; text-align: center; padding: 10px 8px; }
 }
+
+
+/* 单条台词编辑 */
+.line-item .line-text-edit {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  outline: none;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  cursor: text;
+  min-height: 22px;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.line-item .line-text-edit:hover { background: rgba(138, 180, 248, 0.08); }
+.line-item .line-text-edit:focus { background: rgba(15, 52, 96, 0.85); box-shadow: 0 0 0 1px #4ecca3; }
+.line-item .line-text-edit[contenteditable="false"] { cursor: default; opacity: 0.72; }
