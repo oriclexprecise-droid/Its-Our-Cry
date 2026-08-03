@@ -1,5 +1,6 @@
 const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {} };
 let audioPlayer = null;
+let analysisController = null;
 
 async function api(url, opts = {}) {
   const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -54,8 +55,18 @@ async function runAnalyze() {
   status.textContent = "正在分析情绪...";
   status.className = "status-text";
   document.getElementById("btn-analyze").disabled = true;
+  if (analysisController) analysisController.abort();
+  const controller = new AbortController();
+  analysisController = controller;
+  const stopBtn = document.getElementById("btn-stop-analyze");
+  stopBtn.classList.remove("hidden");
   try {
-    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }) });
+    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }), signal: controller.signal });
+    if (data.status === "cancelled") {
+      status.textContent = "已停止分析";
+      status.className = "status-text";
+      return;
+    }
     state.lines = data.lines;
     state.failures = {};
     state.hasGenerated = false;
@@ -87,14 +98,29 @@ async function runAnalyze() {
     const issues = data.proofread || [];
     if (issues.length) showProofreadModal(issues);
   } catch (e) {
+    if (e.name === "AbortError") {
+      status.textContent = "已停止分析";
+      status.className = "status-text";
+      return;
+    }
     status.textContent = e.message;
     status.className = "status-text error";
   } finally {
+    if (analysisController === controller) analysisController = null;
+    stopBtn.classList.add("hidden");
     document.getElementById("btn-analyze").disabled = false;
   }
 }
 
 document.getElementById("btn-analyze").addEventListener("click", runAnalyze);
+document.getElementById("btn-stop-analyze").addEventListener("click", () => {
+  if (analysisController) analysisController.abort();
+  api("/api/analyze/cancel", { method: "POST" }).catch(() => {});
+});
+document.getElementById("btn-stop-line-analyze").addEventListener("click", () => {
+  if (analysisController) analysisController.abort();
+  api("/api/analyze/cancel", { method: "POST" }).catch(() => {});
+});
 
 function showProofreadModal(issues) {
   state.lastProofread = issues;
@@ -272,6 +298,7 @@ function renderLines() {
     edit.addEventListener("blur", async () => {
       if (state.generating) { edit.textContent = esc(state.lines[idx].text); return; }
       const prevText = state.lines[idx].text;
+      const prevEmotion = state.lines[idx].emotion;
       let newText = (edit.textContent || "").replace(/\s*\n+\s*/g, " ").replace(/[ \t]{2,}/g, " ").trim();
       if (!newText || newText === prevText) {
         edit.textContent = esc(prevText);
@@ -282,13 +309,25 @@ function renderLines() {
       status.classList.remove("hidden");
       status.textContent = "正在重新分析第 " + (idx + 1) + " 行情绪...";
       status.className = "status-text";
+      if (analysisController) analysisController.abort();
+      const controller = new AbortController();
+      analysisController = controller;
+      const stopBtn = document.getElementById("btn-stop-line-analyze");
+      stopBtn.classList.remove("hidden");
       try {
         const res = await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({
           text: newText,
           api_key: document.getElementById("api-key").value.trim(),
           base_url: document.getElementById("ai-base-url").value.trim(),
           model: document.getElementById("ai-model").value.trim()
-        }) });
+        }), signal: controller.signal });
+        if (res.reanalyze_cancelled) {
+          state.lines[idx] = res.line;
+          renderLines();
+          status.textContent = "已停止分析，本次修改未保存";
+          status.className = "status-text";
+          return;
+        }
         state.lines[idx] = res.line;
         delete state.failures[idx];
         if (res.reanalyze_error) {
@@ -319,9 +358,23 @@ function renderLines() {
           status.className = "status-text success";
         }
       } catch (err) {
-        edit.textContent = esc(prevText);
-        status.textContent = "文本保存失败: " + err.message;
-        status.className = "status-text error";
+        if (err.name === "AbortError") {
+          try {
+            await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ text: prevText, emotion: prevEmotion, reanalyze: false }) });
+          } catch (e2) {}
+          state.lines[idx].text = prevText;
+          state.lines[idx].emotion = prevEmotion;
+          renderLines();
+          status.textContent = "已停止分析，本次修改未保存";
+          status.className = "status-text";
+        } else {
+          edit.textContent = esc(prevText);
+          status.textContent = "文本保存失败: " + err.message;
+          status.className = "status-text error";
+        }
+      } finally {
+        if (analysisController === controller) analysisController = null;
+        stopBtn.classList.add("hidden");
       }
     });
   });

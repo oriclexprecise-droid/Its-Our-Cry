@@ -403,6 +403,8 @@ def create_app(config_path="config.yaml"):
         "lines": [],
         "emotions": [],
         "lang": "zh",
+        "analysis_seq": 0,
+        "analysis_cancel_seq": -1,
         "generated": {},
         "merged_path": None,
         "srt_path": None,
@@ -568,6 +570,9 @@ def create_app(config_path="config.yaml"):
         for line in lines:
             line.setdefault("interval", DEFAULT_INTERVAL)
 
+        seq = state.get("analysis_seq", 0) + 1
+        state["analysis_seq"] = seq
+
         try:
             emotions = analyze_emotions(
                 lines=lines,
@@ -583,6 +588,9 @@ def create_app(config_path="config.yaml"):
                 project_root=project_root,
             )
             return jsonify({"error": "emotion analysis failed: " + str(e)}), 500
+
+        if state.get("analysis_cancel_seq", -1) >= seq:
+            return jsonify({"status": "cancelled"}), 200
 
         emotion_map = {}
         for e in emotions:
@@ -613,6 +621,9 @@ def create_app(config_path="config.yaml"):
                     translation_map.get(line["index"], "").strip() or line["text"]
                 )
 
+        if state.get("analysis_cancel_seq", -1) >= seq:
+            return jsonify({"status": "cancelled"}), 200
+
         valid_chars = list(config["characters"].keys()) + ["旁白"]
         proofread = find_character_issues(lines, valid_chars)
         record_event(
@@ -640,6 +651,11 @@ def create_app(config_path="config.yaml"):
 
         return jsonify({"lines": lines, "proofread": proofread, "skipped": skipped})
 
+    @app.route("/api/analyze/cancel", methods=["POST"])
+    def cancel_analysis():
+        state["analysis_cancel_seq"] = state.get("analysis_seq", 0)
+        return jsonify({"status": "ok"})
+
     @app.route("/api/line/<int:index>", methods=["PUT"])
     def update_line(index):
         data = request.get_json() or {}
@@ -648,6 +664,7 @@ def create_app(config_path="config.yaml"):
         line = state["lines"][index]
         had_generated = False
         reanalyze_error = None
+        reanalyze_cancelled = False
 
         def invalidate_segment():
             nonlocal had_generated
@@ -685,55 +702,72 @@ def create_app(config_path="config.yaml"):
                 return jsonify({"error": "台词不能为空"}), 400
             new_text = new_text.strip()
             if new_text != line.get("text"):
+                old_text = line.get("text")
                 line["text"] = new_text
-                invalidate_segment()
-                try:
-                    api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
-                    base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
-                    model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
-                    single = {**line, "index": 0}
-                    emotions = analyze_emotions(
-                        lines=[single],
-                        api_key=api_key,
-                        base_url=base_url,
-                        model=model,
-                        lang=state.get("lang", "zh"),
-                    )
-                    emotion = "思考"
-                    for e in emotions:
-                        if e.get("index") == 0:
-                            emotion = e.get("emotion") or "思考"
-                            break
-                    line["emotion"] = emotion
-                    if state.get("lang") == "ja":
-                        translations = translate_lines(
+                if data.get("reanalyze", True):
+                    try:
+                        seq = state.get("analysis_seq", 0) + 1
+                        state["analysis_seq"] = seq
+                        api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
+                        base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
+                        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+                        single = {**line, "index": 0}
+                        emotions = analyze_emotions(
                             lines=[single],
                             api_key=api_key,
-                            base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
-                            model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                            base_url=base_url,
+                            model=model,
+                            lang=state.get("lang", "zh"),
                         )
-                        translated = next((t.get("translation", "") for t in translations if t.get("index") == 0), "").strip()
-                        line["translated_text"] = translated or line["text"]
-                    record_event(
-                        {
-                            "type": "line_edit",
-                            "message": f"台词修改：第{index + 1}行 {line['character']} 已重新分析情绪",
-                            "payload": {"index": index, "text": line["text"], "emotion": line["emotion"]},
-                        },
-                        project_root=project_root,
-                    )
-                except Exception as e:
-                    traceback.print_exc()
-                    reanalyze_error = str(e)
-                    state["failures"][index] = "文本已修改，情绪重新分析失败：" + str(e)[-200:]
-                    record_event(
-                        {
-                            "type": "line_edit",
-                            "message": f"台词修改：第{index + 1}行 文本已保存，情绪重分析失败",
-                            "payload": {"index": index, "error": str(e)[-200:]},
-                        },
-                        project_root=project_root,
-                    )
+                        if state.get("analysis_cancel_seq", -1) >= seq:
+                            line["text"] = old_text
+                            reanalyze_cancelled = True
+                            record_event(
+                                {
+                                    "type": "line_edit",
+                                    "message": f"台词修改：第{index + 1}行 已停止重新分析，文本未保存",
+                                    "payload": {"index": index},
+                                },
+                                project_root=project_root,
+                            )
+                        else:
+                            emotion = "思考"
+                            for e in emotions:
+                                if e.get("index") == 0:
+                                    emotion = e.get("emotion") or "思考"
+                                    break
+                            line["emotion"] = emotion
+                            if state.get("lang") == "ja":
+                                translations = translate_lines(
+                                    lines=[single],
+                                    api_key=api_key,
+                                    base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
+                                    model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                                )
+                                translated = next((t.get("translation", "") for t in translations if t.get("index") == 0), "").strip()
+                                line["translated_text"] = translated or line["text"]
+                            invalidate_segment()
+                            record_event(
+                                {
+                                    "type": "line_edit",
+                                    "message": f"台词修改：第{index + 1}行 {line['character']} 已重新分析情绪",
+                                    "payload": {"index": index, "text": line["text"], "emotion": line["emotion"]},
+                                },
+                                project_root=project_root,
+                            )
+                    except Exception as e:
+                        traceback.print_exc()
+                        reanalyze_error = str(e)
+                        invalidate_segment()
+                        state["failures"][index] = "文本已修改，情绪重新分析失败：" + str(e)[-200:]
+                        record_event(
+                            {
+                                "type": "line_edit",
+                                "message": f"台词修改：第{index + 1}行 文本已保存，情绪重分析失败",
+                                "payload": {"index": index, "error": str(e)[-200:]},
+                            },
+                            project_root=project_root,
+                        )
         if "character" in data:
             new_char = data["character"]
             if not isinstance(new_char, str) or not new_char.strip():
@@ -762,6 +796,8 @@ def create_app(config_path="config.yaml"):
         resp = {"status": "ok", "line": line, "had_generated": had_generated}
         if reanalyze_error:
             resp["reanalyze_error"] = reanalyze_error
+        if reanalyze_cancelled:
+            resp["reanalyze_cancelled"] = True
         return jsonify(resp)
 
     @app.route("/api/lines/interval", methods=["POST"])
