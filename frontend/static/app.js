@@ -16,10 +16,6 @@ async function loadConfig() {
   const cfg = await api("/api/config");
   state.chars = cfg.characters;
   state.emotions = cfg.emotions;
-  const charDatalist = document.getElementById("char-suggestions");
-  if (charDatalist) {
-    charDatalist.innerHTML = (cfg.characters || []).concat(["旁白"]).map(c => '<option value="' + esc(c) + '"></option>').join("");
-  }
   setNarrationInputs(cfg.narration || {});
   loadDeployPath(cfg);
   loadCleanPath(cfg);
@@ -173,7 +169,7 @@ function renderLines() {
     const isNarration = line.character === "旁白";
     return '<div class="line-item">'
       + idxCell
-      + '<input type="text" class="char char-input" list="char-suggestions" value="' + esc(line.character) + '" data-index="' + i + '" title="点击修改角色名，回车保存" autocomplete="off">'
+      + '<input type="text" class="char char-input" value="' + esc(line.character) + '" data-index="' + i + '" title="点击修改角色名，回车保存" autocomplete="off">'
       + '<span class="line-texts">'
       + '<div class="text line-text-edit" contenteditable="true" spellcheck="false" title="点击修改台词，回车保存" data-index="' + i + '">' + esc(line.text) + '</div>'
       + (line.translated_text ? '<span class="translated" title="' + esc(line.translated_text) + '">日语：' + esc(line.translated_text) + '</span>' : '')
