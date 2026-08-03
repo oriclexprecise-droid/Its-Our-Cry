@@ -2318,6 +2318,7 @@ async function deleteModelAlias(key, alias) {
 
 let refRootPath = "";
 let refAudioPlayer = null;
+let refPromptState = null;
 
 function refAudioUrl(key, emotion, name) {
   return "/api/reference/audio/file?key=" + encodeURIComponent(key) + "&emotion=" + encodeURIComponent(emotion) + "&name=" + encodeURIComponent(name);
@@ -2354,8 +2355,10 @@ function renderReferenceLibrary(items) {
       const filesHtml = files.length ? files.map(f => (
         '<div class="ref-file">'
         + '<span class="ref-file-name" title="' + esc(f.name) + '">' + esc(f.name) + ' <em>' + fmtSize(f.size || 0) + '</em></span>'
+        + '<button type="button" class="btn-line-action btn-ref-prompt" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '" data-name="' + esc(f.name) + '" data-prompt="' + esc(f.prompt_text || "") + '">字幕</button>'
         + '<button type="button" class="btn-line-action btn-ref-play" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '" data-name="' + esc(f.name) + '">试听</button>'
         + '<button type="button" class="btn-line-action btn-ref-del" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '" data-name="' + esc(f.name) + '">删除</button>'
+        + '<span class="ref-file-prompt' + (f.prompt_text ? "" : " empty") + '" title="' + esc(f.prompt_text || "") + '">' + esc(f.prompt_text || "未填字幕") + '</span>'
         + '</div>'
       )).join("") : '<span class="ref-empty">暂无音频</span>';
       return '<div class="ref-emotion">'
@@ -2365,7 +2368,6 @@ function renderReferenceLibrary(items) {
         + '</div>'
         + '<div class="ref-files">' + filesHtml + '</div>'
         + '<div class="ref-upload-row">'
-        + '<input type="file" class="ref-file-input hidden" accept=".wav,.mp3,.flac,.ogg,.m4a,.aac" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '">'
         + '<button type="button" class="btn-secondary btn-small btn-ref-upload" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '">上传音频</button>'
         + '</div>'
         + '</div>';
@@ -2385,13 +2387,10 @@ function renderReferenceLibrary(items) {
     btn.addEventListener("click", () => deleteRefAudio(btn.dataset.key, btn.dataset.emotion, btn.dataset.name));
   });
   listEl.querySelectorAll(".btn-ref-upload").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const input = btn.parentElement.querySelector(".ref-file-input");
-      if (input) input.click();
-    });
+    btn.addEventListener("click", () => openRefUploadModal(btn.dataset.key, btn.dataset.emotion));
   });
-  listEl.querySelectorAll(".ref-file-input").forEach(input => {
-    input.addEventListener("change", () => uploadRefAudio(input));
+  listEl.querySelectorAll(".btn-ref-prompt").forEach(btn => {
+    btn.addEventListener("click", () => openRefPromptEditor(btn.dataset.key, btn.dataset.emotion, btn.dataset.name, btn.dataset.prompt || ""));
   });
 }
 
@@ -2402,29 +2401,84 @@ function playRefAudio(key, emotion, name) {
   a.play().catch(() => {});
 }
 
-async function uploadRefAudio(input) {
-  const file = input.files && input.files[0];
+function openRefUploadModal(key, emotion) {
+  const modal = document.getElementById("ref-prompt-modal");
+  if (!modal) return;
+  refPromptState = { mode: "upload", key, emotion };
+  document.getElementById("ref-prompt-title").textContent = "上传参考音频";
+  document.getElementById("ref-prompt-desc").textContent = key + "「" + emotion + "」：选择音频文件，并填写该音频对应的字幕文本。";
+  const fileRow = document.getElementById("ref-prompt-file-row");
+  if (fileRow) fileRow.classList.remove("hidden");
+  const fileInput = document.getElementById("ref-prompt-file");
+  if (fileInput) fileInput.value = "";
+  const textEl = document.getElementById("ref-prompt-text");
+  if (textEl) textEl.value = "";
+  modal.classList.remove("hidden");
+}
+
+function openRefPromptEditor(key, emotion, name, promptText) {
+  const modal = document.getElementById("ref-prompt-modal");
+  if (!modal) return;
+  refPromptState = { mode: "edit", key, emotion, name };
+  document.getElementById("ref-prompt-title").textContent = "编辑音频字幕";
+  document.getElementById("ref-prompt-desc").textContent = name + "：填写该音频对应的字幕文本。";
+  const fileRow = document.getElementById("ref-prompt-file-row");
+  if (fileRow) fileRow.classList.add("hidden");
+  const textEl = document.getElementById("ref-prompt-text");
+  if (textEl) textEl.value = promptText || "";
+  modal.classList.remove("hidden");
+}
+
+function closeRefPromptModal() {
+  const modal = document.getElementById("ref-prompt-modal");
+  if (modal) modal.classList.add("hidden");
+  refPromptState = null;
+}
+
+async function confirmRefPrompt() {
+  const st = refPromptState;
+  if (!st) return;
   const statusEl = document.getElementById("ref-library-status");
-  if (!file) return;
-  const key = input.dataset.key;
-  const emotion = input.dataset.emotion;
-  const form = new FormData();
-  form.append("key", key);
-  form.append("emotion", emotion);
-  form.append("file", file);
-  if (statusEl) { statusEl.textContent = "正在上传 " + file.name + "..."; statusEl.className = "status-text"; }
-  try {
-    const res = await fetch("/api/reference/audio/upload", { method: "POST", body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || ("HTTP " + res.status));
+  const textEl = document.getElementById("ref-prompt-text");
+  const promptText = textEl ? textEl.value.trim() : "";
+  if (st.mode === "upload") {
+    const fileInput = document.getElementById("ref-prompt-file");
+    const file = fileInput && fileInput.files && fileInput.files[0];
+    if (!file) {
+      if (statusEl) { statusEl.textContent = "请先选择音频文件"; statusEl.className = "status-text error"; }
+      return;
     }
-    if (statusEl) { statusEl.textContent = "已上传到 " + key + "「" + emotion + "」"; statusEl.className = "status-text success"; }
-    input.value = "";
+    const form = new FormData();
+    form.append("key", st.key);
+    form.append("emotion", st.emotion);
+    form.append("prompt_text", promptText);
+    form.append("file", file);
+    if (statusEl) { statusEl.textContent = "正在上传 " + file.name + "..."; statusEl.className = "status-text"; }
+    try {
+      const res = await fetch("/api/reference/audio/upload", { method: "POST", body: form });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || ("HTTP " + res.status));
+      }
+      if (statusEl) { statusEl.textContent = "已上传到 " + st.key + "「" + st.emotion + "」"; statusEl.className = "status-text success"; }
+      closeRefPromptModal();
+      await loadReferenceLibrary();
+    } catch (e) {
+      if (statusEl) { statusEl.textContent = "上传失败: " + e.message; statusEl.className = "status-text error"; }
+    }
+    return;
+  }
+  if (statusEl) { statusEl.textContent = "正在保存字幕..."; statusEl.className = "status-text"; }
+  try {
+    await api("/api/reference/audio/prompt", {
+      method: "POST",
+      body: JSON.stringify({ key: st.key, emotion: st.emotion, name: st.name, prompt_text: promptText }),
+    });
+    if (statusEl) { statusEl.textContent = "字幕已保存"; statusEl.className = "status-text success"; }
+    closeRefPromptModal();
     await loadReferenceLibrary();
   } catch (e) {
-    if (statusEl) { statusEl.textContent = "上传失败: " + e.message; statusEl.className = "status-text error"; }
-    input.value = "";
+    if (statusEl) { statusEl.textContent = "保存字幕失败: " + e.message; statusEl.className = "status-text error"; }
   }
 }
 
