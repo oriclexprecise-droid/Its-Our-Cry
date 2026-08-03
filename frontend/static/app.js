@@ -200,8 +200,10 @@ document.addEventListener("keydown", (e) => {
     const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
     if (typing) {
       if (!e.shiftKey) return;
-      e.preventDefault();
-      runHistory("redo");
+      if (historyCounts.redo > 0) {
+        e.preventDefault();
+        runHistory("redo");
+      }
       return;
     }
     e.preventDefault();
@@ -594,6 +596,7 @@ let lastAutoVersionAt = 0;
 let lastAutoHash = "";
 let scriptSyncTimer = null;
 let scriptDirty = false;
+let historyCounts = { undo: 0, redo: 0 };
 let toastTimer = null;
 function toast(message, kind) {
   let root = document.getElementById("toast-root");
@@ -1108,6 +1111,8 @@ function updateHistoryButtons(h) {
   if (!undoBtn || !redoBtn) return;
   const uc = h ? h.undo_count : 0;
   const rc = h ? h.redo_count : 0;
+  historyCounts.undo = uc;
+  historyCounts.redo = rc;
   undoBtn.disabled = uc === 0;
   redoBtn.disabled = rc === 0;
   undoBtn.title = uc ? "撤销 " + (h.undo_label || "") + " (Ctrl+Z)" : "撤销 (Ctrl+Z)";
