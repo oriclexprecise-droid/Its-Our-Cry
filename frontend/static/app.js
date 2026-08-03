@@ -492,6 +492,8 @@ function setLineButtonsDisabled(disabled) {
   document.querySelectorAll(".line-text-edit").forEach(el => { el.contentEditable = disabled ? "false" : "true"; });
   document.querySelectorAll(".char-input").forEach(el => { el.disabled = disabled; });
   document.querySelectorAll(".line-check, #select-all, #btn-apply-interval, #batch-interval, #btn-select-mode").forEach(el => { el.disabled = disabled; });
+  const saveRecordBtn = document.getElementById("btn-save-record");
+  if (saveRecordBtn) saveRecordBtn.disabled = disabled;
 }
 
 function refreshGenerated(p) {
@@ -513,6 +515,179 @@ function refreshGenerated(p) {
 }
 
 function esc(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+async function refreshRecentList() {
+  const listEl = document.getElementById("recent-list");
+  if (!listEl) return;
+  try {
+    const data = await api("/api/recent");
+    const records = data.records || [];
+    const settings = data.settings || {};
+    const autoEl = document.getElementById("recent-auto-save");
+    const limitEl = document.getElementById("recent-limit");
+    if (autoEl) autoEl.checked = !!settings.auto_save;
+    if (limitEl) limitEl.value = settings.limit || 50;
+    if (!records.length) {
+      listEl.innerHTML = '<div class="recent-empty">暂无近期记录</div>';
+      return;
+    }
+    listEl.innerHTML = records.map(r => {
+      const first = r.first_line ? '<div class="recent-preview" title="' + esc(r.first_line) + '">' + esc(r.first_line) + '</div>' : "";
+      const meta = r.line_count + " 条 · " + r.voice_count + " 条语音" + (r.fail_count > 0 ? " · 仅字幕 " + r.fail_count + " 条" : "") + (r.export_count > 0 ? " · 已导出 " + r.export_count + " 次" : "");
+      return '<div class="recent-item">'
+        + '<div class="recent-item-main">'
+        + '<div class="recent-item-head"><span class="recent-time">' + esc(r.saved_at || "") + '</span><span class="recent-badge">' + (r.source === "manual" ? "手动" : "自动") + " · " + (r.lang === "ja" ? "日语" : "中文") + "</span></div>"
+        + first
+        + '<div class="recent-meta">' + esc(meta) + "</div>"
+        + '</div>'
+        + '<div class="recent-actions">'
+        + '<button type="button" class="btn-line-action btn-recent-load" data-id="' + esc(r.id) + '">载入</button>'
+        + (r.last_folder ? '<button type="button" class="btn-line-action btn-recent-open" data-id="' + esc(r.id) + '">打开文件夹</button>' : "")
+        + '<button type="button" class="btn-line-action btn-recent-del" data-id="' + esc(r.id) + '">删除</button>'
+        + '</div>'
+        + '</div>';
+    }).join("");
+    listEl.querySelectorAll(".btn-recent-load").forEach(btn => btn.addEventListener("click", () => loadRecentRecord(btn.dataset.id)));
+    listEl.querySelectorAll(".btn-recent-open").forEach(btn => btn.addEventListener("click", () => openRecentFolder(btn.dataset.id)));
+    listEl.querySelectorAll(".btn-recent-del").forEach(btn => btn.addEventListener("click", () => deleteRecentRecord(btn.dataset.id)));
+  } catch (e) {}
+}
+
+function setRecentStatus(msg, kind) {
+  const el = document.getElementById("recent-status");
+  if (!el) return;
+  el.textContent = msg;
+  el.className = "status-text" + (kind === "error" ? " error" : kind === "success" ? " success" : "");
+}
+
+async function saveRecentRecord() {
+  if (state.generating) { setRecentStatus("生成中，请稍后再保存记录", "error"); return; }
+  if (!state.lines.length) { setRecentStatus("还没有可保存的剧本", "error"); return; }
+  setRecentStatus("正在保存...", "");
+  try {
+    await api("/api/recent/save", { method: "POST" });
+    setRecentStatus("已保存为近期记录", "success");
+    refreshRecentList();
+  } catch (e) {
+    setRecentStatus("保存失败: " + e.message, "error");
+  }
+}
+
+async function loadRecentRecord(id) {
+  if (state.generating) { setRecentStatus("生成中，请稍后再载入记录", "error"); return; }
+  if (state.lines.length && !confirm("载入记录会覆盖当前工作台（可以用撤销恢复），确定继续吗？")) return;
+  setRecentStatus("正在载入...", "");
+  try {
+    const res = await api("/api/recent/" + id + "/load", { method: "POST" });
+    const s = res.state || {};
+    state.lines = s.lines || [];
+    state.failures = s.failures || {};
+    state.hasGenerated = Object.keys(s.generated || {}).length > 0;
+    state.selected = new Set();
+    state.selectMode = false;
+    const selBtn = document.getElementById("btn-select-mode");
+    if (selBtn) {
+      selBtn.textContent = "选择模式";
+      selBtn.classList.remove("active");
+    }
+    const selBar = document.getElementById("selection-toolbar");
+    if (selBar) selBar.classList.add("hidden");
+    renderLines();
+    refreshGenerated({ generated_indices: Object.keys(s.generated || {}).map(Number), failures: state.failures });
+    const downloadPanel = document.getElementById("step-download");
+    if (downloadPanel) downloadPanel.classList.toggle("hidden", !state.hasGenerated && !s.merged_path);
+    const genBtn = document.getElementById("btn-generate");
+    if (genBtn) genBtn.textContent = state.hasGenerated ? "重新生成" : "生成全部语音";
+    updateHistoryButtons(res.history);
+    setRecentStatus("已载入记录" + (res.record && res.record.saved_at ? "：" + res.record.saved_at : ""), "success");
+    refreshRecentList();
+  } catch (e) {
+    setRecentStatus("载入失败: " + e.message, "error");
+  }
+}
+
+async function openRecentFolder(id) {
+  try {
+    const res = await api("/api/recent/" + id);
+    const exportsList = (res.record && res.record.exports) || [];
+    const folder = exportsList.length ? exportsList[exportsList.length - 1].folder : "";
+    if (!folder) return;
+    await api("/api/open_folder", { method: "POST", body: JSON.stringify({ path: folder }) });
+  } catch (e) {
+    alert("打开失败: " + e.message);
+  }
+}
+
+async function deleteRecentRecord(id) {
+  if (!confirm("确定删除这条近期记录？")) return;
+  try {
+    await api("/api/recent/" + id, { method: "DELETE" });
+    setRecentStatus("已删除记录", "success");
+    refreshRecentList();
+  } catch (e) {
+    setRecentStatus("删除失败: " + e.message, "error");
+  }
+}
+
+async function clearRecentRecords() {
+  if (!confirm("确定清空全部近期记录？此操作不可恢复。")) return;
+  const status = document.getElementById("recent-settings-status");
+  try {
+    await api("/api/recent/clear", { method: "POST" });
+    if (status) { status.textContent = "已清空全部记录"; status.className = "status-text success"; }
+    refreshRecentList();
+  } catch (e) {
+    if (status) { status.textContent = "清空失败: " + e.message; status.className = "status-text error"; }
+  }
+}
+
+async function saveRecentSettings() {
+  const status = document.getElementById("recent-settings-status");
+  if (!status) return;
+  const limitRaw = parseInt(document.getElementById("recent-limit").value, 10);
+  if (isNaN(limitRaw) || limitRaw < 10 || limitRaw > 500) {
+    status.textContent = "记录上限请输入 10-500 的数字";
+    status.className = "status-text error";
+    return;
+  }
+  const auto = document.getElementById("recent-auto-save").checked;
+  status.textContent = "正在保存记录设置...";
+  status.className = "status-text";
+  try {
+    const res = await api("/api/recent/settings", { method: "POST", body: JSON.stringify({ limit: limitRaw, auto_save: auto }) });
+    document.getElementById("recent-limit").value = res.settings.limit;
+    document.getElementById("recent-auto-save").checked = !!res.settings.auto_save;
+    status.textContent = "记录设置已保存";
+    status.className = "status-text success";
+    refreshRecentList();
+  } catch (e) {
+    status.textContent = "保存失败: " + e.message;
+    status.className = "status-text error";
+  }
+}
+
+function initRecentRecords() {
+  const saveBtn = document.getElementById("btn-save-record");
+  if (saveBtn) saveBtn.addEventListener("click", saveRecentRecord);
+  const saveSettingsBtn = document.getElementById("btn-save-recent-settings");
+  if (saveSettingsBtn) saveSettingsBtn.addEventListener("click", saveRecentSettings);
+  const clearBtn = document.getElementById("btn-clear-recent");
+  if (clearBtn) clearBtn.addEventListener("click", clearRecentRecords);
+  const recentBtn = document.getElementById("btn-recent");
+  const dropdown = document.getElementById("recent-dropdown");
+  if (recentBtn && dropdown) {
+    recentBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle("hidden");
+      if (!dropdown.classList.contains("hidden")) refreshRecentList();
+    });
+    document.addEventListener("click", (e) => {
+      if (dropdown.classList.contains("hidden")) return;
+      if (dropdown.contains(e.target) || recentBtn.contains(e.target)) return;
+      dropdown.classList.add("hidden");
+    });
+  }
+}
 
 function updateHistoryButtons(h) {
   const undoBtn = document.getElementById("btn-undo");
@@ -798,6 +973,7 @@ async function pollProgress(btn, progressText, barFill) {
       if (cancelBtnFinish) cancelBtnFinish.classList.add("hidden");
       setLineButtonsDisabled(false); renderLines(); refreshGenerated(p);
       document.getElementById("step-download").classList.remove("hidden");
+      refreshRecentList();
       return;
     }
     setTimeout(() => pollProgress(btn, progressText, barFill), 1000);
@@ -821,6 +997,7 @@ async function runExport(folderName) {
     status.className = "status-text success";
     document.getElementById("btn-open-export").classList.remove("hidden");
     document.getElementById("export-folder-input").value = "";
+    refreshRecentList();
   } catch (e) {
     if (e.code === "folder_exists") {
       status.textContent = e.message;
@@ -1599,6 +1776,8 @@ initCleanSpace();
 loadConfig();
 refreshHistory();
 initBackgroundSettings();
+initRecentRecords();
+refreshRecentList();
 function updateDeployBanner(cfgPath) {
   const banner = document.getElementById("deploy-banner");
   if (!banner) return;
@@ -1623,6 +1802,8 @@ function showSettings(tab) {
   const workbench = document.getElementById("view-workbench");
   const settings = document.getElementById("view-settings");
   if (!workbench || !settings) return;
+  const recentDropdown = document.getElementById("recent-dropdown");
+  if (recentDropdown) recentDropdown.classList.add("hidden");
   workbench.classList.add("hidden");
   settings.classList.remove("hidden");
   document.getElementById("btn-back-workbench").classList.remove("hidden");

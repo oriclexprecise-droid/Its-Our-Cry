@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260804">
+<link rel="stylesheet" href="/static/style.css?v=20260806">
 <style>
 .creator-tip {
   position: fixed;
@@ -50,7 +50,7 @@
     <div id="creator-tip" class="creator-tip"></div>
     <h1>It 's Our Cry!!!!!</h1>
     <div class="header-meta">
-      <span class="version-tag">Version 1.1.0</span>
+      <span class="version-tag">Version 1.2.0</span>
       <button id="btn-back-workbench" class="btn-secondary btn-small hidden" title="返回工作台">返回工作台</button>
       <button id="btn-undo" class="btn-secondary btn-small" disabled title="撤销 (Ctrl+Z)">撤销</button>
       <button id="btn-redo" class="btn-secondary btn-small" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
@@ -61,6 +61,18 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
     设置
   </button>
+  <button type="button" id="btn-recent" class="recent-float" title="近期记录">
+    近期记录
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+  </button>
+  <div id="recent-dropdown" class="recent-dropdown hidden">
+    <div class="recent-dropdown-head">
+      <span class="recent-dropdown-title">近期记录</span>
+      <button id="btn-save-record" class="btn-secondary btn-small" title="把当前工作台保存为近期记录">保存为记录</button>
+    </div>
+    <div id="recent-list" class="recent-list"><div class="recent-empty">暂无近期记录</div></div>
+    <span id="recent-status" class="status-text"></span>
+  </div>
 
   <div id="deploy-banner" class="deploy-banner hidden">
     <span>还没配置 GPT-SoVITS，配音前需要先完成部署</span>
@@ -228,6 +240,19 @@
           <span id="pronunciation-config-status" class="status-text"></span>
         </div>
         <div class="side-section">
+          <h3 class="side-section-title">近期记录</h3>
+          <label class="recent-option"><input type="checkbox" id="recent-auto-save"> 生成完成后自动保存记录</label>
+          <div class="api-field">
+            <label for="recent-limit">最多保留记录数（10-500）</label>
+            <input type="number" id="recent-limit" min="10" max="500" step="1" value="50">
+          </div>
+          <div class="btn-row">
+            <button type="button" id="btn-save-recent-settings" class="btn-secondary btn-small btn-flex">保存记录设置</button>
+            <button type="button" id="btn-clear-recent" class="btn-secondary btn-small">清空全部记录</button>
+          </div>
+          <span id="recent-settings-status" class="status-text"></span>
+        </div>
+        <div class="side-section">
           <h3 class="side-section-title">外观</h3>
           <div class="api-field">
             <label for="bg-select">背景图</label>
@@ -330,7 +355,7 @@
         <h3 class="side-section-title">数据与隐私</h3>
         <p class="legal-text">本程序仅在本地记录情绪修正等匿名日志用于改进 AI 效果，日志可随时查看、下载与重置，不会上传剧本内容和 API Key。</p>
         <h3 class="side-section-title">版本信息</h3>
-        <p class="legal-text">版本：1.1.0</p>
+        <p class="legal-text">版本：1.2.0</p>
         <p class="legal-text">开发者：ORiCale</p>
         <h3 class="side-section-title">联系与支持</h3>
         <p class="legal-text">Bilibili：<a href="https://space.bilibili.com/3493294730381924" target="_blank" rel="noopener">访问我的主页</a></p>
@@ -363,7 +388,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260804"></script>
+<script src="/static/app.js?v=20260806"></script>
 <script>
 (function () {
   var tips = [

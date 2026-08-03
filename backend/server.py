@@ -8,8 +8,10 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import urllib.request
+import uuid
 import wave
 import zipfile
 import copy
@@ -30,6 +32,10 @@ from .cleanup import clean_items, scan_cleanable
 
 
 DEFAULT_INTERVAL = 0.5
+
+RECENT_LIMIT_MIN = 10
+RECENT_LIMIT_MAX = 500
+DEFAULT_RECENT_LIMIT = 50
 
 DEFAULT_PRONUNCIATION = [
     {"zh": "长崎素世", "ja": "長崎そよ"},
@@ -402,6 +408,21 @@ def create_app(config_path="config.yaml"):
         config["pronunciation"] = [dict(x) for x in DEFAULT_PRONUNCIATION]
     dpapi_ok = _dpapi_encrypt("probe") is not None
 
+    # 近期记录：本地 JSON 文件，不提交 git、不联网
+    work_dir = project_root / "work"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    recent_path = work_dir / "recent_results.json"
+    recent_lock = threading.RLock()
+    raw_auto = user_settings.get("recent_auto_save", True)
+    if isinstance(raw_auto, bool):
+        recent_auto_save = raw_auto
+    else:
+        recent_auto_save = str(raw_auto).lower() not in ("", "0", "false", "no")
+    recent_settings = {
+        "limit": max(RECENT_LIMIT_MIN, min(RECENT_LIMIT_MAX, int(user_settings.get("recent_limit") or DEFAULT_RECENT_LIMIT))),
+        "auto_save": recent_auto_save,
+    }
+
     # Resolve all relative paths to absolute to survive cwd changes
     gs_path = str(config.get("gptsovits_path") or "").strip()
     config["gptsovits_path"] = gs_path
@@ -458,6 +479,7 @@ def create_app(config_path="config.yaml"):
         "history_undo": [],
         "history_redo": [],
         "history_limit": 50,
+        "current_record_id": None,
         "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
         "deploy_model_copy": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total": 0, "current": ""},
         "deploy_clone": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target_dir": ""},
@@ -473,6 +495,7 @@ def create_app(config_path="config.yaml"):
             "merged_path": state.get("merged_path"),
             "srt_path": state.get("srt_path"),
             "time_info": copy.deepcopy(state.get("time_info", [])),
+            "current_record_id": state.get("current_record_id"),
             "lang": state.get("lang", "zh"),
         }
 
@@ -492,6 +515,7 @@ def create_app(config_path="config.yaml"):
         state["srt_path"] = snap.get("srt_path")
         state["time_info"] = copy.deepcopy(snap.get("time_info", []))
         state["lang"] = snap.get("lang", "zh")
+        state["current_record_id"] = snap.get("current_record_id")
         state["progress"] = {"current": 0, "total": 0}
         state["srt_only"] = False
 
@@ -516,6 +540,175 @@ def create_app(config_path="config.yaml"):
             "redo_label": redo[-1]["label"] if redo else None,
         }
 
+    def load_recent_records():
+        if not recent_path.exists():
+            return []
+        try:
+            with recent_lock:
+                data = json.loads(recent_path.read_text(encoding="utf-8"))
+            records = data if isinstance(data, list) else []
+            return [r for r in records if isinstance(r, dict) and r.get("id")]
+        except Exception:
+            return []
+
+    def persist_recent_records(records):
+        try:
+            with recent_lock:
+                tmp_path = recent_path.with_suffix(".tmp")
+                tmp_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.replace(str(tmp_path), str(recent_path))
+        except Exception:
+            pass
+
+    def enforce_recent_limit(records):
+        limit = int(recent_settings.get("limit") or DEFAULT_RECENT_LIMIT)
+        if len(records) > limit:
+            del records[limit:]
+
+    def persist_recent_settings():
+        try:
+            settings = {}
+            if user_settings_path.exists():
+                settings = json.loads(user_settings_path.read_text(encoding="utf-8"))
+            settings["recent_limit"] = recent_settings["limit"]
+            settings["recent_auto_save"] = recent_settings["auto_save"]
+            user_settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def record_config_snapshot():
+        return {
+            "lang": state.get("lang", "zh"),
+            "narration": config.get("narration", {}),
+        }
+
+    def build_recent_record(source="auto"):
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        generated = {}
+        for idx, gen in (state.get("generated") or {}).items():
+            generated[str(idx)] = {"path": gen.get("path"), "duration": gen.get("duration")}
+        failures = {}
+        for idx, msg in (state.get("failures") or {}).items():
+            failures[str(idx)] = msg
+        return {
+            "id": uuid.uuid4().hex,
+            "saved_at": now,
+            "updated_at": now,
+            "source": source,
+            "lang": state.get("lang", "zh"),
+            "lines": copy.deepcopy(state.get("lines", [])),
+            "generated": generated,
+            "failures": failures,
+            "merged_path": state.get("merged_path"),
+            "srt_path": state.get("srt_path"),
+            "time_info": copy.deepcopy(state.get("time_info", [])),
+            "config": record_config_snapshot(),
+            "exports": [],
+        }
+
+    def upsert_current_record(source="auto"):
+        with recent_lock:
+            records = load_recent_records()
+            record_id = state.get("current_record_id")
+            record = None
+            if record_id:
+                for r in records:
+                    if r.get("id") == record_id:
+                        record = r
+                        break
+            if record is None:
+                record = build_recent_record(source)
+                state["current_record_id"] = record["id"]
+                records.insert(0, record)
+            else:
+                now = time.strftime("%Y-%m-%d %H:%M:%S")
+                record["updated_at"] = now
+                record["source"] = source
+                record["lang"] = state.get("lang", "zh")
+                record["lines"] = copy.deepcopy(state.get("lines", []))
+                record["generated"] = {}
+                for idx, gen in (state.get("generated") or {}).items():
+                    record["generated"][str(idx)] = {"path": gen.get("path"), "duration": gen.get("duration")}
+                record["failures"] = {}
+                for idx, msg in (state.get("failures") or {}).items():
+                    record["failures"][str(idx)] = msg
+                record["merged_path"] = state.get("merged_path")
+                record["srt_path"] = state.get("srt_path")
+                record["time_info"] = copy.deepcopy(state.get("time_info", []))
+                record["config"] = record_config_snapshot()
+                records = [r for r in records if r.get("id") != record_id]
+                records.insert(0, record)
+            enforce_recent_limit(records)
+            persist_recent_records(records)
+        return record
+
+    def attach_export_to_record(export_info):
+        with recent_lock:
+            records = load_recent_records()
+            record_id = state.get("current_record_id")
+            record = None
+            if record_id:
+                for r in records:
+                    if r.get("id") == record_id:
+                        record = r
+                        break
+            if record is None:
+                upsert_current_record("auto")
+                records = load_recent_records()
+                record_id = state.get("current_record_id")
+                for r in records:
+                    if r.get("id") == record_id:
+                        record = r
+                        break
+            if record is None:
+                return
+            record.setdefault("exports", []).append(export_info)
+            record["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            records = [r for r in records if r.get("id") != record_id]
+            records.insert(0, record)
+            enforce_recent_limit(records)
+            persist_recent_records(records)
+
+    def recent_summary(record):
+        lines = record.get("lines") or []
+        exports = record.get("exports") or []
+        first = ""
+        if lines:
+            l0 = lines[0]
+            first = (str(l0.get("character") or "") + "：" + str(l0.get("text") or ""))[:80]
+        return {
+            "id": record.get("id"),
+            "saved_at": record.get("saved_at"),
+            "updated_at": record.get("updated_at"),
+            "source": record.get("source", "auto"),
+            "line_count": len(lines),
+            "voice_count": len(record.get("generated") or {}),
+            "fail_count": len(record.get("failures") or {}),
+            "export_count": len(exports),
+            "last_folder": exports[-1].get("folder") if exports else None,
+            "first_line": first,
+            "lang": record.get("lang", "zh"),
+        }
+
+    def restore_workbench_from_record(record):
+        state["lines"] = copy.deepcopy(record.get("lines", []))
+        state["generated"] = {}
+        for k, v in (record.get("generated") or {}).items():
+            try:
+                state["generated"][int(k)] = {"path": v.get("path"), "duration": v.get("duration")}
+            except (TypeError, ValueError):
+                continue
+        state["failures"] = {}
+        for k, v in (record.get("failures") or {}).items():
+            state["failures"][int(k)] = str(v)
+        state["lang"] = record.get("lang", "zh")
+        state["merged_path"] = record.get("merged_path")
+        state["srt_path"] = record.get("srt_path")
+        state["time_info"] = copy.deepcopy(record.get("time_info", []))
+        state["progress"] = {"current": 0, "total": 0}
+        state["srt_only"] = False
+        state["current_record_id"] = record.get("id")
+
     @app.route("/")
     def index():
         return render_template("index.html")
@@ -529,6 +722,7 @@ def create_app(config_path="config.yaml"):
             "has_api_key": has_key,
             "default_interval": DEFAULT_INTERVAL,
             "narration": config.get("narration", {}),
+            "recent": dict(recent_settings),
             "gptsovits_path": config["gptsovits_path"],
             "dpapi_ok": dpapi_ok,
             "deepseek": {
@@ -775,6 +969,7 @@ def create_app(config_path="config.yaml"):
         state["failures"] = {}
         state["progress"] = {"current": 0, "total": 0}
         state["srt_only"] = False
+        state["current_record_id"] = None
 
         return jsonify({"lines": lines, "proofread": proofread, "skipped": skipped})
 
@@ -1276,6 +1471,11 @@ def create_app(config_path="config.yaml"):
                 state["error"] = str(e)
             finally:
                 state["generating"] = False
+                if not state.get("cancelled") and recent_settings.get("auto_save", True):
+                    try:
+                        upsert_current_record("auto")
+                    except Exception:
+                        pass
 
         threading.Thread(target=generate_worker, daemon=True).start()
         return jsonify({"status": "started", "total": len(indices)})
@@ -1367,6 +1567,80 @@ def create_app(config_path="config.yaml"):
             project_root=project_root,
         )
         return jsonify({"status": "ok", "label": entry["label"], "state": workbench_state(), "history": history_payload()})
+
+    @app.route("/api/recent", methods=["GET"])
+    def get_recent_records():
+        records = load_recent_records()
+        return jsonify({
+            "records": [recent_summary(r) for r in records],
+            "settings": dict(recent_settings),
+        })
+
+    @app.route("/api/recent/save", methods=["POST"])
+    def save_recent_record():
+        if state.get("generating"):
+            return jsonify({"error": "生成中，请稍后再保存记录"}), 409
+        if not state["lines"]:
+            return jsonify({"error": "还没有可保存的剧本"}), 400
+        record = upsert_current_record("manual")
+        return jsonify({"status": "ok", "record": recent_summary(record)})
+
+    @app.route("/api/recent/<record_id>", methods=["GET"])
+    def get_recent_record(record_id):
+        for r in load_recent_records():
+            if r.get("id") == record_id:
+                return jsonify({"record": r})
+        return jsonify({"error": "记录不存在"}), 404
+
+    @app.route("/api/recent/<record_id>/load", methods=["POST"])
+    def load_recent_record(record_id):
+        if state.get("generating"):
+            return jsonify({"error": "生成中，请稍后再载入记录"}), 409
+        record = None
+        for r in load_recent_records():
+            if r.get("id") == record_id:
+                record = r
+                break
+        if record is None:
+            return jsonify({"error": "记录不存在"}), 404
+        push_history("载入近期记录")
+        restore_workbench_from_record(record)
+        record_event(
+            {"type": "recent_load", "message": "载入近期记录：" + str(record.get("saved_at")), "payload": {"id": record_id, "line_count": len(state["lines"])}},
+            project_root=project_root,
+        )
+        return jsonify({"status": "ok", "state": workbench_state(), "history": history_payload(), "record": recent_summary(record)})
+
+    @app.route("/api/recent/<record_id>", methods=["DELETE"])
+    def delete_recent_record(record_id):
+        records = [r for r in load_recent_records() if r.get("id") != record_id]
+        persist_recent_records(records)
+        if state.get("current_record_id") == record_id:
+            state["current_record_id"] = None
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/recent/clear", methods=["POST"])
+    def clear_recent_records():
+        persist_recent_records([])
+        state["current_record_id"] = None
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/recent/settings", methods=["POST"])
+    def save_recent_settings():
+        data = request.get_json() or {}
+        if "limit" in data:
+            try:
+                limit = int(data["limit"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "记录上限必须是数字"}), 400
+            recent_settings["limit"] = max(RECENT_LIMIT_MIN, min(RECENT_LIMIT_MAX, limit))
+        if "auto_save" in data:
+            recent_settings["auto_save"] = bool(data["auto_save"])
+        persist_recent_settings()
+        records = load_recent_records()
+        enforce_recent_limit(records)
+        persist_recent_records(records)
+        return jsonify({"status": "ok", "settings": dict(recent_settings)})
 
     @app.route("/api/download/<path:file_type>", methods=["GET"])
     def download_file(file_type):
@@ -1493,6 +1767,15 @@ def create_app(config_path="config.yaml"):
 
             if not created_files:
                 raise RuntimeError("没有可导出的音频文件")
+            try:
+                attach_export_to_record({
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "folder": str(export_dir),
+                    "merged_path": str(export_merged),
+                    "srt_path": str(export_srt),
+                })
+            except Exception:
+                pass
             return jsonify({"status": "ok", "folder": str(export_dir), "files": created_files})
         except Exception as e:
             traceback.print_exc()
