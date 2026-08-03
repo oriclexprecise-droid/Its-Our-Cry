@@ -666,9 +666,30 @@ textarea { min-height: 240px; line-height: 1.6; }
 .ref-emotion-status.ok { color: #66d18c; }
 .ref-emotion-status.empty { color: #ff8a80; }
 .ref-files { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; min-height: 20px; }
-.ref-file { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; }
-.ref-file-name { color: #cbd8f0; word-break: break-all; flex: 1; min-width: 0; }
+.ref-file {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "name actions"
+    "prompt actions";
+  column-gap: 10px;
+  row-gap: 4px;
+  align-items: center;
+  font-size: 11px;
+}
+.ref-file-name { grid-area: name; color: #cbd8f0; word-break: break-all; min-width: 0; }
 .ref-file-name em { color: #6b84ad; font-style: normal; margin-left: 4px; }
+.ref-file-actions {
+  grid-area: actions;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ref-file-actions .btn-line-action {
+  width: 56px;
+  text-align: center;
+  padding: 4px 8px;
+}
 .ref-empty { color: #6b84ad; font-size: 11px; }
 .ref-upload-row { display: flex; justify-content: flex-end; }
 .ref-upload-row .btn-secondary { padding: 3px 10px; font-size: 11px; }
@@ -693,7 +714,6 @@ textarea { min-height: 240px; line-height: 1.6; }
   resize: vertical;
 }
 .ref-file-prompt {
-  width: 100%;
   color: #8fb3d9;
   font-size: 11px;
   line-height: 1.5;

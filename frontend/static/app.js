@@ -2355,9 +2355,11 @@ function renderReferenceLibrary(items) {
       const filesHtml = files.length ? files.map(f => (
         '<div class="ref-file">'
         + '<span class="ref-file-name" title="' + esc(f.name) + '">' + esc(f.name) + ' <em>' + fmtSize(f.size || 0) + '</em></span>'
+        + '<div class="ref-file-actions">'
         + '<button type="button" class="btn-line-action btn-ref-prompt" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '" data-name="' + esc(f.name) + '" data-prompt="' + esc(f.prompt_text || "") + '">字幕</button>'
         + '<button type="button" class="btn-line-action btn-ref-play" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '" data-name="' + esc(f.name) + '">试听</button>'
         + '<button type="button" class="btn-line-action btn-ref-del" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '" data-name="' + esc(f.name) + '">删除</button>'
+        + '</div>'
         + '<span class="ref-file-prompt' + (f.prompt_text ? "" : " empty") + '" title="' + esc(f.prompt_text || "") + '">' + esc(f.prompt_text || "未填字幕") + '</span>'
         + '</div>'
       )).join("") : '<span class="ref-empty">暂无音频</span>';
