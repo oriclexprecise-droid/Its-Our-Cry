@@ -3144,8 +3144,11 @@ if (refreshBtn && refreshModal) {
   refreshBtn.addEventListener("click", () => {
     refreshModal.classList.remove("hidden");
   });
-  document.getElementById("btn-refresh-confirm").addEventListener("click", () => {
+  document.getElementById("btn-refresh-confirm").addEventListener("click", async () => {
     refreshModal.classList.add("hidden");
+    try {
+      await api("/api/recent/new", { method: "POST" });
+    } catch (e) {}
     window.location.reload();
   });
   document.getElementById("btn-refresh-cancel").addEventListener("click", () => {
