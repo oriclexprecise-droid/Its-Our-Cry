@@ -2304,6 +2304,146 @@ async function deleteModelAlias(key, alias) {
   }
 }
 
+let refRootPath = "";
+let refAudioPlayer = null;
+
+function refAudioUrl(key, emotion, name) {
+  return "/api/reference/audio/file?key=" + encodeURIComponent(key) + "&emotion=" + encodeURIComponent(emotion) + "&name=" + encodeURIComponent(name);
+}
+
+async function loadReferenceLibrary() {
+  const listEl = document.getElementById("ref-library-list");
+  const statusEl = document.getElementById("ref-library-status");
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="model-empty">加载中...</div>';
+  try {
+    const data = await api("/api/reference/audio");
+    refRootPath = data.root || "";
+    const rootEl = document.getElementById("ref-root-path");
+    if (rootEl) rootEl.textContent = refRootPath || "reference_audio/";
+    renderReferenceLibrary(data.items || []);
+    if (statusEl) { statusEl.textContent = ""; statusEl.className = "status-text"; }
+  } catch (e) {
+    listEl.innerHTML = '<div class="model-empty">加载失败: ' + esc(e.message) + '</div>';
+    if (statusEl) { statusEl.textContent = "加载失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+function renderReferenceLibrary(items) {
+  const listEl = document.getElementById("ref-library-list");
+  if (!listEl) return;
+  if (!items.length) {
+    listEl.innerHTML = '<div class="model-empty">暂无角色模型，请先配置模型</div>';
+    return;
+  }
+  listEl.innerHTML = items.map(item => {
+    const emotionsHtml = (item.emotions || []).map(em => {
+      const files = em.files || [];
+      const filesHtml = files.length ? files.map(f => (
+        '<div class="ref-file">'
+        + '<span class="ref-file-name" title="' + esc(f.name) + '">' + esc(f.name) + ' <em>' + fmtSize(f.size || 0) + '</em></span>'
+        + '<button type="button" class="btn-line-action btn-ref-play" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '" data-name="' + esc(f.name) + '">试听</button>'
+        + '<button type="button" class="btn-line-action btn-ref-del" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '" data-name="' + esc(f.name) + '">删除</button>'
+        + '</div>'
+      )).join("") : '<span class="ref-empty">暂无音频</span>';
+      return '<div class="ref-emotion">'
+        + '<div class="ref-emotion-head">'
+        + '<span class="ref-emotion-name">' + esc(em.emotion) + '</span>'
+        + '<span class="ref-emotion-status ' + (files.length ? "ok" : "empty") + '">' + (files.length ? files.length + " 个音频" : "缺失") + '</span>'
+        + '</div>'
+        + '<div class="ref-files">' + filesHtml + '</div>'
+        + '<div class="ref-upload-row">'
+        + '<input type="file" class="ref-file-input hidden" accept=".wav,.mp3,.flac,.ogg,.m4a,.aac" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '">'
+        + '<button type="button" class="btn-secondary btn-small btn-ref-upload" data-key="' + esc(item.key) + '" data-emotion="' + esc(em.emotion) + '">上传音频</button>'
+        + '</div>'
+        + '</div>';
+    }).join("");
+    return '<div class="ref-char">'
+      + '<div class="ref-char-head">'
+      + '<span class="ref-char-name">' + esc(item.name) + '</span>'
+      + '<span class="ref-char-dir">reference_audio/' + esc(item.ref_dir || "") + '</span>'
+      + '</div>'
+      + '<div class="ref-emotions">' + emotionsHtml + '</div>'
+      + '</div>';
+  }).join("");
+  listEl.querySelectorAll(".btn-ref-play").forEach(btn => {
+    btn.addEventListener("click", () => playRefAudio(btn.dataset.key, btn.dataset.emotion, btn.dataset.name));
+  });
+  listEl.querySelectorAll(".btn-ref-del").forEach(btn => {
+    btn.addEventListener("click", () => deleteRefAudio(btn.dataset.key, btn.dataset.emotion, btn.dataset.name));
+  });
+  listEl.querySelectorAll(".btn-ref-upload").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const input = btn.parentElement.querySelector(".ref-file-input");
+      if (input) input.click();
+    });
+  });
+  listEl.querySelectorAll(".ref-file-input").forEach(input => {
+    input.addEventListener("change", () => uploadRefAudio(input));
+  });
+}
+
+function playRefAudio(key, emotion, name) {
+  if (refAudioPlayer) { refAudioPlayer.pause(); refAudioPlayer = null; }
+  const a = new Audio(refAudioUrl(key, emotion, name));
+  refAudioPlayer = a;
+  a.play().catch(() => {});
+}
+
+async function uploadRefAudio(input) {
+  const file = input.files && input.files[0];
+  const statusEl = document.getElementById("ref-library-status");
+  if (!file) return;
+  const key = input.dataset.key;
+  const emotion = input.dataset.emotion;
+  const form = new FormData();
+  form.append("key", key);
+  form.append("emotion", emotion);
+  form.append("file", file);
+  if (statusEl) { statusEl.textContent = "正在上传 " + file.name + "..."; statusEl.className = "status-text"; }
+  try {
+    const res = await fetch("/api/reference/audio/upload", { method: "POST", body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || ("HTTP " + res.status));
+    }
+    if (statusEl) { statusEl.textContent = "已上传到 " + key + "「" + emotion + "」"; statusEl.className = "status-text success"; }
+    input.value = "";
+    await loadReferenceLibrary();
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "上传失败: " + e.message; statusEl.className = "status-text error"; }
+    input.value = "";
+  }
+}
+
+async function deleteRefAudio(key, emotion, name) {
+  if (!(await showConfirmModal("确定删除参考音频“" + name + "”吗？"))) return;
+  const statusEl = document.getElementById("ref-library-status");
+  try {
+    await api("/api/reference/audio", { method: "DELETE", body: JSON.stringify({ key, emotion, name }) });
+    if (statusEl) { statusEl.textContent = "已删除 " + name; statusEl.className = "status-text success"; }
+    await loadReferenceLibrary();
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "删除失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+function initReferenceLibrary() {
+  const openBtn = document.getElementById("btn-ref-open-root");
+  if (openBtn) {
+    openBtn.addEventListener("click", async () => {
+      if (!refRootPath) await loadReferenceLibrary();
+      if (!refRootPath) return;
+      try {
+        await api("/api/open_folder", { method: "POST", body: JSON.stringify({ path: refRootPath }) });
+      } catch (e) {
+        await showAlertModal("打开失败: " + e.message);
+      }
+    });
+  }
+  loadReferenceLibrary();
+}
+
 function initModelConfig() {
   loadModels();
 }
@@ -2312,6 +2452,7 @@ initAIConfig();
 initNarrationConfig();
 initPronunciationConfig();
 initModelConfig();
+initReferenceLibrary();
 const refreshBtn = document.getElementById("btn-refresh");
 const refreshModal = document.getElementById("refresh-modal");
 if (refreshBtn && refreshModal) {

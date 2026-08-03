@@ -650,3 +650,29 @@ textarea { min-height: 240px; line-height: 1.6; }
 /* Styled confirm/alert modal */
 #confirm-modal .modal-summary { white-space: pre-line; }
 #confirm-modal .btn-secondary.hidden { display: none; }
+/* Reference audio library */
+.ref-root-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.ref-root-path { font-size: 12px; color: #a9b8d8; word-break: break-all; flex: 1; min-width: 0; }
+.ref-library-list { display: flex; flex-direction: column; gap: 12px; max-height: 62vh; overflow-y: auto; padding-right: 4px; }
+.ref-char { background: rgba(15, 52, 96, 0.45); border: 1px solid #1a4a7a; border-radius: 6px; padding: 10px 12px; }
+.ref-char-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.ref-char-name { color: #8ab4f8; font-weight: 600; font-size: 14px; }
+.ref-char-dir { color: #6b84ad; font-size: 11px; word-break: break-all; }
+.ref-emotions { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.ref-emotion { background: rgba(10, 28, 54, 0.6); border: 1px solid rgba(26, 74, 122, 0.6); border-radius: 6px; padding: 8px 10px; }
+.ref-emotion-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ref-emotion-name { color: #ff6b9d; font-weight: 600; font-size: 12px; }
+.ref-emotion-status { font-size: 11px; }
+.ref-emotion-status.ok { color: #66d18c; }
+.ref-emotion-status.empty { color: #ff8a80; }
+.ref-files { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; min-height: 20px; }
+.ref-file { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; }
+.ref-file-name { color: #cbd8f0; word-break: break-all; flex: 1; min-width: 0; }
+.ref-file-name em { color: #6b84ad; font-style: normal; margin-left: 4px; }
+.ref-empty { color: #6b84ad; font-size: 11px; }
+.ref-upload-row { display: flex; justify-content: flex-end; }
+.ref-upload-row .btn-secondary { padding: 3px 10px; font-size: 11px; }
+@media (max-width: 760px) {
+  .ref-emotions { grid-template-columns: 1fr; }
+  .ref-char-head { flex-direction: column; align-items: flex-start; }
+}

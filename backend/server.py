@@ -1253,6 +1253,126 @@ def create_app(config_path="config.yaml"):
                 files.append(str(f))
         if not files:
             return None
+    AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
+
+    def _ref_audio_base(key):
+        m = models.get(key)
+        if not m:
+            return None
+        base = Path(str(m.get("ref_audio_dir") or ("reference_audio/" + key)))
+        if not base.is_absolute():
+            base = project_root / base
+        return base
+
+    def _ref_audio_target(key, emotion, name):
+        base = _ref_audio_base(key)
+        if base is None or emotion not in config["emotions"]:
+            return None
+        safe_name = Path(str(name)).name.strip()
+        safe_name = re.sub(r"[\x00-\x1f<>:\"/\\|?*]", "_", safe_name)
+        if not safe_name or Path(safe_name).suffix.lower() not in AUDIO_EXTS:
+            return None
+        return base / emotion / safe_name
+
+    @app.route("/api/reference/audio", methods=["GET"])
+    def list_reference_audio():
+        items = []
+        for key, m in models.items():
+            name = DEFAULT_MODEL_ALIASES.get(key, key)
+            base = _ref_audio_base(key)
+            if base is None:
+                continue
+            emotions = []
+            for emo in config["emotions"]:
+                d = base / emo
+                files = []
+                if d.is_dir():
+                    for f in d.iterdir():
+                        if f.is_file() and f.suffix.lower() in AUDIO_EXTS:
+                            try:
+                                size = f.stat().st_size
+                            except Exception:
+                                size = 0
+                            files.append({"name": f.name, "size": size})
+                files.sort(key=lambda x: str(x["name"]).lower())
+                emotions.append({"emotion": emo, "files": files})
+            items.append({
+                "key": key,
+                "name": name,
+                "ref_dir": base.name,
+                "ref_path": str(base),
+                "emotions": emotions,
+            })
+        return jsonify({"root": str(project_root / "reference_audio"), "items": items})
+
+    @app.route("/api/reference/audio/upload", methods=["POST"])
+    def upload_reference_audio():
+        key = str(request.form.get("key") or "").strip()
+        emotion = str(request.form.get("emotion") or "").strip()
+        f = request.files.get("file")
+        if key not in models:
+            return jsonify({"error": "角色不存在"}), 400
+        if emotion not in config["emotions"]:
+            return jsonify({"error": "情绪不存在"}), 400
+        if not f or not f.filename:
+            return jsonify({"error": "未选择文件"}), 400
+        target = _ref_audio_target(key, emotion, f.filename)
+        if target is None:
+            return jsonify({"error": "仅支持音频文件"}), 400
+        target.parent.mkdir(parents=True, exist_ok=True)
+        stem = target.stem
+        suffix = target.suffix
+        counter = 1
+        while target.exists():
+            target = target.with_name(stem + "_" + str(counter) + suffix)
+            counter += 1
+        try:
+            f.save(str(target))
+        except Exception as e:
+            return jsonify({"error": "保存失败: " + str(e)}), 500
+        record_event({
+            "type": "ref_audio_upload",
+            "message": "上传参考音频：" + key + "「" + emotion + "」",
+            "payload": {"character": key, "emotion": emotion, "file": target.name},
+        }, project_root)
+        return jsonify({"status": "ok", "name": target.name, "size": target.stat().st_size})
+
+    @app.route("/api/reference/audio/file", methods=["GET"])
+    def play_reference_audio():
+        key = request.args.get("key", "")
+        emotion = request.args.get("emotion", "")
+        name = request.args.get("name", "")
+        target = _ref_audio_target(key, emotion, name)
+        if target is None or not target.exists() or not target.is_file():
+            return jsonify({"error": "文件不存在"}), 404
+        return send_file(str(target))
+
+    @app.route("/api/reference/audio", methods=["DELETE"])
+    def delete_reference_audio():
+        data = request.get_json() or {}
+        key = str(data.get("key") or "").strip()
+        emotion = str(data.get("emotion") or "").strip()
+        name = str(data.get("name") or "").strip()
+        target = _ref_audio_target(key, emotion, name)
+        if target is None or not target.exists() or not target.is_file():
+            return jsonify({"error": "文件不存在"}), 404
+        base = _ref_audio_base(key).resolve()
+        target_res = target.resolve()
+        try:
+            target_res.relative_to(base)
+        except ValueError:
+            return jsonify({"error": "非法路径"}), 400
+        try:
+            target.unlink()
+        except Exception as e:
+            return jsonify({"error": "删除失败: " + str(e)}), 500
+        record_event({
+            "type": "ref_audio_delete",
+            "message": "删除参考音频：" + key + "「" + emotion + "」" + name,
+            "payload": {"character": key, "emotion": emotion, "file": name},
+        }, project_root)
+        return jsonify({"status": "ok"})
+
         return random.choice(files)
 
     def narration_seconds(text):

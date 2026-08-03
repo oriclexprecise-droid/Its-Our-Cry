@@ -50,7 +50,7 @@
     <div id="creator-tip" class="creator-tip"></div>
     <h1>It 's Our Cry!!!!!</h1>
     <div class="header-meta">
-      <span class="version-tag">Version 1.2.1</span>
+      <span class="version-tag">Version 1.2.2</span>
       <button id="btn-back-workbench" class="btn-secondary btn-small hidden" title="返回工作台">返回工作台</button>
       <button id="btn-undo" class="btn-secondary btn-small" disabled title="撤销 (Ctrl+Z)">撤销</button>
       <button id="btn-redo" class="btn-secondary btn-small" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
@@ -153,6 +153,7 @@
       <nav class="settings-nav">
         <button type="button" class="settings-tab active" data-settings-tab="deploy">部署</button>
         <button type="button" class="settings-tab" data-settings-tab="models">模型配置</button>
+        <button type="button" class="settings-tab" data-settings-tab="refs">语音库</button>
         <button type="button" class="settings-tab" data-settings-tab="clean">清理空间</button>
         <button type="button" class="settings-tab" data-settings-tab="log">日志</button>
         <button type="button" class="settings-tab" data-settings-tab="legal">声明</button>
@@ -275,6 +276,21 @@
           <div id="model-list" class="model-list"><div class="model-empty">加载中...</div></div>
         </div>
       </div>
+    <section class="panel settings-page" data-settings-page="refs">
+      <div class="panel-header"><h2>参考音频库</h2></div>
+      <div class="panel-body ref-body">
+        <div class="side-section">
+          <h3 class="side-section-title">语音库概览</h3>
+          <p class="side-hint">按“角色 + 情绪”管理参考音频，缺失的情绪在生成时会降级为纯字幕。上传后即可用于语音合成。</p>
+          <div class="ref-root-row">
+            <span id="ref-root-path" class="ref-root-path"></span>
+            <button id="btn-ref-open-root" class="btn-secondary btn-small">打开文件夹</button>
+          </div>
+          <span id="ref-library-status" class="status-text"></span>
+          <div id="ref-library-list" class="ref-library-list"><div class="model-empty">加载中...</div></div>
+        </div>
+      </div>
+    </section>
     </section>
     <section class="panel settings-page" data-settings-page="deploy">
       <div class="panel-header"><h2>部署</h2></div>
@@ -355,7 +371,7 @@
         <h3 class="side-section-title">数据与隐私</h3>
         <p class="legal-text">本程序仅在本地记录情绪修正等匿名日志用于改进 AI 效果，日志可随时查看、下载与重置，不会上传剧本内容和 API Key。</p>
         <h3 class="side-section-title">版本信息</h3>
-        <p class="legal-text">版本：1.2.0</p>
+        <p class="legal-text">版本：1.2.2</p>
         <p class="legal-text">开发者：ORiCale</p>
         <h3 class="side-section-title">联系与支持</h3>
         <p class="legal-text">Bilibili：<a href="https://space.bilibili.com/3493294730381924" target="_blank" rel="noopener">访问我的主页</a></p>
@@ -398,7 +414,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260807"></script>
+<script src="/static/app.js?v=20260808"></script>
 <script>
 (function () {
   var tips = [
