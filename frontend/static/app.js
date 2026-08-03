@@ -2559,6 +2559,7 @@ async function addEmotion() {
     if (statusEl) { statusEl.textContent = "已添加情绪"; statusEl.className = "status-text success"; }
     loadReferenceLibrary();
     renderLines();
+    loadEmotionParams();
   } catch (e) {
     if (statusEl) { statusEl.textContent = "添加失败: " + e.message; statusEl.className = "status-text error"; }
   }
@@ -2575,6 +2576,7 @@ async function deleteEmotion(name) {
     if (statusEl) { statusEl.textContent = "已删除情绪"; statusEl.className = "status-text success"; }
     loadReferenceLibrary();
     renderLines();
+    loadEmotionParams();
   } catch (e) {
     if (statusEl) { statusEl.textContent = "删除失败: " + e.message; statusEl.className = "status-text error"; }
   }
@@ -2591,8 +2593,118 @@ async function resetEmotions() {
     if (statusEl) { statusEl.textContent = "已恢复系统默认"; statusEl.className = "status-text success"; }
     loadReferenceLibrary();
     renderLines();
+    loadEmotionParams();
   } catch (e) {
     if (statusEl) { statusEl.textContent = "重置失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+let emotionParams = {};
+
+function initEmotionParams() {
+  const suggestBtn = document.getElementById("btn-suggest-params");
+  if (suggestBtn) suggestBtn.addEventListener("click", suggestEmotionParams);
+  const saveBtn = document.getElementById("btn-save-params");
+  if (saveBtn) saveBtn.addEventListener("click", saveEmotionParams);
+  const resetBtn = document.getElementById("btn-reset-params");
+  if (resetBtn) resetBtn.addEventListener("click", resetEmotionParams);
+  loadEmotionParams();
+}
+
+async function loadEmotionParams() {
+  const body = document.getElementById("emotion-params-body");
+  if (!body) return;
+  try {
+    const [pRes, eRes] = await Promise.all([
+      api("/api/emotion_params"),
+      api("/api/emotions"),
+    ]);
+    emotionParams = pRes.params || {};
+    state.emotions = eRes.emotions || [];
+    renderEmotionParams();
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="6" class="model-empty">加载失败: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function renderEmotionParams() {
+  const body = document.getElementById("emotion-params-body");
+  if (!body) return;
+  const list = state.emotions || [];
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="6" class="model-empty">暂无情绪</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map(e => {
+    const p = emotionParams[e] || {};
+    const f = (key) => (p[key] !== undefined && p[key] !== null && p[key] !== "" ? p[key] : "");
+    return '<tr>'
+      + '<td class="param-name">' + esc(e) + '</td>'
+      + '<td><input type="number" step="0.1" min="0.1" max="1.5" data-emotion="' + esc(e) + '" data-key="temperature" value="' + esc(f("temperature")) + '"></td>'
+      + '<td><input type="number" step="1" min="1" max="50" data-emotion="' + esc(e) + '" data-key="top_k" value="' + esc(f("top_k")) + '"></td>'
+      + '<td><input type="number" step="0.05" min="0.1" max="1" data-emotion="' + esc(e) + '" data-key="top_p" value="' + esc(f("top_p")) + '"></td>'
+      + '<td><input type="number" step="0.05" min="0.5" max="1.5" data-emotion="' + esc(e) + '" data-key="speed_factor" value="' + esc(f("speed_factor")) + '"></td>'
+      + '<td><input type="number" step="1" data-emotion="' + esc(e) + '" data-key="seed" value="' + esc(f("seed")) + '"></td>'
+      + '</tr>';
+  }).join("");
+}
+
+function collectEmotionParams() {
+  const params = {};
+  document.querySelectorAll("#emotion-params-body tr").forEach(row => {
+    const inputs = row.querySelectorAll("input[data-emotion]");
+    if (!inputs.length) return;
+    const name = inputs[0].dataset.emotion;
+    const p = {};
+    inputs.forEach(inp => {
+      const v = inp.value.trim();
+      p[inp.dataset.key] = v === "" ? "" : Number(v);
+    });
+    params[name] = p;
+  });
+  return params;
+}
+
+async function suggestEmotionParams() {
+  const statusEl = document.getElementById("emotion-params-status");
+  if (statusEl) { statusEl.textContent = "AI 正在生成参数建议..."; statusEl.className = "status-text"; }
+  try {
+    const res = await api("/api/emotion_params/suggest", { method: "POST", body: JSON.stringify({}) });
+    const params = res.params || {};
+    for (const name of Object.keys(params)) {
+      emotionParams[name] = { ...(emotionParams[name] || {}), ...params[name] };
+    }
+    renderEmotionParams();
+    if (statusEl) { statusEl.textContent = "已填入 AI 建议，确认后点“保存模板”"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "生成建议失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+async function saveEmotionParams() {
+  const statusEl = document.getElementById("emotion-params-status");
+  if (statusEl) { statusEl.textContent = "正在保存..."; statusEl.className = "status-text"; }
+  try {
+    const res = await api("/api/emotion_params", { method: "POST", body: JSON.stringify({ params: collectEmotionParams() }) });
+    emotionParams = res.params || {};
+    renderEmotionParams();
+    if (statusEl) { statusEl.textContent = "已保存情绪参数模板"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "保存失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+async function resetEmotionParams() {
+  if (!(await showConfirmModal("确定清空情绪参数模板吗？生成时将使用 SoVITS 默认参数。"))) return;
+  const statusEl = document.getElementById("emotion-params-status");
+  if (statusEl) { statusEl.textContent = "正在清空..."; statusEl.className = "status-text"; }
+  try {
+    const res = await api("/api/emotion_params", { method: "POST", body: JSON.stringify({ params: {} }) });
+    emotionParams = res.params || {};
+    renderEmotionParams();
+    if (statusEl) { statusEl.textContent = "已清空模板"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "清空失败: " + e.message; statusEl.className = "status-text error"; }
   }
 }
 
@@ -2634,6 +2746,7 @@ initNarrationConfig();
 initPronunciationConfig();
 initModelConfig();
 initEmotions();
+initEmotionParams();
 initReferenceLibrary();
 const refreshBtn = document.getElementById("btn-refresh");
 const refreshModal = document.getElementById("refresh-modal");

@@ -782,3 +782,10 @@ textarea { min-height: 240px; line-height: 1.6; }
 }
 .emotion-name-input:focus { border-color: #ff6b9d; }
 .emotion-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.emotion-params-scroll { overflow-x: auto; margin-top: 4px; }
+.emotion-params-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.emotion-params-table th, .emotion-params-table td { padding: 6px 8px; border-bottom: 1px solid #16395f; text-align: left; white-space: nowrap; }
+.emotion-params-table th { color: #7f9bc4; font-weight: 600; }
+.emotion-params-table .param-name { color: #dbe7f8; }
+.emotion-params-table input { width: 84px; padding: 6px 8px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 6px; color: #e6edf7; font-size: 13px; outline: none; }
+.emotion-params-table input:focus { border-color: #ff6b9d; }

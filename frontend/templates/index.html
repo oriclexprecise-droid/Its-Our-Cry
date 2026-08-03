@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260816">
+<link rel="stylesheet" href="/static/style.css?v=20260817">
 <style>
 .creator-tip {
   position: fixed;
@@ -303,6 +303,24 @@
             <span id="emotions-status" class="status-text"></span>
           </div>
         </div>
+        <div class="side-section">
+          <h3 class="side-section-title">情绪参数模板（SoVITS）</h3>
+          <p class="side-hint">按情绪保存 GPT-SoVITS 合成参数，生成时会自动应用到对应情绪的台词。留空表示使用 SoVITS 默认参数。</p>
+          <div class="btn-row">
+            <button type="button" id="btn-suggest-params" class="btn-secondary btn-small">AI 生成建议</button>
+            <button type="button" id="btn-save-params" class="btn-secondary btn-small btn-flex">保存模板</button>
+            <button type="button" id="btn-reset-params" class="btn-secondary btn-small">清空模板</button>
+            <span id="emotion-params-status" class="status-text"></span>
+          </div>
+          <div class="emotion-params-scroll">
+            <table class="emotion-params-table">
+              <thead>
+                <tr><th>情绪</th><th>温度</th><th>top_k</th><th>top_p</th><th>语速</th><th>seed</th></tr>
+              </thead>
+              <tbody id="emotion-params-body"><tr><td colspan="6" class="model-empty">加载中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
     <section class="panel settings-page" data-settings-page="deploy">
@@ -449,7 +467,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260816"></script>
+<script src="/static/app.js?v=20260817"></script>
 <script>
 (function () {
   var tips = [

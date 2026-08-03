@@ -22,7 +22,7 @@ import yaml
 from flask import Flask, jsonify, render_template, request, send_file
 
 from .script_parser import find_character_issues, parse_script
-from .emotion_analyzer import analyze_emotions
+from .emotion_analyzer import analyze_emotions, suggest_params
 from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt, convert_channels
 from .translator import translate_lines
@@ -266,6 +266,7 @@ def _persist_user_settings(project_root, config):
         for field, key in (("base_url", "deepseek_base_url"), ("model", "deepseek_model"), ("name", "deepseek_name")):
             settings[key] = deepseek.get(field, "")
         settings["emotions"] = list(config.get("emotions", []))
+        settings["emotion_params"] = config.get("emotion_params", {})
         settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -384,6 +385,7 @@ def create_app(config_path="config.yaml"):
         "fixed_duration": 0.0,
     })
 
+    config.setdefault("emotion_params", {})
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
     user_settings = {}
     user_settings_path = project_root / "user_settings.json"
@@ -408,6 +410,10 @@ def create_app(config_path="config.yaml"):
         custom_emotions = [str(e).strip() for e in user_settings["emotions"] if str(e).strip()]
         if custom_emotions:
             config["emotions"] = custom_emotions
+    if isinstance(user_settings.get("emotion_params"), dict):
+        config["emotion_params"] = {
+            str(k).strip(): dict(v) for k, v in user_settings["emotion_params"].items() if isinstance(v, dict)
+        }
     if "pronunciation" in user_settings and isinstance(user_settings["pronunciation"], list):
         config["pronunciation"] = [
             {"zh": str(p.get("zh", "")).strip(), "ja": str(p.get("ja", "")).strip()}
@@ -806,6 +812,73 @@ def create_app(config_path="config.yaml"):
         config["emotions"] = list(DEFAULT_EMOTIONS)
         _persist_user_settings(project_root, config)
         return jsonify({"status": "ok", "emotions": config["emotions"]})
+
+    @app.route("/api/emotion_params", methods=["GET"])
+    def get_emotion_params():
+        return jsonify({"params": config.get("emotion_params", {})})
+
+    @app.route("/api/emotion_params", methods=["POST"])
+    def save_emotion_params():
+        data = request.get_json(silent=True) or {}
+        raw = data.get("params")
+        if not isinstance(raw, dict):
+            return jsonify({"error": "参数格式错误"}), 400
+
+        def _clamp_f(v, lo, hi, default):
+            try:
+                val = float(v)
+            except (TypeError, ValueError):
+                return default
+            return max(lo, min(hi, val))
+
+        def _clamp_i(v, lo, hi, default):
+            try:
+                val = int(float(v))
+            except (TypeError, ValueError):
+                return default
+            return max(lo, min(hi, val))
+
+        cleaned = {}
+        for name, p in raw.items():
+            if not isinstance(p, dict):
+                continue
+            cleaned[str(name).strip()] = {
+                "temperature": _clamp_f(p.get("temperature"), 0.1, 1.5, 1.0),
+                "top_k": _clamp_i(p.get("top_k"), 1, 50, 15),
+                "top_p": _clamp_f(p.get("top_p"), 0.1, 1.0, 1.0),
+                "speed_factor": _clamp_f(p.get("speed_factor"), 0.5, 1.5, 1.0),
+                "seed": _clamp_i(p.get("seed"), -1, 2147483647, -1),
+            }
+        config["emotion_params"] = cleaned
+        _persist_user_settings(project_root, config)
+        return jsonify({"status": "ok", "params": cleaned})
+
+    @app.route("/api/emotion_params/suggest", methods=["POST"])
+    def suggest_emotion_params():
+        data = request.get_json(silent=True) or {}
+        api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
+        base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+        if not api_key:
+            return jsonify({"error": "请先配置 DeepSeek API Key"}), 400
+        used = []
+        for line in state.get("lines", []):
+            e = str(line.get("emotion") or "").strip()
+            if e and e not in used:
+                used.append(e)
+        if not used:
+            return jsonify({"error": "请先分析剧本，才能按台词情绪生成参数建议"}), 400
+        try:
+            suggestions = suggest_params(
+                emotions=used,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+            )
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "参数建议失败: " + str(e)}), 500
+        return jsonify({"params": suggestions, "emotions": used})
 
     @app.route("/api/models", methods=["GET"])
     def list_models():
@@ -1661,6 +1734,14 @@ def create_app(config_path="config.yaml"):
                         output_path = output_dir / f"{idx:04d}_{char}_{emotion}.wav"
 
                         tts_cfg = config["tts"]
+                        emo_params = config.get("emotion_params", {}).get(emotion) or {}
+
+                        def _param(key, default):
+                            v = emo_params.get(key)
+                            if v is None or v == "":
+                                return default
+                            return v
+
                         tts_lang = state.get("lang", "zh")
                         if tts_lang not in ("zh", "ja"):
                             tts_lang = "zh"
@@ -1679,12 +1760,12 @@ def create_app(config_path="config.yaml"):
                                 prompt_lang=_detect_prompt_lang(ref_prompt, tts_lang),
                                 text_split_method=tts_cfg.get("text_split_method", "cut5"),
                                 batch_size=tts_cfg.get("batch_size", 1),
-                                speed_factor=tts_cfg.get("speed_factor", 1.0),
+                                speed_factor=_param("speed_factor", tts_cfg.get("speed_factor", 1.0)),
                                 fragment_interval=tts_cfg.get("fragment_interval", 0.3),
-                                temperature=tts_cfg.get("temperature", 1.0),
-                                top_k=tts_cfg.get("top_k", 15),
-                                top_p=tts_cfg.get("top_p", 1.0),
-                                seed=tts_cfg.get("seed", -1),
+                                temperature=_param("temperature", tts_cfg.get("temperature", 1.0)),
+                                top_k=_param("top_k", tts_cfg.get("top_k", 15)),
+                                top_p=_param("top_p", tts_cfg.get("top_p", 1.0)),
+                                seed=_param("seed", tts_cfg.get("seed", -1)),
                             )
                         except Exception as e:
                             fail(idx, f"{char} 生成失败（仅保留字幕）：{str(e)[-300:]}")
