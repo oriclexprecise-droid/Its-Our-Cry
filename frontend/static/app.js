@@ -605,6 +605,7 @@ let recentSettings = {};
 let lastAutoVersionAt = 0;
 let lastAutoHash = "";
 let scriptSyncTimer = null;
+let lastHistoryPayload = null;
 let scriptDraftSeq = 0;
 let scriptTextUndo = [];
 let scriptTextRedo = [];
@@ -846,6 +847,7 @@ function applyScriptText(value, opts) {
     scriptTextUndo = [];
     scriptTextRedo = [];
   }
+  refreshHistoryButtons();
 }
 
 function recordScriptTextChange(value) {
@@ -1149,13 +1151,19 @@ function initRecentRecords() {
         lastScriptValue = scriptEl.value;
       }
       scheduleScriptDraft(scriptEl.value);
+      refreshHistoryButtons();
     });
     scriptEl.addEventListener("input", (e) => {
       if (e.isComposing || scriptComposing) return;
       recordScriptTextChange(scriptEl.value);
       state.script = scriptEl.value;
       scheduleScriptDraft(scriptEl.value);
+      refreshHistoryButtons();
     });
+  }
+  const scriptLangEl = document.getElementById("script-lang");
+  if (scriptLangEl) {
+    scriptLangEl.addEventListener("change", () => refreshHistory());
   }
   setInterval(maybeAutoSaveVersion, 30000);
   maybeAutoSaveVersion();
@@ -1187,9 +1195,13 @@ function updateHistoryButtons(h) {
   redoBtn.title = rc ? "重做 " + (h.redo_label || "") + " (Ctrl+Shift+Z)" : "重做 (Ctrl+Shift+Z)";
 }
 
+function refreshHistoryButtons() {
+  updateHistoryButtons(lastHistoryPayload);
+}
 async function refreshHistory() {
   try {
     const h = await api("/api/history");
+    lastHistoryPayload = h;
     updateHistoryButtons(h);
   } catch (e) {}
 }
