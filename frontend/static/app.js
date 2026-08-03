@@ -2413,6 +2413,8 @@ function openRefUploadModal(key, emotion) {
   if (fileRow) fileRow.classList.remove("hidden");
   const fileInput = document.getElementById("ref-prompt-file");
   if (fileInput) fileInput.value = "";
+  const fileNameEl = document.getElementById("ref-prompt-file-name");
+  if (fileNameEl) fileNameEl.textContent = "未选择文件";
   const textEl = document.getElementById("ref-prompt-text");
   if (textEl) textEl.value = "";
   modal.classList.remove("hidden");
@@ -2507,6 +2509,13 @@ function initReferenceLibrary() {
       } catch (e) {
         await showAlertModal("打开失败: " + e.message);
       }
+    });
+  }
+  const promptFileInput = document.getElementById("ref-prompt-file");
+  const promptFileName = document.getElementById("ref-prompt-file-name");
+  if (promptFileInput && promptFileName) {
+    promptFileInput.addEventListener("change", () => {
+      promptFileName.textContent = promptFileInput.files && promptFileInput.files[0] ? promptFileInput.files[0].name : "未选择文件";
     });
   }
   const promptOk = document.getElementById("btn-ref-prompt-ok");

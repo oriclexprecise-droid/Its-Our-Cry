@@ -698,15 +698,38 @@ textarea { min-height: 240px; line-height: 1.6; }
   .ref-char-head { flex-direction: column; align-items: flex-start; }
 }
 .ref-prompt-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
-.ref-prompt-form input[type="file"] {
-  padding: 8px 10px;
+.ref-prompt-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ref-prompt-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.ref-prompt-file-btn {
+  display: inline-block;
+  padding: 8px 16px;
   background: #0f3460;
   border: 1px solid #1a4a7a;
   border-radius: 6px;
-  color: #cbd8f0;
+  color: #e6edf7;
   font-size: 12px;
-  width: 100%;
-  box-sizing: border-box;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ref-prompt-file-btn:hover { background: #1a4a7a; }
+.ref-prompt-file-name {
+  color: #8fb3d9;
+  font-size: 12px;
+  word-break: break-all;
+  min-width: 0;
+  flex: 1;
 }
 .ref-prompt-textarea {
   min-height: 90px !important;
