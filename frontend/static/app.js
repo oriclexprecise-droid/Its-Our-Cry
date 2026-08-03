@@ -195,22 +195,31 @@ if (btnRedoEl) btnRedoEl.addEventListener("click", () => runHistory("redo"));
 
 document.addEventListener("keydown", (e) => {
   const mod = e.ctrlKey || e.metaKey;
-  if (mod && (e.key === "z" || e.key === "Z")) {
-    const el = document.activeElement;
-    const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
-    if (typing) {
-      if (!e.shiftKey) return;
-      if (historyCounts.redo > 0) {
+  const isZ = mod && (e.key === "z" || e.key === "Z");
+  const isY = mod && (e.key === "y" || e.key === "Y");
+  if (!isZ && !isY) return;
+  const el = document.activeElement;
+  const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+  if (typing) {
+    if (el.id === "script-input") {
+      if (isZ && !e.shiftKey) {
         e.preventDefault();
-        runHistory("redo");
+        localScriptUndo();
+        return;
       }
-      return;
+      if ((isZ && e.shiftKey) || isY) {
+        e.preventDefault();
+        localScriptRedo();
+        return;
+      }
     }
-    e.preventDefault();
+    return;
+  }
+  e.preventDefault();
+  if (isZ) {
     if (e.shiftKey) runHistory("redo");
     else runHistory("undo");
-  } else if (mod && (e.key === "y" || e.key === "Y")) {
-    e.preventDefault();
+  } else {
     runHistory("redo");
   }
 });
@@ -251,7 +260,7 @@ if (proofreadModalEl) {
       rawLines[idx] = old.replace(name, suggestion, 1);
       fixedChars[name] = suggestion;
     });
-    document.getElementById("script-input").value = rawLines.join("\n");
+    applyScriptText(rawLines.join("\n"), { resetHistory: true });
     if (state.lines && state.lines.length) {
       state.lines.forEach(line => {
         if (fixedChars[line.character]) line.character = fixedChars[line.character];
@@ -595,8 +604,12 @@ let recentSettings = {};
 let lastAutoVersionAt = 0;
 let lastAutoHash = "";
 let scriptSyncTimer = null;
-let scriptDirty = false;
-let historyCounts = { undo: 0, redo: 0 };
+let scriptTextUndo = [];
+let scriptTextRedo = [];
+const SCRIPT_TEXT_HISTORY_LIMIT = 300;
+let lastScriptValue = "";
+let scriptComposing = false;
+let scriptComposeStart = "";
 let toastTimer = null;
 function toast(message, kind) {
   let root = document.getElementById("toast-root");
@@ -674,8 +687,7 @@ async function confirmNewProject() {
     state.selectMode = false;
     lastAutoHash = "";
     lastAutoVersionAt = 0;
-    const scriptEl = document.getElementById("script-input");
-    if (scriptEl) scriptEl.value = "";
+    applyScriptText("", { resetHistory: true });
     const langEl = document.getElementById("script-lang");
     if (langEl) langEl.value = "zh";
     const selBtn = document.getElementById("btn-select-mode");
@@ -811,17 +823,49 @@ async function syncScriptDraft() {
   } catch (e) {}
 }
 
-async function commitScriptDraft() {
-  if (!scriptDirty) return;
-  const scriptEl = document.getElementById("script-input");
-  const text = scriptEl ? scriptEl.value : state.script || "";
-  scriptDirty = false;
-  try {
-    const res = await api("/api/script/commit", { method: "POST", body: JSON.stringify({ text }) });
-    if (res && res.history) updateHistoryButtons(res.history);
-  } catch (e) {
-    scriptDirty = true;
+function scheduleScriptDraft(text) {
+  clearTimeout(scriptSyncTimer);
+  scriptSyncTimer = setTimeout(() => {
+    api("/api/script", { method: "POST", body: JSON.stringify({ text }) }).catch(() => {});
+  }, 400);
+}
+
+function applyScriptText(value, opts) {
+  const resetHistory = !!(opts && opts.resetHistory);
+  const el = document.getElementById("script-input");
+  if (el) el.value = value;
+  state.script = value;
+  lastScriptValue = value;
+  scriptComposeStart = value;
+  scheduleScriptDraft(value);
+  if (resetHistory) {
+    scriptTextUndo = [];
+    scriptTextRedo = [];
   }
+}
+
+function recordScriptTextChange(value) {
+  if (value === lastScriptValue) return;
+  scriptTextUndo.push(lastScriptValue);
+  if (scriptTextUndo.length > SCRIPT_TEXT_HISTORY_LIMIT) scriptTextUndo.shift();
+  scriptTextRedo = [];
+  lastScriptValue = value;
+}
+
+function localScriptUndo() {
+  const el = document.getElementById("script-input");
+  if (!el || !scriptTextUndo.length) return;
+  const value = el.value;
+  scriptTextRedo.push(value);
+  applyScriptText(scriptTextUndo.pop());
+}
+
+function localScriptRedo() {
+  const el = document.getElementById("script-input");
+  if (!el || !scriptTextRedo.length) return;
+  const value = el.value;
+  scriptTextUndo.push(value);
+  applyScriptText(scriptTextRedo.pop());
 }
 
 async function saveRecentRecord() {
@@ -847,8 +891,7 @@ async function loadRecentRecord(id) {
     const s = res.state || {};
     state.lines = s.lines || [];
     state.script = s.script || "";
-    const scriptEl = document.getElementById("script-input");
-    if (scriptEl) scriptEl.value = state.script;
+    applyScriptText(state.script || "", { resetHistory: true });
     const langEl = document.getElementById("script-lang");
     if (langEl) langEl.value = s.lang || "zh";
     state.failures = s.failures || {};
@@ -978,8 +1021,7 @@ async function loadRecentVersion(recordId, versionId) {
     const s = res.state || {};
     state.lines = s.lines || [];
     state.script = s.script || "";
-    const scriptEl = document.getElementById("script-input");
-    if (scriptEl) scriptEl.value = state.script;
+    applyScriptText(state.script || "", { resetHistory: true });
     const langEl = document.getElementById("script-lang");
     if (langEl) langEl.value = s.lang || "zh";
     state.failures = s.failures || {};
@@ -1081,12 +1123,28 @@ function initRecentRecords() {
     });
   }
   const scriptEl = document.getElementById("script-input");
-  if (scriptEl) scriptEl.addEventListener("input", () => {
-    state.script = scriptEl.value;
-    scriptDirty = true;
-    clearTimeout(scriptSyncTimer);
-    scriptSyncTimer = setTimeout(() => commitScriptDraft(), 800);
-  });
+  if (scriptEl) {
+    scriptEl.addEventListener("compositionstart", () => {
+      scriptComposing = true;
+      scriptComposeStart = scriptEl.value;
+    });
+    scriptEl.addEventListener("compositionend", () => {
+      scriptComposing = false;
+      if (scriptEl.value !== scriptComposeStart) {
+        scriptTextUndo.push(scriptComposeStart);
+        if (scriptTextUndo.length > SCRIPT_TEXT_HISTORY_LIMIT) scriptTextUndo.shift();
+        scriptTextRedo = [];
+        lastScriptValue = scriptEl.value;
+      }
+      scheduleScriptDraft(scriptEl.value);
+    });
+    scriptEl.addEventListener("input", (e) => {
+      if (e.isComposing || scriptComposing) return;
+      recordScriptTextChange(scriptEl.value);
+      state.script = scriptEl.value;
+      scheduleScriptDraft(scriptEl.value);
+    });
+  }
   setInterval(maybeAutoSaveVersion, 30000);
   maybeAutoSaveVersion();
   const recentBtn = document.getElementById("btn-recent");
@@ -1111,8 +1169,6 @@ function updateHistoryButtons(h) {
   if (!undoBtn || !redoBtn) return;
   const uc = h ? h.undo_count : 0;
   const rc = h ? h.redo_count : 0;
-  historyCounts.undo = uc;
-  historyCounts.redo = rc;
   undoBtn.disabled = uc === 0;
   redoBtn.disabled = rc === 0;
   undoBtn.title = uc ? "撤销 " + (h.undo_label || "") + " (Ctrl+Z)" : "撤销 (Ctrl+Z)";
@@ -1128,15 +1184,12 @@ async function refreshHistory() {
 
 async function runHistory(dir) {
   if (state.generating) { toast("生成中，请稍后再撤销/重做", "error"); return; }
-  await commitScriptDraft();
   try {
     const res = await api("/api/" + dir, { method: "POST" });
     const s = res.state || {};
     state.lines = s.lines || [];
     state.script = s.script || "";
-    const scriptEl = document.getElementById("script-input");
-    if (scriptEl) scriptEl.value = state.script;
-    scriptDirty = false;
+    applyScriptText(state.script || "", { resetHistory: true });
     state.failures = s.failures || {};
     state.hasGenerated = Object.keys(s.generated || {}).length > 0;
     state.selected = new Set();
