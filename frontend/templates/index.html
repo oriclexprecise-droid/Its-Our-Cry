@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260823">
+<link rel="stylesheet" href="/static/style.css?v=20260824">
 <style>
 .creator-tip {
   position: fixed;
@@ -52,25 +52,44 @@
     <div class="header-meta">
       <span class="version-tag">Version 1.2.5</span>
       <button id="btn-back-workbench" class="btn-secondary btn-small hidden" title="返回工作台">返回工作台</button>
-      <button id="btn-undo" class="btn-secondary btn-small" disabled title="撤销 (Ctrl+Z)">撤销</button>
-      <button id="btn-redo" class="btn-secondary btn-small" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
-      <button id="btn-refresh" class="btn-secondary btn-small" title="刷新界面">刷新</button>
+      <button id="btn-undo" class="btn-secondary btn-small hidden" disabled title="撤销 (Ctrl+Z)">撤销</button>
+      <button id="btn-redo" class="btn-secondary btn-small hidden" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
+      <button id="btn-refresh" class="btn-secondary btn-small hidden" title="刷新界面">刷新</button>
     </div>
   </header>
-  <button type="button" id="btn-settings" class="settings-float" title="打开设置">
+  <div id="view-projects">
+    <div class="project-picker">
+      <h2 class="project-picker-title">选择项目</h2>
+      <p class="project-picker-sub">从这里开始你的配音工作台</p>
+      <div class="project-picker-cards">
+        <button type="button" id="btn-new-project" class="project-card project-card-new">
+          <span class="project-card-icon">＋</span>
+          <span class="project-card-title">新建项目</span>
+          <span class="project-card-desc">从空白工作台开始创作</span>
+        </button>
+        <button type="button" id="btn-open-projects" class="project-card project-card-open">
+          <span class="project-card-icon">≡</span>
+          <span class="project-card-title">往期项目</span>
+          <span class="project-card-desc">打开之前保存的项目继续制作</span>
+        </button>
+      </div>
+    </div>
+  </div>
+  <button type="button" id="btn-settings" class="settings-float hidden" title="打开设置">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
     设置
   </button>
-  <button type="button" id="btn-recent" class="recent-float" title="近期记录">
-    近期记录
+  <button type="button" id="btn-recent" class="recent-float hidden" title="版本历史">
+    版本历史
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
   </button>
   <div id="recent-dropdown" class="recent-dropdown hidden">
     <div class="recent-dropdown-head">
-      <span class="recent-dropdown-title">近期记录</span>
-      <button id="btn-save-record" class="btn-secondary btn-small" title="把当前工作台保存为草稿新版本（手动）">保存草稿</button>
+      <span class="recent-dropdown-title">版本历史</span>
+      <button id="btn-save-record" class="btn-secondary btn-small" title="把当前工作台保存为小版本（手动）">保存版本</button>
     </div>
-    <div id="recent-list" class="recent-list"><div class="recent-empty">暂无近期记录</div></div>
+    <div id="recent-project-title" class="recent-project-title"></div>
+    <div id="recent-list" class="recent-list"><div class="recent-empty">暂无小版本</div></div>
     <span id="recent-status" class="status-text"></span>
   </div>
 
@@ -78,7 +97,7 @@
     <span>还没配置 GPT-SoVITS，配音前需要先完成部署</span>
     <button type="button" id="btn-go-deploy" class="btn-secondary btn-small">去部署</button>
   </div>
-  <div id="view-workbench">
+<div id="view-workbench" class="hidden">
   <main>
     <section id="step-input" class="panel">
       <div class="panel-header"><h2>1. 输入剧本</h2></div>
@@ -226,24 +245,24 @@
           <span id="narration-config-status" class="status-text"></span>
         </div>
         <div class="side-section">
-          <h3 class="side-section-title">近期记录</h3>
-          <label class="recent-option"><input type="checkbox" id="recent-auto-save"> 生成完成后自动保存记录</label>
-          <label class="recent-option"><input type="checkbox" id="recent-version-auto"> 启用自动保存版本</label>
+          <h3 class="side-section-title">项目与版本</h3>
+          <label class="recent-option"><input type="checkbox" id="recent-auto-save"> 生成完成后自动保存项目</label>
+          <label class="recent-option"><input type="checkbox" id="recent-version-auto"> 启用自动保存小版本</label>
           <div class="api-field">
             <label for="recent-interval">自动保存间隔（分钟，1-120）</label>
             <input type="number" id="recent-interval" min="1" max="120" step="1" value="5">
           </div>
           <div class="api-field">
-            <label for="recent-limit">最多保留记录数（10-500）</label>
+            <label for="recent-limit">最多保留项目数（10-500）</label>
             <input type="number" id="recent-limit" min="10" max="500" step="1" value="50">
           </div>
           <div class="api-field">
-            <label for="recent-version-limit">每个草稿最多保留版本数（5-200）</label>
+            <label for="recent-version-limit">每个项目最多保留小版本数（5-200）</label>
             <input type="number" id="recent-version-limit" min="5" max="200" step="1" value="50">
           </div>
           <div class="btn-row">
-            <button type="button" id="btn-save-recent-settings" class="btn-secondary btn-small btn-flex">保存记录设置</button>
-            <button type="button" id="btn-clear-recent" class="btn-secondary btn-small">清空全部记录</button>
+            <button type="button" id="btn-save-recent-settings" class="btn-secondary btn-small btn-flex">保存版本设置</button>
+            <button type="button" id="btn-clear-recent" class="btn-secondary btn-small">清空全部项目</button>
           </div>
           <span id="recent-settings-status" class="status-text"></span>
         </div>
@@ -479,6 +498,16 @@
     </div>
   </div>
 </div>
+<div id="projects-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3>往期项目</h3>
+    <div id="projects-list" class="projects-list"><div class="recent-empty">加载中...</div></div>
+    <span id="projects-status" class="status-text"></span>
+    <div class="modal-actions">
+      <button id="btn-projects-close" class="btn-secondary">关闭</button>
+    </div>
+  </div>
+</div>
 <div id="confirm-modal" class="modal-overlay hidden">
   <div class="modal-box">
     <h3 id="confirm-modal-title">确认操作</h3>
@@ -489,7 +518,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260823"></script>
+<script src="/static/app.js?v=20260824"></script>
 <script>
 (function () {
   var tips = [

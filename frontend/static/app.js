@@ -584,13 +584,130 @@ let recentSettings = {};
 let lastAutoVersionAt = 0;
 let lastAutoHash = "";
 let scriptSyncTimer = null;
+let toastTimer = null;
+function toast(message, kind) {
+  let root = document.getElementById("toast-root");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "toast-root";
+    document.body.appendChild(root);
+  }
+  const el = document.createElement("div");
+  el.className = "toast" + (kind === "error" ? " toast-error" : kind === "success" ? " toast-success" : "");
+  el.textContent = message;
+  root.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  setTimeout(() => {
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 300);
+  }, 3200);
+}
 
-async function refreshRecentList() {
-  const listEl = document.getElementById("recent-list");
-  if (!listEl) return;
+function showProjectPicker() {
+  const projects = document.getElementById("view-projects");
+  const workbench = document.getElementById("view-workbench");
+  const settings = document.getElementById("view-settings");
+  const dropdown = document.getElementById("recent-dropdown");
+  if (dropdown) dropdown.classList.add("hidden");
+  if (projects) projects.classList.remove("hidden");
+  if (workbench) workbench.classList.add("hidden");
+  if (settings) settings.classList.add("hidden");
+  ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-settings", "btn-recent"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  });
+  const banner = document.getElementById("deploy-banner");
+  if (banner) banner.classList.add("hidden");
+}
+
+async function createNewProject() {
+  if (state.generating) { toast("生成中，请稍后再新建项目", "error"); return; }
+  try {
+    await api("/api/recent/new", { method: "POST" });
+    state.lines = [];
+    state.script = "";
+    state.failures = {};
+    state.hasGenerated = false;
+    state.selected = new Set();
+    state.selectMode = false;
+    lastAutoHash = "";
+    lastAutoVersionAt = 0;
+    const scriptEl = document.getElementById("script-input");
+    if (scriptEl) scriptEl.value = "";
+    const langEl = document.getElementById("script-lang");
+    if (langEl) langEl.value = "zh";
+    const selBtn = document.getElementById("btn-select-mode");
+    if (selBtn) { selBtn.textContent = "选择模式"; selBtn.classList.remove("active"); }
+    const selBar = document.getElementById("selection-toolbar");
+    if (selBar) selBar.classList.add("hidden");
+    const review = document.getElementById("step-review");
+    if (review) review.classList.add("hidden");
+    const download = document.getElementById("step-download");
+    if (download) download.classList.add("hidden");
+    const genBtn = document.getElementById("btn-generate");
+    if (genBtn) genBtn.textContent = "生成全部语音";
+    renderLines();
+    refreshGenerated({ generated_indices: [], failures: {} });
+    refreshHistory();
+    refreshRecentList();
+    showWorkbench();
+    toast("已新建项目，撤销/重做已重置");
+  } catch (e) {
+    toast("新建项目失败: " + e.message, "error");
+  }
+}
+
+function closeProjectsModal() {
+  const modal = document.getElementById("projects-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function openProjectsModal() {
+  const modal = document.getElementById("projects-modal");
+  const list = document.getElementById("projects-list");
+  const status = document.getElementById("projects-status");
+  if (!modal || !list) return;
+  modal.classList.remove("hidden");
+  list.innerHTML = '<div class="recent-empty">加载中...</div>';
+  if (status) status.textContent = "";
   try {
     const data = await api("/api/recent");
     const records = data.records || [];
+    if (!records.length) {
+      list.innerHTML = '<div class="recent-empty">暂无往期项目</div>';
+      return;
+    }
+    list.innerHTML = records.map(r => {
+      const first = r.first_line ? '<div class="recent-preview" title="' + esc(r.first_line) + '">' + esc(r.first_line) + '</div>' : "";
+      const meta = (r.line_count ? r.line_count + " 条" : "仅剧本") + " · " + r.voice_count + " 条语音" + (r.fail_count > 0 ? " · 仅字幕 " + r.fail_count + " 条" : "") + " · " + (r.version_count || 0) + " 个小版本";
+      return '<div class="project-item">'
+        + '<div class="project-item-main">'
+        + '<div class="project-item-head"><span class="project-item-time">' + esc(r.saved_at || "") + '</span><span class="recent-badge">' + (r.source === "manual" ? "手动" : "自动") + " · " + (r.lang === "ja" ? "日语" : "中文") + "</span></div>"
+        + first
+        + '<div class="recent-meta">' + esc(meta) + "</div>"
+        + '</div>'
+        + '<div class="project-item-actions">'
+        + '<button type="button" class="btn-line-action btn-project-load" data-id="' + esc(r.id) + '">载入</button>'
+        + (r.last_folder ? '<button type="button" class="btn-line-action btn-project-open" data-id="' + esc(r.id) + '">打开文件夹</button>' : "")
+        + '<button type="button" class="btn-line-action btn-project-del" data-id="' + esc(r.id) + '">删除</button>'
+        + '</div>'
+        + '</div>';
+    }).join("");
+    list.querySelectorAll(".btn-project-load").forEach(btn => btn.addEventListener("click", () => loadRecentRecord(btn.dataset.id)));
+    list.querySelectorAll(".btn-project-open").forEach(btn => btn.addEventListener("click", () => openRecentFolder(btn.dataset.id)));
+    list.querySelectorAll(".btn-project-del").forEach(btn => btn.addEventListener("click", () => deleteRecentRecord(btn.dataset.id)));
+  } catch (e) {
+    list.innerHTML = '<div class="recent-empty">加载失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+
+async function refreshRecentList() {
+  const listEl = document.getElementById("recent-list");
+  const titleEl = document.getElementById("recent-project-title");
+  if (!listEl) return;
+  try {
+    const data = await api("/api/recent");
     const settings = data.settings || {};
     recentSettings = settings;
     const autoEl = document.getElementById("recent-auto-save");
@@ -603,44 +720,31 @@ async function refreshRecentList() {
     if (vAutoEl) vAutoEl.checked = !!settings.version_auto_save;
     if (intervalEl) intervalEl.value = settings.auto_save_interval || 5;
     if (versionLimitEl) versionLimitEl.value = settings.version_limit || 50;
-    if (!records.length) {
-      listEl.innerHTML = '<div class="recent-empty">暂无近期记录</div>';
+    const cur = await api("/api/recent/current");
+    const record = cur.record;
+    if (titleEl) {
+      titleEl.textContent = record ? ("当前项目：" + (record.first_line || "未命名项目")) : "当前项目：未命名";
+    }
+    const versions = (record && record.versions) || [];
+    if (!versions.length) {
+      listEl.innerHTML = '<div class="recent-empty">暂无小版本，保存后会生成第一个版本</div>';
       return;
     }
-    listEl.innerHTML = records.map(r => {
-      const first = r.first_line ? '<div class="recent-preview" title="' + esc(r.first_line) + '">' + esc(r.first_line) + '</div>' : "";
-      const meta = (r.line_count ? r.line_count + " 条" : "仅剧本") + " · " + r.voice_count + " 条语音" + (r.fail_count > 0 ? " · 仅字幕 " + r.fail_count + " 条" : "") + (r.export_count > 0 ? " · 已导出 " + r.export_count + " 次" : "");
-      const versions = r.versions || [];
-      const versionBtn = versions.length
-        ? '<button type="button" class="btn-line-action btn-recent-versions" data-id="' + esc(r.id) + '">版本 ' + versions.length + '</button>'
-        : "";
-      const versionPanel = versions.length
-        ? '<div class="recent-versions-panel hidden" id="versions-panel-' + esc(r.id) + '">'
-          + versions.map(v => '<div class="recent-version-row"><span class="recent-version-time">' + esc(v.saved_at || "") + '</span><span class="recent-badge">' + (v.source === "manual" ? "手动" : "自动") + '</span><button type="button" class="btn-line-action btn-version-load" data-id="' + esc(r.id) + '" data-vid="' + esc(v.id) + '">载入</button><button type="button" class="btn-line-action btn-version-del" data-id="' + esc(r.id) + '" data-vid="' + esc(v.id) + '">删除</button></div>').join("")
-          + '</div>'
-        : "";
-      return '<div class="recent-item">'
-        + '<div class="recent-item-main">'
-        + '<div class="recent-item-head"><span class="recent-time">' + esc(r.saved_at || "") + '</span><span class="recent-badge">' + (r.source === "manual" ? "手动" : "自动") + " · " + (r.lang === "ja" ? "日语" : "中文") + "</span></div>"
-        + first
-        + '<div class="recent-meta">' + esc(meta) + "</div>"
-        + versionPanel
-        + '</div>'
-        + '<div class="recent-actions">'
-        + '<button type="button" class="btn-line-action btn-recent-load" data-id="' + esc(r.id) + '">载入</button>'
-        + (r.last_folder ? '<button type="button" class="btn-line-action btn-recent-open" data-id="' + esc(r.id) + '">打开文件夹</button>' : "")
-        + versionBtn
-        + '<button type="button" class="btn-line-action btn-recent-del" data-id="' + esc(r.id) + '">删除</button>'
+    listEl.innerHTML = versions.map(v => {
+      return '<div class="recent-item recent-version-item">'
+        + '<div class="recent-version-row">'
+        + '<span class="recent-version-time">' + esc(v.saved_at || "") + '</span>'
+        + '<span class="recent-badge">' + (v.source === "manual" ? "手动" : "自动") + '</span>'
+        + '<button type="button" class="btn-line-action btn-version-load" data-id="' + esc(record.id) + '" data-vid="' + esc(v.id) + '">载入</button>'
+        + '<button type="button" class="btn-line-action btn-version-del" data-id="' + esc(record.id) + '" data-vid="' + esc(v.id) + '">删除</button>'
         + '</div>'
         + '</div>';
     }).join("");
-    listEl.querySelectorAll(".btn-recent-load").forEach(btn => btn.addEventListener("click", () => loadRecentRecord(btn.dataset.id)));
-    listEl.querySelectorAll(".btn-recent-open").forEach(btn => btn.addEventListener("click", () => openRecentFolder(btn.dataset.id)));
-    listEl.querySelectorAll(".btn-recent-del").forEach(btn => btn.addEventListener("click", () => deleteRecentRecord(btn.dataset.id)));
-    listEl.querySelectorAll(".btn-recent-versions").forEach(btn => btn.addEventListener("click", () => toggleRecentVersions(btn.dataset.id)));
     listEl.querySelectorAll(".btn-version-load").forEach(btn => btn.addEventListener("click", () => loadRecentVersion(btn.dataset.id, btn.dataset.vid)));
     listEl.querySelectorAll(".btn-version-del").forEach(btn => btn.addEventListener("click", () => deleteRecentVersion(btn.dataset.id, btn.dataset.vid)));
-  } catch (e) {}
+  } catch (e) {
+    listEl.innerHTML = '<div class="recent-empty">加载失败: ' + esc(e.message) + '</div>';
+  }
 }
 
 function setRecentStatus(msg, kind) {
@@ -660,13 +764,13 @@ async function syncScriptDraft() {
 }
 
 async function saveRecentRecord() {
-  if (state.generating) { setRecentStatus("生成中，请稍后再保存记录", "error"); return; }
+  if (state.generating) { setRecentStatus("生成中，请稍后再保存版本", "error"); return; }
   await syncScriptDraft();
   if (!state.lines.length && !(state.script || "").trim()) { setRecentStatus("还没有可保存的剧本", "error"); return; }
   setRecentStatus("正在保存...", "");
   try {
     await api("/api/recent/save", { method: "POST" });
-    setRecentStatus("已保存手动版本", "success");
+    setRecentStatus("已保存小版本（手动）", "success");
     refreshRecentList();
   } catch (e) {
     setRecentStatus("保存失败: " + e.message, "error");
@@ -674,9 +778,9 @@ async function saveRecentRecord() {
 }
 
 async function loadRecentRecord(id) {
-  if (state.generating) { setRecentStatus("生成中，请稍后再载入记录", "error"); return; }
-  if (state.lines.length && !(await showConfirmModal("载入草稿会覆盖当前工作台（可以用撤销恢复），确定继续吗？"))) return;
-  setRecentStatus("正在载入...", "");
+  if (state.generating) { setRecentStatus("生成中，请稍后再载入项目", "error"); return; }
+  if ((state.lines.length || (state.script || "").trim()) && !(await showConfirmModal("载入项目会覆盖当前工作台，且撤销/重做将重置，确定继续吗？"))) return;
+  setRecentStatus("正在载入项目...", "");
   try {
     const res = await api("/api/recent/" + id + "/load", { method: "POST" });
     const s = res.state || {};
@@ -684,6 +788,8 @@ async function loadRecentRecord(id) {
     state.script = s.script || "";
     const scriptEl = document.getElementById("script-input");
     if (scriptEl) scriptEl.value = state.script;
+    const langEl = document.getElementById("script-lang");
+    if (langEl) langEl.value = s.lang || "zh";
     state.failures = s.failures || {};
     state.hasGenerated = Object.keys(s.generated || {}).length > 0;
     state.selected = new Set();
@@ -702,8 +808,11 @@ async function loadRecentRecord(id) {
     const genBtn = document.getElementById("btn-generate");
     if (genBtn) genBtn.textContent = state.hasGenerated ? "重新生成" : "生成全部语音";
     updateHistoryButtons(res.history);
-    setRecentStatus("已载入草稿" + (res.record && res.record.saved_at ? "：" + res.record.saved_at : ""), "success");
+    closeProjectsModal();
+    showWorkbench();
+    setRecentStatus("已载入项目" + (res.record && res.record.saved_at ? "：" + res.record.saved_at : ""), "success");
     refreshRecentList();
+    toast("已载入项目，撤销/重做已重置");
   } catch (e) {
     setRecentStatus("载入失败: " + e.message, "error");
   }
@@ -722,22 +831,24 @@ async function openRecentFolder(id) {
 }
 
 async function deleteRecentRecord(id) {
-  if (!(await showConfirmModal("确定删除这条近期记录？"))) return;
+  if (!(await showConfirmModal("确定删除这个项目？此操作不可恢复。"))) return;
   try {
     await api("/api/recent/" + id, { method: "DELETE" });
-    setRecentStatus("已删除记录", "success");
+    setRecentStatus("已删除项目", "success");
     refreshRecentList();
+    const projectsModal = document.getElementById("projects-modal");
+    if (projectsModal && !projectsModal.classList.contains("hidden")) openProjectsModal();
   } catch (e) {
     setRecentStatus("删除失败: " + e.message, "error");
   }
 }
 
 async function clearRecentRecords() {
-  if (!(await showConfirmModal("确定清空全部近期记录？此操作不可恢复。"))) return;
+  if (!(await showConfirmModal("确定清空全部项目？此操作不可恢复。"))) return;
   const status = document.getElementById("recent-settings-status");
   try {
     await api("/api/recent/clear", { method: "POST" });
-    if (status) { status.textContent = "已清空全部记录"; status.className = "status-text success"; }
+    if (status) { status.textContent = "已清空全部项目"; status.className = "status-text success"; }
     refreshRecentList();
   } catch (e) {
     if (status) { status.textContent = "清空失败: " + e.message; status.className = "status-text error"; }
@@ -750,7 +861,7 @@ async function saveRecentSettings() {
   if (!status || !limitEl) return;
   const limitRaw = parseInt(limitEl.value, 10);
   if (isNaN(limitRaw) || limitRaw < 10 || limitRaw > 500) {
-    status.textContent = "记录上限请输入 10-500 的数字";
+    status.textContent = "项目上限请输入 10-500 的数字";
     status.className = "status-text error";
     return;
   }
@@ -772,7 +883,7 @@ async function saveRecentSettings() {
     status.className = "status-text error";
     return;
   }
-  status.textContent = "正在保存记录设置...";
+  status.textContent = "正在保存版本设置...";
   status.className = "status-text";
   try {
     const res = await api("/api/recent/settings", { method: "POST", body: JSON.stringify({ limit: limitRaw, auto_save: auto, version_auto_save: vAuto, auto_save_interval: intervalRaw, version_limit: versionLimitRaw }) });
@@ -783,7 +894,7 @@ async function saveRecentSettings() {
     if (versionLimitEl) versionLimitEl.value = res.settings.version_limit;
     recentSettings = res.settings || recentSettings;
     lastAutoVersionAt = 0;
-    status.textContent = "记录设置已保存";
+    status.textContent = "版本设置已保存";
     status.className = "status-text success";
     refreshRecentList();
   } catch (e) {
@@ -799,7 +910,7 @@ function toggleRecentVersions(id) {
 
 async function loadRecentVersion(recordId, versionId) {
   if (state.generating) { setRecentStatus("生成中，请稍后再载入版本", "error"); return; }
-  if ((state.lines.length || (state.script || "").trim()) && !(await showConfirmModal("载入版本会覆盖当前工作台（可以用撤销恢复），确定继续吗？"))) return;
+  if ((state.lines.length || (state.script || "").trim()) && !(await showConfirmModal("载入版本会覆盖当前工作台，且撤销/重做将重置，确定继续吗？"))) return;
   setRecentStatus("正在载入版本...", "");
   try {
     const res = await api("/api/recent/" + recordId + "/versions/" + versionId + "/load", { method: "POST" });
@@ -808,6 +919,8 @@ async function loadRecentVersion(recordId, versionId) {
     state.script = s.script || "";
     const scriptEl = document.getElementById("script-input");
     if (scriptEl) scriptEl.value = state.script;
+    const langEl = document.getElementById("script-lang");
+    if (langEl) langEl.value = s.lang || "zh";
     state.failures = s.failures || {};
     state.hasGenerated = Object.keys(s.generated || {}).length > 0;
     state.selected = new Set();
@@ -828,6 +941,7 @@ async function loadRecentVersion(recordId, versionId) {
     updateHistoryButtons(res.history);
     setRecentStatus("已载入版本" + (res.version && res.version.saved_at ? "：" + res.version.saved_at : ""), "success");
     refreshRecentList();
+    toast("已载入版本，撤销/重做已重置");
   } catch (e) {
     setRecentStatus("载入失败: " + e.message, "error");
   }
@@ -877,6 +991,18 @@ function initRecentRecords() {
   if (saveSettingsBtn) saveSettingsBtn.addEventListener("click", saveRecentSettings);
   const clearBtn = document.getElementById("btn-clear-recent");
   if (clearBtn) clearBtn.addEventListener("click", clearRecentRecords);
+  const newBtn = document.getElementById("btn-new-project");
+  if (newBtn) newBtn.addEventListener("click", createNewProject);
+  const openBtn = document.getElementById("btn-open-projects");
+  if (openBtn) openBtn.addEventListener("click", openProjectsModal);
+  const closeBtn = document.getElementById("btn-projects-close");
+  if (closeBtn) closeBtn.addEventListener("click", closeProjectsModal);
+  const projectsModal = document.getElementById("projects-modal");
+  if (projectsModal) {
+    projectsModal.addEventListener("click", (e) => {
+      if (e.target === projectsModal) closeProjectsModal();
+    });
+  }
   const scriptEl = document.getElementById("script-input");
   if (scriptEl) scriptEl.addEventListener("input", () => {
     state.script = scriptEl.value;
@@ -1980,6 +2106,7 @@ function initSplash() {
     closed = true;
     overlay.classList.add("fade-out");
     setTimeout(() => overlay.classList.add("hidden"), 500);
+    showProjectPicker();
   };
   if (skip) skip.addEventListener("click", close);
   video.addEventListener("ended", close);
@@ -2018,7 +2145,9 @@ function openSettingsTab(tab) {
 function showSettings(tab) {
   const workbench = document.getElementById("view-workbench");
   const settings = document.getElementById("view-settings");
+  const projects = document.getElementById("view-projects");
   if (!workbench || !settings) return;
+  if (projects) projects.classList.add("hidden");
   const recentDropdown = document.getElementById("recent-dropdown");
   if (recentDropdown) recentDropdown.classList.add("hidden");
   const recentBtn = document.getElementById("btn-recent");
@@ -2038,13 +2167,17 @@ function showSettings(tab) {
 function showWorkbench() {
   const workbench = document.getElementById("view-workbench");
   const settings = document.getElementById("view-settings");
+  const projects = document.getElementById("view-projects");
   if (!workbench || !settings) return;
+  if (projects) projects.classList.add("hidden");
   workbench.classList.remove("hidden");
   settings.classList.add("hidden");
   document.getElementById("btn-back-workbench").classList.add("hidden");
-  document.getElementById("btn-settings").classList.remove("hidden");
-  const recentBtn = document.getElementById("btn-recent");
-  if (recentBtn) recentBtn.classList.remove("hidden");
+  ["btn-undo", "btn-redo", "btn-refresh", "btn-settings", "btn-recent"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove("hidden");
+  });
+  updateDeployBanner();
 }
 
 function initSettingsNav() {
@@ -3022,3 +3155,4 @@ if (refreshBtn && refreshModal) {
     if (e.target === refreshModal) refreshModal.classList.add("hidden");
   });
 }
+showProjectPicker();

@@ -2103,6 +2103,39 @@ def create_app(config_path="config.yaml"):
             "settings": dict(recent_settings),
         })
 
+    @app.route("/api/recent/current", methods=["GET"])
+    def get_current_recent():
+        records = load_recent_records()
+        record_id = state.get("current_record_id")
+        record = None
+        if record_id:
+            for r in records:
+                if r.get("id") == record_id:
+                    record = r
+                    break
+        return jsonify({"record": recent_summary(record) if record else None})
+
+    @app.route("/api/recent/new", methods=["POST"])
+    def new_recent_project():
+        if state.get("generating"):
+            return jsonify({"error": "生成中，请稍后再新建项目"}), 409
+        state["current_record_id"] = None
+        state["lang"] = "zh"
+        state["script"] = ""
+        state["lines"] = []
+        state["emotions"] = []
+        state["generated"] = {}
+        state["failures"] = {}
+        state["merged_path"] = None
+        state["srt_path"] = None
+        state["time_info"] = []
+        state["history_undo"] = []
+        state["history_redo"] = []
+        state["progress"] = {"current": 0, "total": 0}
+        state["srt_only"] = False
+        state["analysis_cancel_seq"] = state.get("analysis_seq", 0)
+        return jsonify({"status": "ok"})
+
     @app.route("/api/script", methods=["POST"])
     def save_script_draft():
         data = request.get_json(silent=True) or {}
@@ -2149,7 +2182,8 @@ def create_app(config_path="config.yaml"):
         version = next((v for v in (record.get("versions") or []) if v.get("id") == version_id), None)
         if version is None:
             return jsonify({"error": "版本不存在"}), 404
-        push_history("载入版本")
+        state["history_undo"] = []
+        state["history_redo"] = []
         restore_workbench_from_version(record, version)
         record_event(
             {"type": "recent_load", "message": "载入版本：" + str(version.get("saved_at")), "payload": {"id": record_id, "version": version_id, "line_count": len(state["lines"])}},
@@ -2200,7 +2234,8 @@ def create_app(config_path="config.yaml"):
                 break
         if record is None:
             return jsonify({"error": "记录不存在"}), 404
-        push_history("载入近期记录")
+        state["history_undo"] = []
+        state["history_redo"] = []
         restore_workbench_from_record(record)
         record_event(
             {"type": "recent_load", "message": "载入近期记录：" + str(record.get("saved_at")), "payload": {"id": record_id, "line_count": len(state["lines"])}},
