@@ -1895,7 +1895,14 @@ function showWorkbench() {
 }
 
 function initSettingsNav() {
-  document.getElementById("btn-settings").addEventListener("click", () => showSettings(null));
+  document.getElementById("btn-settings").addEventListener("click", () => {
+    const settingsView = document.getElementById("view-settings");
+    if (settingsView && !settingsView.classList.contains("hidden")) {
+      showWorkbench();
+    } else {
+      showSettings(null);
+    }
+  });
   document.getElementById("btn-back-workbench").addEventListener("click", showWorkbench);
   document.querySelectorAll(".settings-tab").forEach(btn => {
     btn.addEventListener("click", () => showSettings(btn.dataset.settingsTab));
