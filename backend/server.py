@@ -2187,6 +2187,15 @@ def create_app(config_path="config.yaml"):
         state["script"] = str(data.get("text") or "")
         return jsonify({"status": "ok"})
 
+    @app.route("/api/script/commit", methods=["POST"])
+    def commit_script_draft():
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text") or "")
+        if text != state.get("script", ""):
+            push_history("修改剧本")
+            state["script"] = text
+        return jsonify({"status": "ok", "history": history_payload()})
+
     @app.route("/api/recent/save", methods=["POST"])
     def save_recent_record():
         if state.get("generating"):

@@ -584,6 +584,7 @@ let recentSettings = {};
 let lastAutoVersionAt = 0;
 let lastAutoHash = "";
 let scriptSyncTimer = null;
+let scriptDirty = false;
 let toastTimer = null;
 function toast(message, kind) {
   let root = document.getElementById("toast-root");
@@ -796,6 +797,19 @@ async function syncScriptDraft() {
   try {
     await api("/api/script", { method: "POST", body: JSON.stringify({ text }) });
   } catch (e) {}
+}
+
+async function commitScriptDraft() {
+  if (!scriptDirty) return;
+  const scriptEl = document.getElementById("script-input");
+  const text = scriptEl ? scriptEl.value : state.script || "";
+  scriptDirty = false;
+  try {
+    const res = await api("/api/script/commit", { method: "POST", body: JSON.stringify({ text }) });
+    if (res && res.history) updateHistoryButtons(res.history);
+  } catch (e) {
+    scriptDirty = true;
+  }
 }
 
 async function saveRecentRecord() {
@@ -1057,10 +1071,9 @@ function initRecentRecords() {
   const scriptEl = document.getElementById("script-input");
   if (scriptEl) scriptEl.addEventListener("input", () => {
     state.script = scriptEl.value;
+    scriptDirty = true;
     clearTimeout(scriptSyncTimer);
-    scriptSyncTimer = setTimeout(() => {
-      api("/api/script", { method: "POST", body: JSON.stringify({ text: scriptEl.value }) }).catch(() => {});
-    }, 800);
+    scriptSyncTimer = setTimeout(() => commitScriptDraft(), 800);
   });
   setInterval(maybeAutoSaveVersion, 30000);
   maybeAutoSaveVersion();
@@ -1100,13 +1113,8 @@ async function refreshHistory() {
 }
 
 async function runHistory(dir) {
-  if (state.generating) return;
-  const status = document.getElementById("progress-text");
-  if (status) {
-    status.classList.remove("hidden");
-    status.textContent = dir === "undo" ? "正在撤销..." : "正在重做...";
-    status.className = "status-text";
-  }
+  if (state.generating) { toast("生成中，请稍后再撤销/重做", "error"); return; }
+  await commitScriptDraft();
   try {
     const res = await api("/api/" + dir, { method: "POST" });
     const s = res.state || {};
@@ -1114,6 +1122,7 @@ async function runHistory(dir) {
     state.script = s.script || "";
     const scriptEl = document.getElementById("script-input");
     if (scriptEl) scriptEl.value = state.script;
+    scriptDirty = false;
     state.failures = s.failures || {};
     state.hasGenerated = Object.keys(s.generated || {}).length > 0;
     state.selected = new Set();
@@ -1131,16 +1140,10 @@ async function runHistory(dir) {
     if (downloadPanel) downloadPanel.classList.toggle("hidden", !state.hasGenerated && !s.merged_path);
     const genBtn = document.getElementById("btn-generate");
     if (genBtn) genBtn.textContent = state.hasGenerated ? "重新生成" : "生成全部语音";
-    if (status) {
-      status.textContent = (dir === "undo" ? "已撤销：" : "已重做：") + (res.label || "");
-      status.className = "status-text success";
-    }
     updateHistoryButtons(res.history);
+    toast((dir === "undo" ? "已撤销：" : "已重做：") + (res.label || ""), "success");
   } catch (e) {
-    if (status) {
-      status.textContent = (dir === "undo" ? "撤销失败: " : "重做失败: ") + e.message;
-      status.className = "status-text error";
-    }
+    toast((dir === "undo" ? "撤销失败：" : "重做失败：") + e.message, "error");
   }
 }
 
