@@ -922,6 +922,7 @@ async function saveRecentRecord() {
   if (!state.lines.length && !(state.script || "").trim()) { setRecentStatus("还没有可保存的剧本", "error"); return; }
   setRecentStatus("正在保存...", "");
   try {
+    await syncWebGalState();
     await api("/api/recent/save", { method: "POST" });
     setRecentStatus("已保存小版本（手动）", "success");
     refreshRecentList();
@@ -939,7 +940,10 @@ async function loadRecentRecord(id) {
     const s = res.state || {};
     state.projectType = (res.record && res.record.project_type) || s.project_type || "srt";
     if (state.projectType === "webgal") {
-      await restoreWebGalProject(s.script || "", s.lang || "zh");
+      resetWebGalProject();
+      restoreWebGalSnapshot(s.webgal);
+      state.script = state.webgal.source || "";
+      showWorkbench();
       closeProjectsModal();
       setRecentStatus("已载入项目" + (res.record && res.record.saved_at ? "：" + res.record.saved_at : ""), "success");
       refreshRecentList();
@@ -1128,7 +1132,10 @@ async function loadRecentVersion(recordId, versionId) {
     const s = res.state || {};
     state.projectType = s.project_type || "srt";
     if (state.projectType === "webgal") {
-      await restoreWebGalProject(s.script || "", s.lang || "zh");
+      resetWebGalProject();
+      restoreWebGalSnapshot(s.webgal);
+      state.script = state.webgal.source || "";
+      showWorkbench();
       setRecentStatus("已载入版本" + (res.version && res.version.saved_at ? "：" + res.version.saved_at : ""), "success");
       refreshRecentList();
       toast("已载入版本，撤销/重做已重置");
@@ -1178,17 +1185,27 @@ async function deleteRecentVersion(recordId, versionId) {
 
 function currentContentHash() {
   try {
-    return JSON.stringify({ script: state.script || "", lines: state.lines || [], webgalSource: state.webgal.source || "" });
+    return JSON.stringify({
+      script: state.script || "",
+      lines: state.lines || [],
+      webgalSource: state.webgal.source || "",
+      webgalEmotions: state.webgal.emotions || {},
+      webgalTranslations: state.webgal.translations || {},
+      webgalGenerated: state.webgal.generated || {},
+      webgalFailures: state.webgal.failures || {},
+      webgalPsy: { voice: !!state.webgal.psyVoice, character: state.webgal.psyCharacter || "" }
+    });
   } catch (e) { return ""; }
 }
 
 async function maybeAutoSaveVersion() {
   if (!recentSettings.version_auto_save) return;
-  if (state.generating || analysisController || state.webgal.analyzing) return;
+  if (state.generating || analysisController || state.webgal.generating || state.webgal.analyzing) return;
   const now = Date.now();
   const intervalMs = (Math.max(1, parseInt(recentSettings.auto_save_interval, 10) || 5)) * 60000;
   if (now - lastAutoVersionAt < intervalMs) return;
   await syncScriptDraft();
+  await syncWebGalState();
   const hash = currentContentHash();
   if (!hash) { lastAutoVersionAt = now; return; }
   if (hash === lastAutoHash) { lastAutoVersionAt = now; return; }
@@ -1288,6 +1305,15 @@ function updateHistoryButtons(h) {
   const undoBtn = document.getElementById("btn-undo");
   const redoBtn = document.getElementById("btn-redo");
   if (!undoBtn || !redoBtn) return;
+  if (state.projectType === "webgal") {
+    const uc = Math.max(0, webgalHistoryIndex);
+    const rc = Math.max(0, webgalHistory.length - 1 - webgalHistoryIndex);
+    undoBtn.disabled = uc === 0;
+    redoBtn.disabled = rc === 0;
+    undoBtn.title = uc ? "撤销 WebGaL (Ctrl+Z)" : "撤销 (Ctrl+Z)";
+    redoBtn.title = rc ? "重做 WebGaL (Ctrl+Shift+Z)" : "重做 (Ctrl+Shift+Z)";
+    return;
+  }
   const uc = (h ? h.undo_count : 0) + scriptTextUndo.length;
   const rc = (h ? h.redo_count : 0) + scriptTextRedo.length;
   undoBtn.disabled = uc === 0;
@@ -1310,6 +1336,19 @@ async function refreshHistory() {
 async function runHistory(dir) {
   if (state.generating) { toast("生成中，请取消后再撤销/重做", "error"); return; }
   if (analysisController) { toast("分析中，请取消后再撤销/重做", "error"); return; }
+  if (state.projectType === "webgal") {
+    if (state.webgal.analyzing || webgalTranslateController) {
+      toast("分析/翻译中，请稍后再撤销/重做", "error");
+      return;
+    }
+    const ok = dir === "undo" ? webgalUndo() : webgalRedo();
+    if (ok) {
+      toast(dir === "undo" ? "已撤销 WebGaL 操作" : "已重做 WebGaL 操作", "success");
+    } else {
+      toast(dir === "undo" ? "没有可撤销的操作" : "没有可重做的操作", "error");
+    }
+    return;
+  }
   try {
     const res = await api("/api/" + dir, { method: "POST" });
     const s = res.state || {};
@@ -2437,6 +2476,90 @@ function resetWebGalProject() {
   const exportInput = document.getElementById("webgal-export-folder");
   if (exportInput) exportInput.value = "";
   setWebGalStatus("", "");
+  resetWebGalHistory();
+}
+
+const WEBGAL_HISTORY_LIMIT = 60;
+let webgalHistory = [];
+let webgalHistoryIndex = -1;
+
+function webgalSnapshot() {
+  const wg = state.webgal;
+  return {
+    source: wg.source || "",
+    lang: wg.lang || "zh",
+    dialogues: JSON.parse(JSON.stringify(wg.dialogues || [])),
+    emotions: { ...(wg.emotions || {}) },
+    translations: { ...(wg.translations || {}) },
+    generated: { ...(wg.generated || {}) },
+    failures: { ...(wg.failures || {}) },
+    psyVoice: !!wg.psyVoice,
+    psyCharacter: wg.psyCharacter || "",
+    lastExport: wg.lastExport || "",
+  };
+}
+
+function resetWebGalHistory() {
+  webgalHistory = [];
+  webgalHistoryIndex = -1;
+  refreshHistoryButtons();
+}
+
+function pushWebGalHistory() {
+  webgalHistory = webgalHistory.slice(0, webgalHistoryIndex + 1);
+  webgalHistory.push(webgalSnapshot());
+  if (webgalHistory.length > WEBGAL_HISTORY_LIMIT) webgalHistory.shift();
+  webgalHistoryIndex = webgalHistory.length - 1;
+  refreshHistoryButtons();
+}
+
+function restoreWebGalSnapshot(snap) {
+  const s = snap || {};
+  state.webgal.source = s.source || "";
+  state.webgal.lang = s.lang || "zh";
+  state.webgal.dialogues = JSON.parse(JSON.stringify(s.dialogues || []));
+  state.webgal.emotions = { ...(s.emotions || {}) };
+  state.webgal.translations = { ...(s.translations || {}) };
+  state.webgal.generated = { ...(s.generated || {}) };
+  state.webgal.failures = { ...(s.failures || {}) };
+  state.webgal.psyVoice = !!s.psyVoice;
+  state.webgal.psyCharacter = s.psyCharacter || "";
+  state.webgal.lastExport = s.lastExport || "";
+  state.webgal.progress = { current: 0, total: 0 };
+  state.webgal.generating = false;
+  const input = document.getElementById("webgal-input");
+  if (input) input.value = state.webgal.source;
+  const langSel = document.getElementById("webgal-lang");
+  if (langSel) langSel.value = state.webgal.lang;
+  const psyVoiceEl = document.getElementById("webgal-psy-voice");
+  if (psyVoiceEl) psyVoiceEl.checked = state.webgal.psyVoice;
+  const psyCharEl = document.getElementById("webgal-psy-character");
+  if (psyCharEl) psyCharEl.value = state.webgal.psyCharacter;
+  populateWebGalPsyCharacters();
+  ["webgal-settings", "webgal-review", "webgal-export"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove("hidden");
+  });
+  renderWebGalLines();
+  updateWebGalProgress();
+  const openBtn = document.getElementById("btn-webgal-open-export");
+  if (openBtn) openBtn.classList.toggle("hidden", !state.webgal.lastExport);
+}
+
+function webgalUndo() {
+  if (webgalHistoryIndex <= 0) return false;
+  webgalHistoryIndex -= 1;
+  restoreWebGalSnapshot(webgalHistory[webgalHistoryIndex]);
+  refreshHistoryButtons();
+  return true;
+}
+
+function webgalRedo() {
+  if (webgalHistoryIndex >= webgalHistory.length - 1) return false;
+  webgalHistoryIndex += 1;
+  restoreWebGalSnapshot(webgalHistory[webgalHistoryIndex]);
+  refreshHistoryButtons();
+  return true;
 }
 
 let webgalTranslateController = null;
@@ -2462,6 +2585,7 @@ async function translateWebGal(silent) {
     });
     state.webgal.translations = data.translations || {};
     renderWebGalLines();
+    pushWebGalHistory();
     return { ok: true };
   } catch (e) {
     if (e.name !== "AbortError") {
@@ -2491,6 +2615,26 @@ function syncWebGalDraft() {
   }, 400);
 }
 
+async function syncWebGalState() {
+  if (state.projectType !== "webgal") return;
+  const wg = state.webgal;
+  await api("/api/webgal/sync", {
+    method: "POST",
+    body: JSON.stringify({
+      source: wg.source || "",
+      lang: wg.lang || "zh",
+      dialogues: wg.dialogues || [],
+      emotions: wg.emotions || {},
+      translations: wg.translations || {},
+      generated: wg.generated || {},
+      failures: wg.failures || {},
+      psyVoice: !!wg.psyVoice,
+      psyCharacter: wg.psyCharacter || "",
+      lastExport: wg.lastExport || ""
+    })
+  });
+}
+
 async function parseWebGal() {
   if (state.webgal.generating) { setWebGalStatus("生成中，请稍后再解析", "error"); return; }
   const text = (document.getElementById("webgal-input").value || "").trim();
@@ -2516,6 +2660,7 @@ async function parseWebGal() {
       if (el) el.classList.remove("hidden");
     });
     renderWebGalLines();
+    pushWebGalHistory();
     if (lang === "ja") {
       const tr = await translateWebGal(false);
       if (tr.ok) {
@@ -2570,6 +2715,7 @@ function renderWebGalLines() {
   container.querySelectorAll(".emotion-select").forEach(sel => {
     sel.addEventListener("change", () => {
       state.webgal.emotions[parseInt(sel.dataset.index, 10)] = sel.value;
+      pushWebGalHistory();
     });
   });
   container.querySelectorAll(".wg-play").forEach(btn => {
@@ -2620,6 +2766,7 @@ async function analyzeWebGal() {
     state.webgal.emotions = data.emotions || {};
     state.webgal.translations = data.translations || {};
     renderWebGalLines();
+    pushWebGalHistory();
     setWebGalStatus("情绪分析完成，已填充 " + Object.keys(state.webgal.emotions).length + " 条", "success");
   } catch (e) {
     if (e.name === "AbortError") {
@@ -2739,6 +2886,7 @@ function updateWebGalProgress() {
 }
 
 function finishWebGalGeneration() {
+  pushWebGalHistory();
   const genBtn = document.getElementById("btn-webgal-generate");
   const cancelBtn = document.getElementById("btn-webgal-cancel");
   if (genBtn) genBtn.disabled = false;
@@ -2839,16 +2987,19 @@ function initWebGal() {
   const langSel = document.getElementById("webgal-lang");
   if (langSel) langSel.addEventListener("change", () => {
     state.webgal.lang = langSel.value;
+    pushWebGalHistory();
   });
   const psyVoice = document.getElementById("webgal-psy-voice");
   if (psyVoice) psyVoice.addEventListener("change", () => {
     state.webgal.psyVoice = psyVoice.checked;
     renderWebGalLines();
+    pushWebGalHistory();
   });
   const psyChar = document.getElementById("webgal-psy-character");
   if (psyChar) psyChar.addEventListener("change", () => {
     state.webgal.psyCharacter = psyChar.value;
     renderWebGalLines();
+    pushWebGalHistory();
   });
   populateWebGalPsyCharacters();
   resetWebGalProject();

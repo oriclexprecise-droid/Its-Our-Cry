@@ -602,7 +602,7 @@ def create_app(config_path="config.yaml"):
             "progress": {"current": 0, "total": 0},
             "generating": False,
             "cancel_requested": False,
-            "last_export": "",
+            "lastExport": "",
             "lang": "zh",
         },
         "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
@@ -657,6 +657,7 @@ def create_app(config_path="config.yaml"):
             "time_info": copy.deepcopy(state.get("time_info", [])),
             "lang": state.get("lang", "zh"),
             "project_type": state.get("project_type", "srt"),
+            "webgal": copy.deepcopy(state.get("webgal") or {}),
         }
 
     def history_payload():
@@ -771,6 +772,19 @@ def create_app(config_path="config.yaml"):
         failures = {}
         for idx, msg in (state.get("failures") or {}).items():
             failures[str(idx)] = str(msg)
+        wg = state.get("webgal") or {}
+        webgal_snapshot = {
+            "source": wg.get("source", ""),
+            "lang": wg.get("lang", state.get("lang", "zh")),
+            "dialogues": copy.deepcopy(wg.get("dialogues", [])),
+            "emotions": dict(wg.get("emotions") or {}),
+            "translations": dict(wg.get("translations") or {}),
+            "generated": dict(wg.get("generated") or {}),
+            "failures": dict(wg.get("failures") or {}),
+            "psyVoice": bool(wg.get("psyVoice")),
+            "psyCharacter": str(wg.get("psyCharacter") or ""),
+            "lastExport": str(wg.get("lastExport") or ""),
+        }
         return {
             "script": state.get("script", ""),
             "lines": copy.deepcopy(state.get("lines", [])),
@@ -781,6 +795,7 @@ def create_app(config_path="config.yaml"):
             "srt_path": state.get("srt_path"),
             "time_info": copy.deepcopy(state.get("time_info", [])),
             "config": record_config_snapshot(),
+            "webgal": webgal_snapshot,
         }
 
     def save_current_version(source="auto", force=False):
@@ -912,6 +927,9 @@ def create_app(config_path="config.yaml"):
         state["srt_only"] = False
         state["current_record_id"] = record.get("id")
         state["project_type"] = record.get("project_type") or "srt"
+        wg = version.get("webgal")
+        if isinstance(wg, dict):
+            state["webgal"] = copy.deepcopy(wg)
 
     def restore_workbench_from_record(record):
         versions = record.get("versions") or []
@@ -1405,7 +1423,7 @@ def create_app(config_path="config.yaml"):
             "progress": {"current": 0, "total": 0},
             "generating": False,
             "cancel_requested": False,
-            "last_export": "",
+            "lastExport": "",
             "lang": lang,
         }
         return jsonify({
@@ -1414,6 +1432,18 @@ def create_app(config_path="config.yaml"):
             "lang": lang,
             "dialogues": [dialogue_summary(d) for d in dialogues],
         })
+
+    @app.route("/api/webgal/sync", methods=["POST"])
+    def webgal_sync():
+        data = request.get_json(silent=True) or {}
+        wg = state.get("webgal") or {}
+        keys = ("source", "lang", "dialogues", "emotions", "translations", "generated", "failures", "psyVoice", "psyCharacter", "lastExport")
+        for key in keys:
+            if key in data:
+                wg[key] = data[key]
+        state["webgal"] = wg
+        state["script"] = str(wg.get("source") or state.get("script", ""))
+        return jsonify({"status": "ok"})
 
     @app.route("/api/webgal/translate", methods=["POST"])
     def webgal_translate():
@@ -1540,6 +1570,8 @@ def create_app(config_path="config.yaml"):
 
         wg["generating"] = True
         wg["cancel_requested"] = False
+        wg["psyVoice"] = psy_voice
+        wg["psyCharacter"] = psy_character
         wg["failures"] = {}
         wg["progress"] = {"current": 0, "total": len(requested)}
         for idx in requested:
@@ -1742,7 +1774,7 @@ def create_app(config_path="config.yaml"):
                 })
             except Exception:
                 pass
-            wg["last_export"] = str(export_dir)
+            wg["lastExport"] = str(export_dir)
             return jsonify({
                 "status": "ok",
                 "folder": str(export_dir),
