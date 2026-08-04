@@ -674,20 +674,21 @@ function hasDraftContent() {
 async function exitToHome() {
   const projectsView = document.getElementById("view-projects");
   if (projectsView && !projectsView.classList.contains("hidden")) { showProjectPicker(); return; }
+  const settingsView = document.getElementById("view-settings");
+  const inSettings = settingsView && !settingsView.classList.contains("hidden");
+  if (inSettings && settingsReturnTo === "projects") { showProjectPicker(); return; }
   if (state.generating || state.webgal.generating) { toast("生成中，请取消后再退出到主页", "error"); return; }
   if (analysisController || state.webgal.analyzing || webgalTranslateController) { toast("分析/翻译中，请取消后再退出到主页", "error"); return; }
-  if (hasDraftContent()) {
-    const choice = await showConfirmModal("是否保存当前草稿？", {
-      title: "退出到主页",
-      okText: "保存并退出",
-      cancelText: "取消",
-      altText: "不保存退出"
-    });
-    if (choice === false) return;
-    if (choice === true) {
-      const saved = await saveRecentRecord();
-      if (!saved) { toast("保存失败，已取消退出", "error"); return; }
-    }
+  const choice = await showConfirmModal("是否保存当前草稿？", {
+    title: "退出到主页",
+    okText: "保存并退出",
+    cancelText: "取消",
+    altText: "不保存退出"
+  });
+  if (choice === false) return;
+  if (choice === true && hasDraftContent()) {
+    const saved = await saveRecentRecord();
+    if (!saved) { toast("保存失败，已取消退出", "error"); return; }
   }
   showProjectPicker();
   toast("已退出到主页", "success");
