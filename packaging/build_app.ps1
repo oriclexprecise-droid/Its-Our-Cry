@@ -5,6 +5,23 @@ $runtime = 'E:\GPT-SoVITS-v2pro-20250604-nvidia50\GPT-SoVITS-v2pro-20250604-nvid
 $pyinstaller = Join-Path $runtime 'Scripts\pyinstaller.exe'
 $releaseApp = Join-Path $root "release\It's Our Cry"
 
+Write-Host '== 检查权重源 =='
+# 权重只存在于旧 release 时先回填到根目录，避免清理 release 时把唯一副本删掉
+foreach ($w in @('GPT_weights_v2ProPlus', 'SoVITS_weights_v2ProPlus')) {
+  $src = Join-Path $root $w
+  $rel = Join-Path $releaseApp $w
+  $srcHas = (Test-Path $src) -and ($null -ne (Get-ChildItem $src -File -ErrorAction SilentlyContinue | Select-Object -First 1))
+  if (-not $srcHas) {
+    if (Test-Path $rel) {
+      New-Item -ItemType Directory -Force -Path $src | Out-Null
+      Copy-Item (Join-Path $rel '*') $src -Recurse -Force
+      Write-Host "回填权重: $w -> $src"
+    } else {
+      throw "缺少权重目录: $w，无法打包"
+    }
+  }
+}
+
 Write-Host '== 清理旧构建产物 =='
 foreach ($d in @((Join-Path $root 'build'), (Join-Path $root 'dist'), (Join-Path $root 'release'))) {
   if (Test-Path $d) { Remove-Item $d -Recurse -Force }
