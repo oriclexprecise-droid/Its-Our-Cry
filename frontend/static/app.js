@@ -690,14 +690,12 @@ function showProjectPicker() {
   const workbench = document.getElementById("view-workbench");
   const webgal = document.getElementById("view-webgal");
   const settings = document.getElementById("view-settings");
-  const cloud = document.getElementById("view-cloud");
   const dropdown = document.getElementById("recent-dropdown");
   if (dropdown) dropdown.classList.add("hidden");
   if (projects) projects.classList.remove("hidden");
   if (workbench) workbench.classList.add("hidden");
   if (webgal) webgal.classList.add("hidden");
   if (settings) settings.classList.add("hidden");
-  if (cloud) cloud.classList.add("hidden");
   ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-recent", "btn-exit-home"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add("hidden");
@@ -706,32 +704,6 @@ function showProjectPicker() {
   if (settingsBtn) settingsBtn.classList.remove("hidden");
   const banner = document.getElementById("deploy-banner");
   if (banner) banner.classList.add("hidden");
-}
-
-function showCloudShare() {
-  const projects = document.getElementById("view-projects");
-  const workbench = document.getElementById("view-workbench");
-  const webgal = document.getElementById("view-webgal");
-  const settings = document.getElementById("view-settings");
-  const cloud = document.getElementById("view-cloud");
-  const dropdown = document.getElementById("recent-dropdown");
-  if (dropdown) dropdown.classList.add("hidden");
-  if (projects) projects.classList.add("hidden");
-  if (workbench) workbench.classList.add("hidden");
-  if (webgal) webgal.classList.add("hidden");
-  if (settings) settings.classList.add("hidden");
-  if (cloud) cloud.classList.remove("hidden");
-  ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-recent"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.add("hidden");
-  });
-  ["btn-settings", "btn-exit-home"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.remove("hidden");
-  });
-  const banner = document.getElementById("deploy-banner");
-  if (banner) banner.classList.add("hidden");
-  loadQiniuConfig();
 }
 
 function hasDraftContent() {
@@ -743,11 +715,9 @@ function hasDraftContent() {
 async function exitToHome() {
   const projectsView = document.getElementById("view-projects");
   if (projectsView && !projectsView.classList.contains("hidden")) { showProjectPicker(); return; }
-  const cloudView = document.getElementById("view-cloud");
-  if (cloudView && !cloudView.classList.contains("hidden")) { showProjectPicker(); return; }
   const settingsView = document.getElementById("view-settings");
   const inSettings = settingsView && !settingsView.classList.contains("hidden");
-  if (inSettings && (settingsReturnTo === "projects" || settingsReturnTo === "cloud")) { showProjectPicker(); return; }
+  if (inSettings && settingsReturnTo === "projects") { showProjectPicker(); return; }
   if (state.generating || state.webgal.generating) { toast("生成中，请取消后再退出到主页", "error"); return; }
   if (analysisController || state.webgal.analyzing || webgalParseController || webgalTranslateController) { toast("分析/翻译中，请取消后再退出到主页", "error"); return; }
   const choice = await showConfirmModal("是否保存当前草稿？", {
@@ -3242,15 +3212,11 @@ function showSettings(tab) {
   const webgal = document.getElementById("view-webgal");
   const settings = document.getElementById("view-settings");
   const projects = document.getElementById("view-projects");
-  const cloud = document.getElementById("view-cloud");
   if (!workbench || !settings) return;
   if (settings.classList.contains("hidden")) {
-    if (projects && !projects.classList.contains("hidden")) settingsReturnTo = "projects";
-    else if (cloud && !cloud.classList.contains("hidden")) settingsReturnTo = "cloud";
-    else settingsReturnTo = "workbench";
+    settingsReturnTo = (projects && !projects.classList.contains("hidden")) ? "projects" : "workbench";
   }
   if (projects) projects.classList.add("hidden");
-  if (cloud) cloud.classList.add("hidden");
   const recentDropdown = document.getElementById("recent-dropdown");
   if (recentDropdown) recentDropdown.classList.add("hidden");
   const recentBtn = document.getElementById("btn-recent");
@@ -3276,10 +3242,8 @@ function showWorkbench() {
   const webgal = document.getElementById("view-webgal");
   const settings = document.getElementById("view-settings");
   const projects = document.getElementById("view-projects");
-  const cloud = document.getElementById("view-cloud");
   if (!workbench || !settings) return;
   if (projects) projects.classList.add("hidden");
-  if (cloud) cloud.classList.add("hidden");
   const isWebGal = state.projectType === "webgal";
   workbench.classList.toggle("hidden", isWebGal);
   if (webgal) webgal.classList.toggle("hidden", !isWebGal);
@@ -3296,22 +3260,14 @@ function initSettingsNav() {
   document.getElementById("btn-settings").addEventListener("click", () => {
     const settingsView = document.getElementById("view-settings");
     if (settingsView && !settingsView.classList.contains("hidden")) {
-      if (settingsReturnTo === "projects") showProjectPicker();
-      else if (settingsReturnTo === "cloud") showCloudShare();
-      else showWorkbench();
+      if (settingsReturnTo === "projects") showProjectPicker(); else showWorkbench();
     } else {
       showSettings(null);
     }
   });
   document.getElementById("btn-back-workbench").addEventListener("click", () => {
-    if (settingsReturnTo === "projects") showProjectPicker();
-    else if (settingsReturnTo === "cloud") showCloudShare();
-    else showWorkbench();
+    if (settingsReturnTo === "projects") showProjectPicker(); else showWorkbench();
   });
-  const cloudShareBtn = document.getElementById("btn-cloud-share");
-  if (cloudShareBtn) cloudShareBtn.addEventListener("click", showCloudShare);
-  const qiniuGoConfig = document.getElementById("btn-qiniu-go-config");
-  if (qiniuGoConfig) qiniuGoConfig.addEventListener("click", () => showSettings("qiniu"));
   const exitHomeBtn = document.getElementById("btn-exit-home");
   if (exitHomeBtn) exitHomeBtn.addEventListener("click", exitToHome);
   document.querySelectorAll(".settings-tab").forEach(btn => {
@@ -4108,8 +4064,6 @@ function initQiniuCloud() {
   if (refreshBtn) refreshBtn.addEventListener("click", refreshQiniuList);
   const uploadBtn = document.getElementById("btn-qiniu-upload");
   if (uploadBtn) uploadBtn.addEventListener("click", uploadQiniuFile);
-  const cfgTestBtn = document.getElementById("btn-qiniu-cfg-test");
-  if (cfgTestBtn) cfgTestBtn.addEventListener("click", testQiniuConfigConnection);
   loadQiniuConfig();
 }
 
@@ -4120,7 +4074,7 @@ async function loadQiniuConfig() {
     if (cfg.configured) {
       if (statusEl) { statusEl.textContent = "已配置：" + cfg.bucket + " / " + cfg.domain + (cfg.private ? "（私有空间）" : "（公开空间）"); statusEl.className = "status-text success"; }
     } else {
-      if (statusEl) { statusEl.textContent = "尚未配置七牛云，请到设置 → 云共享设置 填写 AccessKey / SecretKey / Bucket / 域名。"; statusEl.className = "status-text"; }
+      if (statusEl) { statusEl.textContent = "尚未配置七牛云，请在开发者模式中填写 AccessKey / SecretKey / Bucket / 域名。"; statusEl.className = "status-text"; }
     }
     const akEl = document.getElementById("qiniu-access-key");
     if (akEl) akEl.value = cfg.access_key_masked || "";
@@ -4132,9 +4086,9 @@ async function loadQiniuConfig() {
     if (regionEl) regionEl.value = cfg.region || "z0";
     const privateEl = document.getElementById("qiniu-private");
     if (privateEl) privateEl.checked = !!cfg.private;
-    const hintEl = document.getElementById("qiniu-cfg-status");
+    const hintEl = document.getElementById("qiniu-dev-status");
     if (hintEl) {
-      hintEl.textContent = cfg.dev_password_set ? "" : "首次使用：直接填写配置并保存，可同时设置一个新开发者密码。";
+      hintEl.textContent = cfg.dev_password_set ? "" : "首次使用：直接解锁后填写配置，并设置一个新开发者密码。";
       hintEl.className = "status-text";
     }
     refreshQiniuList();
@@ -4150,6 +4104,8 @@ async function unlockQiniuDev() {
   try {
     const res = await api("/api/qiniu/dev_check", { method: "POST", body: JSON.stringify({ dev_password: password }) });
     qiniuDevUnlocked = true;
+    const cfgEl = document.getElementById("qiniu-dev-config");
+    if (cfgEl) cfgEl.classList.remove("hidden");
     const uploadEl = document.getElementById("qiniu-upload");
     if (uploadEl) uploadEl.classList.remove("hidden");
     const unlockBtn = document.getElementById("btn-qiniu-unlock");
@@ -4157,7 +4113,7 @@ async function unlockQiniuDev() {
     const lockBtn = document.getElementById("btn-qiniu-lock");
     if (lockBtn) lockBtn.classList.remove("hidden");
     if (statusEl) {
-      statusEl.textContent = res.first_time ? "已进入开发者模式。首次使用请到设置 → 云共享设置 填写七牛配置并设置新密码。" : "开发者模式已解锁。";
+      statusEl.textContent = res.first_time ? "已进入开发者模式，请填写七牛配置并设置新密码后保存。" : "开发者模式已解锁。";
       statusEl.className = "status-text success";
     }
     refreshQiniuList();
@@ -4168,6 +4124,8 @@ async function unlockQiniuDev() {
 
 function lockQiniuDev() {
   qiniuDevUnlocked = false;
+  const cfgEl = document.getElementById("qiniu-dev-config");
+  if (cfgEl) cfgEl.classList.add("hidden");
   const uploadEl = document.getElementById("qiniu-upload");
   if (uploadEl) uploadEl.classList.add("hidden");
   const unlockBtn = document.getElementById("btn-qiniu-unlock");
@@ -4182,8 +4140,9 @@ function lockQiniuDev() {
 }
 
 async function saveQiniuConfig() {
-  const statusEl = document.getElementById("qiniu-cfg-status");
-  const passwordEl = document.getElementById("qiniu-cfg-password");
+  const statusEl = document.getElementById("qiniu-dev-status");
+  if (!qiniuDevUnlocked) { if (statusEl) { statusEl.textContent = "请先解锁开发者模式"; statusEl.className = "status-text error"; } return; }
+  const passwordEl = document.getElementById("qiniu-dev-password");
   const payload = {
     dev_password: passwordEl ? passwordEl.value : "",
     new_password: (document.getElementById("qiniu-new-password") || {}).value || "",
@@ -4220,18 +4179,6 @@ async function saveQiniuConfig() {
 async function testQiniuConnection() {
   const statusEl = document.getElementById("qiniu-dev-status");
   const passwordEl = document.getElementById("qiniu-dev-password");
-  if (statusEl) { statusEl.textContent = "正在测试连接..."; statusEl.className = "status-text"; }
-  try {
-    const res = await api("/api/qiniu/test", { method: "POST", body: JSON.stringify({ dev_password: passwordEl ? passwordEl.value : "" }) });
-    if (statusEl) { statusEl.textContent = "连接成功，云存储可用（当前共享素材 " + res.item_count + " 个）。"; statusEl.className = "status-text success"; }
-  } catch (e) {
-    if (statusEl) { statusEl.textContent = e.message; statusEl.className = "status-text error"; }
-  }
-}
-
-async function testQiniuConfigConnection() {
-  const statusEl = document.getElementById("qiniu-cfg-status");
-  const passwordEl = document.getElementById("qiniu-cfg-password");
   if (statusEl) { statusEl.textContent = "正在测试连接..."; statusEl.className = "status-text"; }
   try {
     const res = await api("/api/qiniu/test", { method: "POST", body: JSON.stringify({ dev_password: passwordEl ? passwordEl.value : "" }) });
