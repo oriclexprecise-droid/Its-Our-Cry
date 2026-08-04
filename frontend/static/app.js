@@ -941,9 +941,15 @@ async function loadRecentRecord(id) {
     state.projectType = (res.record && res.record.project_type) || s.project_type || "srt";
     if (state.projectType === "webgal") {
       resetWebGalProject();
-      restoreWebGalSnapshot(s.webgal);
-      state.script = state.webgal.source || "";
-      showWorkbench();
+      const wgSnap = (s.webgal && Array.isArray(s.webgal.dialogues) && s.webgal.dialogues.length) ? s.webgal : null;
+      if (wgSnap) {
+        restoreWebGalSnapshot(wgSnap);
+        state.script = state.webgal.source || "";
+        showWorkbench();
+      } else {
+        await restoreWebGalProject(s.script || "", (s.webgal && s.webgal.lang) || s.lang || "zh");
+        state.script = state.webgal.source || "";
+      }
       closeProjectsModal();
       setRecentStatus("已载入项目" + (res.record && res.record.saved_at ? "：" + res.record.saved_at : ""), "success");
       refreshRecentList();
@@ -1133,9 +1139,15 @@ async function loadRecentVersion(recordId, versionId) {
     state.projectType = s.project_type || "srt";
     if (state.projectType === "webgal") {
       resetWebGalProject();
-      restoreWebGalSnapshot(s.webgal);
-      state.script = state.webgal.source || "";
-      showWorkbench();
+      const wgSnap = (s.webgal && Array.isArray(s.webgal.dialogues) && s.webgal.dialogues.length) ? s.webgal : null;
+      if (wgSnap) {
+        restoreWebGalSnapshot(wgSnap);
+        state.script = state.webgal.source || "";
+        showWorkbench();
+      } else {
+        await restoreWebGalProject(s.script || "", (s.webgal && s.webgal.lang) || s.lang || "zh");
+        state.script = state.webgal.source || "";
+      }
       setRecentStatus("已载入版本" + (res.version && res.version.saved_at ? "：" + res.version.saved_at : ""), "success");
       refreshRecentList();
       toast("已载入版本，撤销/重做已重置");

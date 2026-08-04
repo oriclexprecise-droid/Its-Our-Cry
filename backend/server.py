@@ -734,6 +734,9 @@ def create_app(config_path="config.yaml"):
     def persist_recent_records(records):
         try:
             with recent_lock:
+                backup_path = recent_path.with_suffix(".bak.json")
+                if recent_path.exists():
+                    shutil.copy2(str(recent_path), str(backup_path))
                 tmp_path = recent_path.with_suffix(".tmp")
                 tmp_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
                 os.replace(str(tmp_path), str(recent_path))
@@ -930,6 +933,24 @@ def create_app(config_path="config.yaml"):
         wg = version.get("webgal")
         if isinstance(wg, dict):
             state["webgal"] = copy.deepcopy(wg)
+        else:
+            state["webgal"] = {
+                "source": "",
+                "entries": [],
+                "dialogues": [],
+                "emotions": {},
+                "translations": {},
+                "generated": {},
+                "failures": {},
+                "progress": {"current": 0, "total": 0},
+                "generating": False,
+                "cancel_requested": False,
+                "lastExport": "",
+                "lang": version.get("lang", "zh"),
+                "psyVoice": False,
+                "psyCharacter": "",
+                "analyzing": False,
+            }
 
     def restore_workbench_from_record(record):
         versions = record.get("versions") or []
