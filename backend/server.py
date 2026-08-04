@@ -29,7 +29,7 @@ from .translator import translate_lines
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
 from .feedback import read_events, record_event
 from .cleanup import clean_items, scan_cleanable
-from .webgal import DEFAULT_EMOTION_MAP, dialogue_summary, parse_script, render_script, short_name_for
+from .webgal import DEFAULT_EMOTION_MAP, dialogue_summary, parse_script as parse_webgal_script, render_script, short_name_for
 
 
 DEFAULT_INTERVAL = 0.5
@@ -1558,7 +1558,7 @@ def create_app(config_path="config.yaml"):
         lang = str(data.get("lang") or state.get("lang") or "zh")
         if lang not in ("zh", "ja"):
             lang = "zh"
-        entries = parse_script(text, emotion_map=config.get("webgal_emotion_map"), system_emotions=config.get("emotions", []))
+        entries = parse_webgal_script(text, emotion_map=config.get("webgal_emotion_map"), system_emotions=config.get("emotions", []))
         dialogues = [e for e in entries if e["type"] == "dialogue"]
         if not dialogues:
             return jsonify({"error": "没有解析到对话行，请确认粘贴的是 anogo 脚本"}), 400
