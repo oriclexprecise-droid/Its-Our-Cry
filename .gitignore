@@ -16,3 +16,6 @@ release/
 packaging/installer/payload/
 packaging/installer/*.7z
 packaging/installer/*.exe
+
+packaging/tools/innosetup6/
+packaging/tools/*.exe
