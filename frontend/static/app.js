@@ -1,6 +1,7 @@
 const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [], projectType: "srt", webgal: { source: "", dialogues: [], emotions: {}, translations: {}, generated: {}, failures: {}, generating: false, lastExport: "", psyVoice: false, psyCharacter: "", lang: "zh", analyzing: false, progress: { current: 0, total: 0 } } };
 let audioPlayer = null;
 let analysisController = null;
+let webgalParseController = null;
 let webgalTranslateController = null;
 let projectSelectedIds = new Set();
 
@@ -240,7 +241,7 @@ document.addEventListener("keydown", (e) => {
   const isZ = mod && (e.key === "z" || e.key === "Z");
   const isY = mod && (e.key === "y" || e.key === "Y");
   if (!isZ && !isY) return;
-  if (state.generating || state.webgal.generating || analysisController || state.webgal.analyzing || webgalTranslateController) {
+  if (state.generating || state.webgal.generating || analysisController || state.webgal.analyzing || webgalParseController || webgalTranslateController) {
     e.preventDefault();
     toast("AI 处理中，请取消后再撤销/重做", "error");
     return;
@@ -715,7 +716,7 @@ async function exitToHome() {
   const inSettings = settingsView && !settingsView.classList.contains("hidden");
   if (inSettings && settingsReturnTo === "projects") { showProjectPicker(); return; }
   if (state.generating || state.webgal.generating) { toast("生成中，请取消后再退出到主页", "error"); return; }
-  if (analysisController || state.webgal.analyzing || webgalTranslateController) { toast("分析/翻译中，请取消后再退出到主页", "error"); return; }
+  if (analysisController || state.webgal.analyzing || webgalParseController || webgalTranslateController) { toast("分析/翻译中，请取消后再退出到主页", "error"); return; }
   const choice = await showConfirmModal("是否保存当前草稿？", {
     title: "退出到主页",
     okText: "保存并退出",
@@ -1306,7 +1307,7 @@ function currentContentHash() {
 
 async function maybeAutoSaveVersion() {
   if (!recentSettings.version_auto_save) return;
-  if (state.generating || analysisController || state.webgal.generating || state.webgal.analyzing) return;
+  if (state.generating || analysisController || state.webgal.generating || state.webgal.analyzing || webgalParseController || webgalTranslateController) return;
   const now = Date.now();
   const intervalMs = (Math.max(1, parseInt(recentSettings.auto_save_interval, 10) || 5)) * 60000;
   if (now - lastAutoVersionAt < intervalMs) return;
@@ -1411,7 +1412,7 @@ function updateHistoryButtons(h) {
   const undoBtn = document.getElementById("btn-undo");
   const redoBtn = document.getElementById("btn-redo");
   if (!undoBtn || !redoBtn) return;
-  if (state.generating || state.webgal.generating || analysisController || state.webgal.analyzing || webgalTranslateController) {
+  if (state.generating || state.webgal.generating || analysisController || state.webgal.analyzing || webgalParseController || webgalTranslateController) {
     undoBtn.disabled = true;
     redoBtn.disabled = true;
     undoBtn.title = "AI 处理中，暂不可用";
@@ -1450,7 +1451,7 @@ async function runHistory(dir) {
   if (state.generating) { toast("生成中，请取消后再撤销/重做", "error"); return; }
   if (analysisController) { toast("分析中，请取消后再撤销/重做", "error"); return; }
   if (state.projectType === "webgal") {
-    if (state.webgal.analyzing || webgalTranslateController) {
+    if (state.webgal.analyzing || webgalParseController || webgalTranslateController) {
       toast("分析/翻译中，请稍后再撤销/重做", "error");
       return;
     }
@@ -2562,6 +2563,8 @@ function resetWebGalProject() {
     progress: { current: 0, total: 0 }
   };
   if (webgalPollTimer) { clearInterval(webgalPollTimer); webgalPollTimer = null; }
+  if (webgalParseController) { webgalParseController.abort(); webgalParseController = null; }
+  if (webgalTranslateController) { webgalTranslateController.abort(); webgalTranslateController = null; }
   if (webgalAnalyzeController) { webgalAnalyzeController.abort(); webgalAnalyzeController = null; }
   const input = document.getElementById("webgal-input");
   if (input) input.value = "";
@@ -2704,7 +2707,9 @@ async function translateWebGal(silent) {
     pushWebGalHistory();
     return { ok: true };
   } catch (e) {
-    if (e.name !== "AbortError") {
+    if (e.name === "AbortError") {
+      if (!silent) setWebGalStatus("已取消日语翻译", "");
+    } else {
       setWebGalStatus(e.message || "日语翻译失败", "error");
     }
     return { ok: false, error: e };
@@ -2764,9 +2769,15 @@ async function parseWebGal() {
   const text = (document.getElementById("webgal-input").value || "").trim();
   if (!text) { setWebGalStatus("请先粘贴 anogo 脚本", "error"); return; }
   setWebGalStatus("正在解析脚本...", "");
+  const stopBtn = document.getElementById("btn-webgal-stop-analyze");
+  if (stopBtn) { stopBtn.textContent = "停止解析"; stopBtn.classList.remove("hidden"); }
+  if (webgalParseController) webgalParseController.abort();
+  const parseController = new AbortController();
+  webgalParseController = parseController;
+  refreshHistoryButtons();
   try {
     const lang = wgCurrentLang();
-    const data = await api("/api/webgal/parse", { method: "POST", body: JSON.stringify({ text, lang }) });
+    const data = await api("/api/webgal/parse", { method: "POST", body: JSON.stringify({ text, lang }), signal: parseController.signal });
     state.webgal.source = text;
     state.webgal.lang = lang;
     updateWebGalTranslateButton();
@@ -2796,7 +2807,15 @@ async function parseWebGal() {
     }
     syncWebGalDraft();
   } catch (e) {
-    setWebGalStatus("解析失败: " + e.message, "error");
+    if (e.name === "AbortError") {
+      setWebGalStatus("已取消解析", "");
+    } else {
+      setWebGalStatus("解析失败: " + e.message, "error");
+    }
+  } finally {
+    if (webgalParseController === parseController) webgalParseController = null;
+    if (stopBtn) { stopBtn.textContent = "停止分析"; stopBtn.classList.add("hidden"); }
+    refreshHistoryButtons();
   }
 }
 
@@ -2873,7 +2892,7 @@ async function analyzeWebGal() {
   const btn = document.getElementById("btn-webgal-analyze");
   if (btn) btn.disabled = true;
   const stopBtn = document.getElementById("btn-webgal-stop-analyze");
-  if (stopBtn) stopBtn.classList.remove("hidden");
+  if (stopBtn) { stopBtn.textContent = "停止分析"; stopBtn.classList.remove("hidden"); }
   if (webgalAnalyzeController) webgalAnalyzeController.abort();
   const controller = new AbortController();
   webgalAnalyzeController = controller;
@@ -2911,9 +2930,11 @@ async function analyzeWebGal() {
 }
 
 async function stopWebGalAnalyze() {
+  if (webgalParseController) webgalParseController.abort();
+  if (webgalTranslateController) webgalTranslateController.abort();
   if (webgalAnalyzeController) webgalAnalyzeController.abort();
   try { await api("/api/analyze/cancel", { method: "POST" }); } catch (e) {}
-  setWebGalStatus("正在停止分析...", "");
+  setWebGalStatus("正在停止...", "");
 }
 
 async function generateWebGal(indices) {
