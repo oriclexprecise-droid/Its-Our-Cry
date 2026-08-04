@@ -2666,6 +2666,14 @@ def create_app(config_path="config.yaml"):
         }
         with recent_lock:
             records = load_recent_records()
+            name_key = name.strip().lower()
+            type_label = "WebGaL" if project_type == "webgal" else "SRT"
+            if any(
+                (r.get("project_type") or "srt") == project_type
+                and str(r.get("name") or "").strip().lower() == name_key
+                for r in records
+            ):
+                return jsonify({"error": "已存在同名的%s项目「%s」，请换一个名称" % (type_label, name)}), 409
             records.insert(0, record)
             enforce_recent_limit(records)
             persist_recent_records(records)
