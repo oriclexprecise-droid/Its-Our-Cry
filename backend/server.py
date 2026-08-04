@@ -1313,66 +1313,94 @@ def create_app(config_path="config.yaml"):
         for line in lines:
             line.setdefault("interval", DEFAULT_INTERVAL)
 
+        # 智能补齐：剧本未变且情绪/翻译已齐全时，不再重复调用 AI
+        existing = state.get("lines") or []
+        same_script = state.get("script") == script_text and len(existing) == len(lines)
+        if same_script:
+            for new_line, old_line in zip(lines, existing):
+                if new_line.get("text") != old_line.get("text") or new_line.get("character") != old_line.get("character"):
+                    same_script = False
+                    break
+        emotions_ready = same_script and all((line.get("emotion") or "") for line in existing)
+        translations_ready = lang != "ja" or all((line.get("translated_text") or "") for line in existing)
+        reused = bool(emotions_ready and translations_ready)
+        translated_only = bool(same_script and emotions_ready and not translations_ready)
+        emotions_reused = bool(emotions_ready)
+
         seq = state.get("analysis_seq", 0) + 1
         state["analysis_seq"] = seq
 
-        try:
-            emotions = analyze_emotions(
-                lines=lines,
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
-                lang=lang,
-                emotions=config["emotions"],
-            )
-        except Exception as e:
-            traceback.print_exc()
-            record_event(
-                {"type": "error", "message": "情绪分析失败：" + str(e)},
-                project_root=project_root,
-            )
-            return jsonify({"error": "emotion analysis failed: " + str(e)}), 500
-
-        if state.get("analysis_cancel_seq", -1) >= seq:
-            return jsonify({"status": "cancelled"}), 200
-
-        emotion_map = {}
-        for e in emotions:
-            idx = e.get("index")
-            if isinstance(idx, int) and not isinstance(idx, bool):
-                emotion_map[idx] = e.get("emotion") or "思考"
-        for line in lines:
-            line["emotion"] = emotion_map.get(line["index"], "思考")
-
-        if lang == "ja":
+        if reused or translated_only:
+            lines = copy.deepcopy(existing)
+            emotions = list(state.get("emotions") or [])
+        else:
             try:
-                translations = translate_lines(
+                emotions = analyze_emotions(
                     lines=lines,
                     api_key=api_key,
-                    base_url=config["deepseek"]["base_url"],
-                    model=config["deepseek"]["model"],
+                    base_url=base_url,
+                    model=model,
+                    lang=lang,
+                    emotions=config["emotions"],
                 )
             except Exception as e:
                 traceback.print_exc()
-                return jsonify({"error": "日语翻译失败: " + str(e)}), 500
-            translation_map = {}
-            for t in translations:
-                idx = t.get("index")
-                if idx is not None:
-                    translation_map[idx] = t.get("translation", "")
-            for line in lines:
-                corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
-                line["translated_text"] = corrected or (
-                    translation_map.get(line["index"], "").strip() or line["text"]
+                record_event(
+                    {"type": "error", "message": "情绪分析失败：" + str(e)},
+                    project_root=project_root,
                 )
+                return jsonify({"error": "emotion analysis failed: " + str(e)}), 500
+
+            if state.get("analysis_cancel_seq", -1) >= seq:
+                return jsonify({"status": "cancelled"}), 200
+
+            emotion_map = {}
+            for e in emotions:
+                idx = e.get("index")
+                if isinstance(idx, int) and not isinstance(idx, bool):
+                    emotion_map[idx] = e.get("emotion") or "思考"
+            for line in lines:
+                line["emotion"] = emotion_map.get(line["index"], "思考")
+
+        if lang == "ja" and not translations_ready:
+            missing = [line for line in lines if not (line.get("translated_text") or "").strip()]
+            if missing:
+                try:
+                    translations = translate_lines(
+                        lines=missing,
+                        api_key=api_key,
+                        base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
+                        model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                    )
+                except Exception as e:
+                    traceback.print_exc()
+                    return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+                if state.get("analysis_cancel_seq", -1) >= seq:
+                    return jsonify({"status": "cancelled"}), 200
+                translation_map = {}
+                for t in translations:
+                    idx = t.get("index")
+                    if idx is not None:
+                        translation_map[idx] = t.get("translation", "")
+                for line in missing:
+                    corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
+                    line["translated_text"] = corrected or (
+                        translation_map.get(line["index"], "").strip() or line["text"]
+                    )
 
         if state.get("analysis_cancel_seq", -1) >= seq:
             return jsonify({"status": "cancelled"}), 200
 
         valid_chars = list(config["characters"].keys()) + ["旁白"]
         proofread = find_character_issues(lines, valid_chars)
+        if translated_only:
+            event_message = "情绪已是最新，已补齐日语翻译"
+        elif reused:
+            event_message = "情绪分析完成（已是最新）"
+        else:
+            event_message = f"情绪分析完成：共 {len(lines)} 条台词"
         record_event(
-            {"type": "analyze", "message": f"情绪分析完成：共 {len(lines)} 条台词", "payload": {"count": len(lines)}},
+            {"type": "analyze", "message": event_message, "payload": {"count": len(lines), "reused": reused, "translated_only": translated_only}},
             project_root=project_root,
         )
 
@@ -1384,11 +1412,94 @@ def create_app(config_path="config.yaml"):
                 skipped.append({"line_no": skipped_no, "text": raw.strip()[:100]})
 
         state["script"] = script_text
-        push_history("重新分析剧本")
-        state["script"] = script_text
         state["lines"] = lines
         state["emotions"] = emotions
         state["lang"] = lang
+        if not reused:
+            state["generated"] = {}
+            state["time_info"] = []
+            state["merged_path"] = None
+            state["srt_path"] = None
+            state["failures"] = {}
+            state["progress"] = {"current": 0, "total": 0}
+            state["srt_only"] = False
+            state["current_record_id"] = None
+            push_history("日语翻译" if translated_only else "重新分析剧本")
+
+        return jsonify({"lines": lines, "proofread": proofread, "skipped": skipped, "reused": reused, "emotions_reused": emotions_reused})
+
+    @app.route("/api/translate", methods=["POST"])
+    def translate_only():
+        data = request.get_json(silent=True) or {}
+        script_text = data.get("text", "")
+        api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
+        base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+
+        if not api_key:
+            return jsonify({"error": "please configure DeepSeek API Key"}), 400
+
+        existing = state.get("lines") or []
+        if script_text.strip():
+            lines = parse_script(script_text)
+            if not lines:
+                return jsonify({"error": "no valid lines found"}), 400
+            for line in lines:
+                line.setdefault("interval", DEFAULT_INTERVAL)
+            old_by_index = {old.get("index"): old for old in existing}
+            for line in lines:
+                old = old_by_index.get(line.get("index"))
+                if old:
+                    if old.get("emotion"):
+                        line["emotion"] = old["emotion"]
+                    if old.get("interval") is not None:
+                        line["interval"] = old["interval"]
+            same = state.get("script") == script_text and len(existing) == len(lines)
+            if same:
+                for new_line, old_line in zip(lines, existing):
+                    if new_line.get("text") != old_line.get("text") or new_line.get("character") != old_line.get("character"):
+                        same = False
+                        break
+            if same and all((old.get("translated_text") or "") for old in existing):
+                state["script"] = script_text
+                state["lines"] = existing
+                state["lang"] = "ja"
+                return jsonify({"lines": existing, "count": len(existing), "reused": True})
+        else:
+            lines = copy.deepcopy(existing)
+            if not lines:
+                return jsonify({"error": "请先粘贴剧本或先分析情绪"}), 400
+
+        seq = state.get("analysis_seq", 0) + 1
+        state["analysis_seq"] = seq
+        try:
+            translations = translate_lines(
+                lines=lines,
+                api_key=api_key,
+                base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
+                model=config["deepseek"].get("model", "deepseek-v4-flash"),
+            )
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+
+        if state.get("analysis_cancel_seq", -1) >= seq:
+            return jsonify({"status": "cancelled"}), 200
+
+        translation_map = {}
+        for t in translations:
+            idx = t.get("index")
+            if idx is not None:
+                translation_map[idx] = t.get("translation", "")
+        for line in lines:
+            corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
+            line["translated_text"] = corrected or (
+                translation_map.get(line["index"], "").strip() or line["text"]
+            )
+
+        state["script"] = script_text.strip() or state.get("script", "")
+        state["lines"] = lines
+        state["lang"] = "ja"
         state["generated"] = {}
         state["time_info"] = []
         state["merged_path"] = None
@@ -1397,8 +1508,12 @@ def create_app(config_path="config.yaml"):
         state["progress"] = {"current": 0, "total": 0}
         state["srt_only"] = False
         state["current_record_id"] = None
-
-        return jsonify({"lines": lines, "proofread": proofread, "skipped": skipped})
+        push_history("日语翻译")
+        record_event(
+            {"type": "translate", "message": f"日语翻译完成：共 {len(lines)} 条台词", "payload": {"count": len(lines)}},
+            project_root=project_root,
+        )
+        return jsonify({"lines": lines, "count": len(lines), "reused": False})
 
     @app.route("/api/analyze/cancel", methods=["POST"])
     def cancel_analysis():

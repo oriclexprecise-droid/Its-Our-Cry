@@ -131,6 +131,7 @@ async function runAnalyze() {
   status.textContent = "正在分析情绪...";
   status.className = "status-text";
   document.getElementById("btn-analyze").disabled = true;
+  document.getElementById("btn-translate-only").disabled = true;
   if (analysisController) analysisController.abort();
   const controller = new AbortController();
   analysisController = controller;
@@ -160,6 +161,12 @@ async function runAnalyze() {
       const nums = skipped.slice(0, 6).map(s => "第" + s.line_no + "行").join("、");
       status.textContent = "已分析 " + data.lines.length + " 条台词；" + skipped.length + " 行格式不对已跳过（" + nums + (skipped.length > 6 ? " 等" : "") + "）";
       status.className = "status-text error";
+    } else if (data.translated_only) {
+      status.textContent = "情绪已是最新，已补齐日语翻译";
+      status.className = "status-text success";
+    } else if (data.reused) {
+      status.textContent = "剧本未变化，情绪与翻译已是最新，未重复调用 AI";
+      status.className = "status-text success";
     } else {
       status.textContent = "已分析 " + data.lines.length + " 条台词";
       status.className = "status-text success";
@@ -173,7 +180,7 @@ async function runAnalyze() {
     if (cancelBtnReset) cancelBtnReset.classList.add("hidden");
     document.getElementById("progress-text").classList.add("hidden");
     refreshHistory();
-    suggestEmotionParams();
+    if (!data.reused && !data.emotions_reused) suggestEmotionParams();
     const issues = data.proofread || [];
     if (issues.length) showProofreadModal(issues);
   } catch (e) {
@@ -188,10 +195,87 @@ async function runAnalyze() {
     if (analysisController === controller) analysisController = null;
     stopBtn.classList.add("hidden");
     document.getElementById("btn-analyze").disabled = false;
+    updateTranslateOnlyVisibility();
   }
 }
 
+async function runTranslateOnly() {
+  const text = document.getElementById("script-input").value.trim();
+  state.script = text;
+  const apiKey = document.getElementById("api-key").value.trim();
+  const status = document.getElementById("analyze-status");
+  if (!text) { status.textContent = "请粘贴剧本内容"; status.className = "status-text error"; return; }
+  status.textContent = "正在日语翻译...";
+  status.className = "status-text";
+  document.getElementById("btn-analyze").disabled = true;
+  document.getElementById("btn-translate-only").disabled = true;
+  if (analysisController) analysisController.abort();
+  const controller = new AbortController();
+  analysisController = controller;
+  const stopBtn = document.getElementById("btn-stop-analyze");
+  stopBtn.classList.remove("hidden");
+  await syncScriptDraft();
+  try {
+    const data = await api("/api/translate", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang: "ja", base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }), signal: controller.signal });
+    if (data.status === "cancelled") {
+      status.textContent = "已停止翻译";
+      status.className = "status-text";
+      return;
+    }
+    state.lines = data.lines;
+    state.failures = {};
+    state.hasGenerated = false;
+    state.selectMode = false;
+    state.selected = new Set();
+    document.getElementById("btn-select-mode").textContent = "选择模式";
+    document.getElementById("btn-select-mode").classList.remove("active");
+    document.getElementById("selection-toolbar").classList.add("hidden");
+    const srtBtn = document.getElementById("btn-srt-only");
+    if (srtBtn) srtBtn.classList.add("hidden");
+    renderLines();
+    if (data.reused) {
+      status.textContent = "翻译已是最新，未重复调用 AI";
+      status.className = "status-text success";
+    } else {
+      status.textContent = "日语翻译完成：" + data.lines.length + " 条台词";
+      status.className = "status-text success";
+    }
+    document.getElementById("step-review").classList.remove("hidden");
+    document.getElementById("step-download").classList.add("hidden");
+    document.getElementById("btn-merge").classList.add("hidden");
+    document.getElementById("btn-generate").disabled = false;
+    document.getElementById("btn-generate").textContent = "生成全部语音";
+    const cancelBtnReset = document.getElementById("btn-cancel-generate");
+    if (cancelBtnReset) cancelBtnReset.classList.add("hidden");
+    document.getElementById("progress-text").classList.add("hidden");
+    refreshHistory();
+  } catch (e) {
+    if (e.name === "AbortError") {
+      status.textContent = "已停止翻译";
+      status.className = "status-text";
+      return;
+    }
+    status.textContent = e.message;
+    status.className = "status-text error";
+  } finally {
+    if (analysisController === controller) analysisController = null;
+    stopBtn.classList.add("hidden");
+    document.getElementById("btn-analyze").disabled = false;
+    updateTranslateOnlyVisibility();
+  }
+}
+
+function updateTranslateOnlyVisibility() {
+  const btn = document.getElementById("btn-translate-only");
+  if (!btn) return;
+  const langEl = document.getElementById("script-lang");
+  const lang = langEl ? langEl.value : "zh";
+  btn.classList.toggle("hidden", lang !== "ja");
+  btn.disabled = state.generating || !!analysisController;
+}
+
 document.getElementById("btn-analyze").addEventListener("click", runAnalyze);
+document.getElementById("btn-translate-only").addEventListener("click", runTranslateOnly);
 document.getElementById("btn-stop-analyze").addEventListener("click", () => {
   if (analysisController) analysisController.abort();
   api("/api/analyze/cancel", { method: "POST" }).catch(() => {});
@@ -750,6 +834,7 @@ async function confirmNewProject() {
     applyScriptText("", { resetHistory: true });
     const langEl = document.getElementById("script-lang");
     if (langEl) langEl.value = "zh";
+    updateTranslateOnlyVisibility();
     const selBtn = document.getElementById("btn-select-mode");
     if (selBtn) { selBtn.textContent = "选择模式"; selBtn.classList.remove("active"); }
     const selBar = document.getElementById("selection-toolbar");
@@ -1004,6 +1089,7 @@ async function loadRecentRecord(id) {
     applyScriptText(state.script || "", { resetHistory: true });
     const langEl = document.getElementById("script-lang");
     if (langEl) langEl.value = s.lang || "zh";
+    updateTranslateOnlyVisibility();
     state.failures = s.failures || {};
     state.hasGenerated = Object.keys(s.generated || {}).length > 0;
     state.selected = new Set();
@@ -1202,6 +1288,7 @@ async function loadRecentVersion(recordId, versionId) {
     applyScriptText(state.script || "", { resetHistory: true });
     const langEl = document.getElementById("script-lang");
     if (langEl) langEl.value = s.lang || "zh";
+    updateTranslateOnlyVisibility();
     state.failures = s.failures || {};
     state.hasGenerated = Object.keys(s.generated || {}).length > 0;
     state.selected = new Set();
@@ -1351,7 +1438,7 @@ function initRecentRecords() {
   }
   const scriptLangEl = document.getElementById("script-lang");
   if (scriptLangEl) {
-    scriptLangEl.addEventListener("change", () => refreshHistory());
+    scriptLangEl.addEventListener("change", () => { refreshHistory(); updateTranslateOnlyVisibility(); });
   }
   setInterval(maybeAutoSaveVersion, 30000);
   maybeAutoSaveVersion();
