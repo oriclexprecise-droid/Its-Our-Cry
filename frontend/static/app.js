@@ -4320,6 +4320,87 @@ function initModelConfig() {
   loadModels();
 }
 
+function initShareImportExport() {
+  const fileInput = document.getElementById("share-import-file");
+  if (!fileInput) return;
+  let pendingKind = null;
+  const statusFor = kind => {
+    if (kind === "webgal_map") return document.getElementById("webgal-share-status");
+    if (kind === "audio") return document.getElementById("ref-share-status");
+    return document.getElementById("voice-share-status");
+  };
+  const triggerImport = kind => {
+    pendingKind = kind;
+    fileInput.value = "";
+    fileInput.click();
+  };
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    const kind = pendingKind;
+    pendingKind = null;
+    if (!file || !kind) return;
+    const statusEl = statusFor(kind);
+    if (kind === "audio" && !(await showConfirmModal("导入参考音频包会合并到本地语音库，同名文件将被覆盖。确定继续吗？"))) {
+      fileInput.value = "";
+      return;
+    }
+    const form = new FormData();
+    form.append("file", file);
+    if (statusEl) { statusEl.textContent = "正在导入 " + file.name + "..."; statusEl.className = "status-text"; }
+    try {
+      const res = await fetch("/api/share/import", { method: "POST", body: form });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || ("HTTP " + res.status));
+      }
+      if (statusEl) { statusEl.textContent = res.message || "导入成功"; statusEl.className = "status-text success"; }
+      if (kind === "pronunciation") {
+        await loadPronunciation();
+      } else if (kind === "emotion_params") {
+        await loadEmotionParams();
+      } else if (kind === "webgal_map") {
+        await loadEmotions();
+        const cfg = await api("/api/config");
+        loadWebgalMap(cfg);
+      } else if (kind === "audio") {
+        await Promise.all([loadReferenceLibrary(), loadEmotions(), loadEmotionParams()]);
+        const cfg = await api("/api/config");
+        loadWebgalMap(cfg);
+      }
+    } catch (e) {
+      if (statusEl) { statusEl.textContent = "导入失败: " + e.message; statusEl.className = "status-text error"; }
+    }
+    fileInput.value = "";
+  });
+  const exports = [
+    ["btn-export-pronunciation", "pronunciation", "voice-share-status"],
+    ["btn-export-emotion-params", "emotion_params", "voice-share-status"],
+    ["btn-export-webgal-map", "webgal_map", "webgal-share-status"],
+    ["btn-export-ref-audio", "audio", "ref-share-status"]
+  ];
+  exports.forEach(item => {
+    const btn = document.getElementById(item[0]);
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      const statusEl = document.getElementById(item[2]);
+      if (item[1] === "audio" && !(await showConfirmModal("导出全部参考音频、字幕与情绪列表为 ZIP 压缩包？文件较大时可能需要等待。"))) return;
+      if (statusEl) { statusEl.textContent = "正在生成导出文件..."; statusEl.className = "status-text"; }
+      window.location = "/api/share/export?type=" + item[1];
+      if (statusEl) { statusEl.textContent = "导出文件已开始下载"; statusEl.className = "status-text success"; }
+    });
+  });
+  const imports = [
+    ["btn-import-pronunciation", "pronunciation"],
+    ["btn-import-emotion-params", "emotion_params"],
+    ["btn-import-webgal-map", "webgal_map"],
+    ["btn-import-ref-audio", "audio"]
+  ];
+  imports.forEach(item => {
+    const btn = document.getElementById(item[0]);
+    if (btn) btn.addEventListener("click", () => triggerImport(item[1]));
+  });
+}
+
 initAIConfig();
 initNarrationConfig();
 initPronunciationConfig();
@@ -4328,6 +4409,7 @@ initModelConfig();
 initEmotions();
 initEmotionParams();
 initReferenceLibrary();
+initShareImportExport();
 const refreshBtn = document.getElementById("btn-refresh");
 const refreshModal = document.getElementById("refresh-modal");
 if (refreshBtn && refreshModal) {

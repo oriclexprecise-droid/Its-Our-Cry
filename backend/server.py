@@ -1,5 +1,6 @@
 """Flask backend for MyGO TTS Workbench."""
 
+import io
 import json
 import os
 import random
@@ -7,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -19,7 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, after_this_request, jsonify, render_template, request, send_file
 
 from .script_parser import find_character_issues, parse_script
 from .emotion_analyzer import analyze_emotions, suggest_params
@@ -43,6 +45,7 @@ DEFAULT_VERSION_LIMIT = 50
 AUTO_SAVE_INTERVAL_MIN = 1
 AUTO_SAVE_INTERVAL_MAX = 120
 DEFAULT_AUTO_SAVE_INTERVAL = 5
+APP_VERSION = "2.1.0"
 
 
 def _recent_version_meta(record, limit=DEFAULT_VERSION_LIMIT):
@@ -334,6 +337,7 @@ def _persist_user_settings(project_root, config):
         for field, key in (("base_url", "deepseek_base_url"), ("model", "deepseek_model"), ("name", "deepseek_name")):
             settings[key] = deepseek.get(field, "")
         settings["emotions"] = list(config.get("emotions", []))
+        settings["pronunciation"] = [dict(x) for x in (config.get("pronunciation") or [])]
         settings["webgal_emotion_map"] = dict(config.get("webgal_emotion_map") or {})
         settings["webgal_retranslate_on_analyze"] = bool(config.get("webgal_retranslate_on_analyze", True))
         settings["emotion_params"] = config.get("emotion_params", {})
@@ -2425,6 +2429,306 @@ def create_app(config_path="config.yaml"):
             "payload": {"character": key, "emotion": emotion, "file": name},
         }, project_root)
         return jsonify({"status": "ok"})
+
+    def _share_param_payload(kind):
+        if kind == "pronunciation":
+            return {
+                "schema": 1,
+                "kind": "pronunciation",
+                "app_version": APP_VERSION,
+                "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "data": {"entries": [dict(x) for x in (config.get("pronunciation") or [])]},
+            }
+        if kind == "emotion_params":
+            return {
+                "schema": 1,
+                "kind": "emotion_params",
+                "app_version": APP_VERSION,
+                "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "data": {
+                    "params": config.get("emotion_params", {}),
+                    "enabled": bool(config.get("use_emotion_params", True)),
+                    "presets": config.get("emotion_param_presets", {}),
+                    "emotions": list(config["emotions"]),
+                },
+            }
+        if kind == "webgal_map":
+            return {
+                "schema": 1,
+                "kind": "webgal_map",
+                "app_version": APP_VERSION,
+                "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "data": {
+                    "map": dict(config.get("webgal_emotion_map", {})),
+                    "emotions": list(config["emotions"]),
+                },
+            }
+        return None
+
+    @app.route("/api/share/export", methods=["GET"])
+    def share_export():
+        kind = str(request.args.get("type") or "").strip()
+        now = time.strftime("%Y%m%d_%H%M%S")
+        if kind == "audio":
+            return _share_export_audio(now)
+        payload = _share_param_payload(kind)
+        if payload is None:
+            return jsonify({"error": "未知导出类型"}), 400
+        names = {
+            "pronunciation": "its_our_cry_纠音词典_" + now + ".json",
+            "emotion_params": "its_our_cry_情绪参数模板_" + now + ".json",
+            "webgal_map": "its_our_cry_脚本情绪映射_" + now + ".json",
+        }
+        raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        return send_file(
+            io.BytesIO(raw),
+            as_attachment=True,
+            download_name=names[kind],
+            mimetype="application/json",
+        )
+
+    def _share_export_audio(now):
+        tmp = Path(tempfile.gettempdir()) / ("its_our_cry_audio_" + uuid.uuid4().hex + ".zip")
+        manifest_files = []
+        characters = []
+        try:
+            with zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as zf:
+                for key, m in models.items():
+                    base = _ref_audio_base(key)
+                    if base is None or not base.is_dir():
+                        continue
+                    rel_dir = base.name
+                    characters.append({
+                        "key": key,
+                        "name": DEFAULT_MODEL_ALIASES.get(key, key),
+                        "dir": rel_dir,
+                    })
+                    for emo_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+                        emotion = emo_dir.name
+                        if emotion not in config["emotions"]:
+                            continue
+                        for f in sorted(emo_dir.iterdir()):
+                            if not f.is_file():
+                                continue
+                            if f.suffix.lower() in AUDIO_EXTS:
+                                arc = "reference_audio/" + rel_dir + "/" + emotion + "/" + f.name
+                                zf.write(str(f), arc)
+                                manifest_files.append({
+                                    "zip_path": arc,
+                                    "key": key,
+                                    "character": DEFAULT_MODEL_ALIASES.get(key, key),
+                                    "emotion": emotion,
+                                    "name": f.name,
+                                    "prompt_text": _read_ref_prompt(f),
+                                })
+                                prompt_path = _ref_prompt_path(f)
+                                if prompt_path.exists():
+                                    zf.write(str(prompt_path), arc + ".txt")
+                zf.writestr("manifest.json", json.dumps({
+                    "schema": 1,
+                    "kind": "audio",
+                    "app_version": APP_VERSION,
+                    "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "emotions": list(config["emotions"]),
+                    "characters": characters,
+                    "files": manifest_files,
+                }, ensure_ascii=False, indent=2))
+        except Exception as e:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return jsonify({"error": "导出失败: " + str(e)}), 500
+
+        @after_this_request
+        def _cleanup_zip(resp):
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return resp
+
+        return send_file(
+            str(tmp),
+            as_attachment=True,
+            download_name="its_our_cry_参考音频库_" + now + ".zip",
+            mimetype="application/zip",
+        )
+
+    @app.route("/api/share/import", methods=["POST"])
+    def share_import():
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return jsonify({"error": "未选择文件"}), 400
+        raw = f.read()
+        if not raw:
+            return jsonify({"error": "文件为空"}), 400
+        if raw[:3] == b"\xef\xbb\xbf":
+            raw = raw[3:]
+        filename = str(f.filename).lower()
+        if filename.endswith(".json") or raw.lstrip()[:1] == b"{":
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except Exception:
+                return jsonify({"error": "JSON 文件解析失败"}), 400
+            return _share_import_params(payload)
+        if filename.endswith(".zip"):
+            return _share_import_audio(raw)
+        return jsonify({"error": "仅支持 .json 或 .zip 文件"}), 400
+
+    def _share_import_params(payload):
+        if not isinstance(payload, dict) or payload.get("schema") != 1:
+            return jsonify({"error": "不支持的预设文件格式"}), 400
+        kind = str(payload.get("kind") or "").strip()
+        data = payload.get("data") or {}
+        if kind == "pronunciation":
+            entries = data.get("entries")
+            if not isinstance(entries, list):
+                return jsonify({"error": "纠音词典格式不正确"}), 400
+            cleaned = []
+            for p in entries:
+                if not isinstance(p, dict):
+                    continue
+                zh = str(p.get("zh", "")).strip()
+                ja = str(p.get("ja", "")).strip()
+                if zh and ja:
+                    cleaned.append({"zh": zh, "ja": ja})
+            config["pronunciation"] = cleaned
+            _persist_user_settings(project_root, config)
+            record_event({"type": "share_import", "message": "导入纠音词典 " + str(len(cleaned)) + " 条", "payload": {"kind": kind}}, project_root)
+            return jsonify({"status": "ok", "kind": kind, "message": "已导入纠音词典 " + str(len(cleaned)) + " 条"})
+        if kind == "emotion_params":
+            raw_params = data.get("params")
+            if not isinstance(raw_params, dict):
+                return jsonify({"error": "情绪参数格式不正确"}), 400
+            config["emotion_params"] = _clean_emotion_params(raw_params)
+            config["use_emotion_params"] = bool(data.get("enabled", True))
+            if isinstance(data.get("presets"), dict):
+                config["emotion_param_presets"] = {
+                    str(k).strip(): dict(v) for k, v in data["presets"].items() if isinstance(v, dict)
+                }
+            added = _share_merge_emotions(data.get("emotions"))
+            _persist_user_settings(project_root, config)
+            record_event({"type": "share_import", "message": "导入情绪参数模板", "payload": {"kind": kind}}, project_root)
+            msg = "已导入情绪参数模板（含已保存预设）"
+            if added:
+                msg += "，补全新情绪 " + str(len(added)) + " 个"
+            return jsonify({"status": "ok", "kind": kind, "message": msg, "added_emotions": added})
+        if kind == "webgal_map":
+            raw_map = data.get("map")
+            if not isinstance(raw_map, dict):
+                return jsonify({"error": "情绪映射格式不正确"}), 400
+            cleaned = {}
+            for k, v in raw_map.items():
+                key = str(k).strip().lower()
+                val = str(v).strip()
+                if key and val:
+                    cleaned[key] = val
+            config["webgal_emotion_map"] = cleaned
+            added = _share_merge_emotions(data.get("emotions"))
+            _persist_user_settings(project_root, config)
+            record_event({"type": "share_import", "message": "导入脚本情绪映射 " + str(len(cleaned)) + " 条", "payload": {"kind": kind}}, project_root)
+            msg = "已导入脚本情绪映射 " + str(len(cleaned)) + " 条"
+            if added:
+                msg += "，补全新情绪 " + str(len(added)) + " 个"
+            return jsonify({"status": "ok", "kind": kind, "message": msg, "added_emotions": added})
+        return jsonify({"error": "未知预设类型"}), 400
+
+    def _share_merge_emotions(raw_list):
+        added = []
+        if not isinstance(raw_list, list):
+            return added
+        for e in raw_list:
+            name = str(e).strip()
+            if name and name not in config["emotions"]:
+                config["emotions"].append(name)
+                added.append(name)
+        return added
+
+    def _share_import_audio(raw):
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(raw))
+        except Exception:
+            return jsonify({"error": "ZIP 文件无法打开，可能已损坏"}), 400
+        try:
+            names = zf.namelist()
+        except Exception:
+            return jsonify({"error": "ZIP 文件读取失败"}), 400
+        manifest = None
+        if "manifest.json" in names:
+            try:
+                manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+            except Exception:
+                manifest = None
+        if not isinstance(manifest, dict) or manifest.get("kind") != "audio":
+            return jsonify({"error": "不是有效的参考音频包"}), 400
+        ref_base = project_root / "reference_audio"
+        ref_base.mkdir(parents=True, exist_ok=True)
+        ref_resolved = str(ref_base.resolve())
+        imported = 0
+        replaced = 0
+        added_emotions = []
+        try:
+            for info in zf.infolist():
+                arc = str(info.filename).replace(chr(92), "/")
+                if info.is_dir() or not arc.startswith("reference_audio/"):
+                    continue
+                parts = arc.split("/")
+                if len(parts) != 4:
+                    continue
+                _, char_dir, emotion, filename = parts
+                if not char_dir or char_dir in (".", "..") or "/" in char_dir:
+                    continue
+                if not emotion or emotion in (".", "..") or "/" in emotion:
+                    continue
+                filename = Path(filename).name
+                if not filename:
+                    continue
+                is_prompt = filename.endswith(".txt")
+                if is_prompt:
+                    if filename == ".txt" or Path(filename[:-4]).suffix.lower() not in AUDIO_EXTS:
+                        continue
+                else:
+                    if Path(filename).suffix.lower() not in AUDIO_EXTS:
+                        continue
+                target = ref_base / char_dir / emotion / filename
+                try:
+                    if not str(target.resolve()).startswith(ref_resolved):
+                        continue
+                except Exception:
+                    continue
+                if emotion not in config["emotions"]:
+                    config["emotions"].append(emotion)
+                    added_emotions.append(emotion)
+                try:
+                    content = zf.read(info)
+                except Exception:
+                    continue
+                existed = target.exists()
+                try:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(content)
+                except Exception as e:
+                    return jsonify({"error": "写入失败: " + str(e)}), 500
+                if not is_prompt:
+                    imported += 1
+                    if existed:
+                        replaced += 1
+        finally:
+            zf.close()
+        if imported or added_emotions:
+            _persist_user_settings(project_root, config)
+        message = "已导入参考音频 " + str(imported) + " 个"
+        if added_emotions:
+            message += "，新增情绪 " + str(len(added_emotions)) + " 个"
+        if replaced:
+            message += "，覆盖同名文件 " + str(replaced) + " 个"
+        record_event({
+            "type": "share_import",
+            "message": message,
+            "payload": {"kind": "audio", "imported": imported, "replaced": replaced, "added": added_emotions},
+        }, project_root)
+        return jsonify({"status": "ok", "kind": "audio", "message": message, "imported": imported, "replaced": replaced, "added_emotions": added_emotions})
 
     def narration_seconds(text):
         nr = config.get("narration", {})
