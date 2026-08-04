@@ -23,11 +23,16 @@ function showConfirmModal(message, options) {
     const msgEl = document.getElementById("confirm-modal-message");
     const okBtn = document.getElementById("btn-modal-ok");
     const cancelBtn = document.getElementById("btn-modal-cancel");
+    const altBtn = document.getElementById("btn-modal-alt");
     titleEl.textContent = options.title || "确认操作";
     msgEl.textContent = message;
     okBtn.textContent = options.okText || "确定";
     cancelBtn.textContent = options.cancelText || "取消";
     cancelBtn.classList.remove("hidden");
+    if (altBtn) {
+      altBtn.textContent = options.altText || "";
+      altBtn.classList.toggle("hidden", !options.altText);
+    }
     let settled = false;
     const finish = (value) => {
       if (settled) return;
@@ -35,11 +40,13 @@ function showConfirmModal(message, options) {
       modal.classList.add("hidden");
       okBtn.onclick = null;
       cancelBtn.onclick = null;
+      if (altBtn) altBtn.onclick = null;
       modal.onclick = null;
       resolve(value);
     };
     okBtn.onclick = () => finish(true);
     cancelBtn.onclick = () => finish(false);
+    if (altBtn) altBtn.onclick = () => finish("alt");
     modal.onclick = (e) => { if (e.target === modal) finish(false); };
     modal.classList.remove("hidden");
   });
@@ -54,10 +61,12 @@ function showAlertModal(message, options) {
     const msgEl = document.getElementById("confirm-modal-message");
     const okBtn = document.getElementById("btn-modal-ok");
     const cancelBtn = document.getElementById("btn-modal-cancel");
+    const altBtn = document.getElementById("btn-modal-alt");
     titleEl.textContent = options.title || "提示";
     msgEl.textContent = message;
     okBtn.textContent = options.okText || "知道了";
     cancelBtn.classList.add("hidden");
+    if (altBtn) altBtn.classList.add("hidden");
     let settled = false;
     const finish = () => {
       if (settled) return;
@@ -65,6 +74,7 @@ function showAlertModal(message, options) {
       modal.classList.add("hidden");
       okBtn.onclick = null;
       cancelBtn.onclick = null;
+      if (altBtn) { altBtn.onclick = null; altBtn.classList.add("hidden"); }
       modal.onclick = null;
       cancelBtn.classList.remove("hidden");
       resolve();
@@ -645,7 +655,7 @@ function showProjectPicker() {
   if (workbench) workbench.classList.add("hidden");
   if (webgal) webgal.classList.add("hidden");
   if (settings) settings.classList.add("hidden");
-  ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-recent"].forEach(id => {
+  ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-recent", "btn-exit-home"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add("hidden");
   });
@@ -653,6 +663,34 @@ function showProjectPicker() {
   if (settingsBtn) settingsBtn.classList.remove("hidden");
   const banner = document.getElementById("deploy-banner");
   if (banner) banner.classList.add("hidden");
+}
+
+function hasDraftContent() {
+  if ((state.lines && state.lines.length) || (state.script || "").trim()) return true;
+  if (state.projectType === "webgal" && state.webgal && (state.webgal.source || "").trim()) return true;
+  return false;
+}
+
+async function exitToHome() {
+  const projectsView = document.getElementById("view-projects");
+  if (projectsView && !projectsView.classList.contains("hidden")) { showProjectPicker(); return; }
+  if (state.generating || state.webgal.generating) { toast("生成中，请取消后再退出到主页", "error"); return; }
+  if (analysisController || state.webgal.analyzing || webgalTranslateController) { toast("分析/翻译中，请取消后再退出到主页", "error"); return; }
+  if (hasDraftContent()) {
+    const choice = await showConfirmModal("是否保存当前草稿？", {
+      title: "退出到主页",
+      okText: "保存并退出",
+      cancelText: "取消",
+      altText: "不保存退出"
+    });
+    if (choice === false) return;
+    if (choice === true) {
+      const saved = await saveRecentRecord();
+      if (!saved) { toast("保存失败，已取消退出", "error"); return; }
+    }
+  }
+  showProjectPicker();
+  toast("已退出到主页", "success");
 }
 
 function createNewProject() {
@@ -917,17 +955,19 @@ function localScriptRedo() {
   return false;
 }
 async function saveRecentRecord() {
-  if (state.generating) { setRecentStatus("生成中，请稍后再保存版本", "error"); return; }
+  if (state.generating) { setRecentStatus("生成中，请稍后再保存版本", "error"); return false; }
   await syncScriptDraft();
-  if (!state.lines.length && !(state.script || "").trim()) { setRecentStatus("还没有可保存的剧本", "error"); return; }
+  if (!state.lines.length && !(state.script || "").trim() && !(state.webgal && (state.webgal.source || "").trim())) { setRecentStatus("还没有可保存的剧本", "error"); return false; }
   setRecentStatus("正在保存...", "");
   try {
     await syncWebGalState();
     await api("/api/recent/save", { method: "POST" });
     setRecentStatus("已保存小版本（手动）", "success");
     refreshRecentList();
+    return true;
   } catch (e) {
     setRecentStatus("保存失败: " + e.message, "error");
+    return false;
   }
 }
 
@@ -3083,6 +3123,8 @@ function showSettings(tab) {
   if (webgal) webgal.classList.add("hidden");
   settings.classList.remove("hidden");
   document.getElementById("btn-back-workbench").classList.remove("hidden");
+  const exitHomeBtn = document.getElementById("btn-exit-home");
+  if (exitHomeBtn) exitHomeBtn.classList.remove("hidden");
   if (!tab) {
     const installed = localStorage.getItem("mygo_deploy_installed") === "yes";
     const saved = localStorage.getItem(SETTINGS_TAB_KEY);
@@ -3104,7 +3146,7 @@ function showWorkbench() {
   if (webgal) webgal.classList.toggle("hidden", !isWebGal);
   settings.classList.add("hidden");
   document.getElementById("btn-back-workbench").classList.add("hidden");
-  ["btn-undo", "btn-redo", "btn-refresh", "btn-settings", "btn-recent"].forEach(id => {
+  ["btn-undo", "btn-redo", "btn-refresh", "btn-settings", "btn-recent", "btn-exit-home"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.remove("hidden");
   });
@@ -3123,6 +3165,8 @@ function initSettingsNav() {
   document.getElementById("btn-back-workbench").addEventListener("click", () => {
     if (settingsReturnTo === "projects") showProjectPicker(); else showWorkbench();
   });
+  const exitHomeBtn = document.getElementById("btn-exit-home");
+  if (exitHomeBtn) exitHomeBtn.addEventListener("click", exitToHome);
   document.querySelectorAll(".settings-tab").forEach(btn => {
     btn.addEventListener("click", () => showSettings(btn.dataset.settingsTab));
   });
