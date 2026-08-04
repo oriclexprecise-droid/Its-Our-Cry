@@ -19,3 +19,8 @@ packaging/installer/*.exe
 
 packaging/tools/innosetup6/
 packaging/tools/*.exe
+
+# 大文件不入库（模型权重、参考音频由安装包/网盘分发）
+GPT_weights_v2ProPlus/
+SoVITS_weights_v2ProPlus/
+reference_audio/**/*.mp3
