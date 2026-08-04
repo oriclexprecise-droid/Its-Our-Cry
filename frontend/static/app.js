@@ -180,7 +180,7 @@ async function runAnalyze() {
     if (cancelBtnReset) cancelBtnReset.classList.add("hidden");
     document.getElementById("progress-text").classList.add("hidden");
     refreshHistory();
-    if (!data.reused && !data.emotions_reused) suggestEmotionParams();
+    if (!data.reused && !data.emotions_reused && emotionParamsEnabled) suggestEmotionParams();
     const issues = data.proofread || [];
     if (issues.length) showProofreadModal(issues);
   } catch (e) {

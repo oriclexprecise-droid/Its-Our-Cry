@@ -135,7 +135,7 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
     if not emotions:
         return {}
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0, max_retries=1)
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -206,7 +206,7 @@ def analyze_emotions(
     if not emotions:
         emotions = list(DEFAULT_EMOTIONS)
 
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0, max_retries=1)
 
     user_prompt = build_analysis_prompt(lines)
 

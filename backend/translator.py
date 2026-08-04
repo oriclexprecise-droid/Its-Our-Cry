@@ -46,7 +46,7 @@ def translate_lines(
     if not lines:
         return []
 
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0, max_retries=1)
     user_prompt = build_translate_prompt(lines)
 
     results = None
