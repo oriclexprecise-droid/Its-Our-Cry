@@ -108,6 +108,31 @@ def _pick_save_dialog(default_name, filetypes, initial_dir=None):
     except Exception:
         return ""
 
+
+def _pick_folder_dialog(initial_dir=None):
+    """Open a native Windows folder picker; returns chosen path or empty string."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        kwargs = {"title": "选择音频导出位置", "parent": root}
+        if initial_dir:
+            try:
+                Path(initial_dir).mkdir(parents=True, exist_ok=True)
+                kwargs["initialdir"] = str(initial_dir)
+            except Exception:
+                pass
+        path = filedialog.askdirectory(**kwargs)
+        root.destroy()
+        return str(path or "").strip()
+    except Exception:
+        return ""
+
 DEFAULT_PRONUNCIATION = [
     {"zh": "长崎素世", "ja": "長崎そよ"},
     {"zh": "soyo", "ja": "そよ"},
@@ -130,15 +155,45 @@ DEFAULT_PRONUNCIATION = [
 ]
 
 
-def correct_pronunciation(text, pronunciation):
-    """整句完全等于词条中文时，返回对应的日文假名。"""
-    if not text:
-        return None
-    key = str(text).strip()
+def _strip_psy_wrap(text):
+    """去掉心理活动常见的（…）括号后再查纠音，保证“（爱音）”也能命中。"""
+    t = str(text or "").strip()
+    if len(t) >= 2 and ((t[0] == "(" and t[-1] == ")") or (t[0] == "（" and t[-1] == "）")):
+        return t[1:-1].strip()
+    return t
+
+
+def _exact_pronunciation(text, pronunciation):
+    """仅整句完全命中词条时返回日文，用于覆盖 AI 翻译。"""
+    key = _strip_psy_wrap(text)
     for entry in pronunciation or []:
         if str(entry.get("zh", "")).strip() == key:
             return str(entry.get("ja", "")).strip()
     return None
+
+def correct_pronunciation(text, pronunciation):
+    """整句完全等于词条中文时返回日文；否则按“长词条优先”做包含替换。"""
+    if not text:
+        return None
+    table = {}
+    for entry in pronunciation or []:
+        zh = str(entry.get("zh", "")).strip()
+        ja = str(entry.get("ja", "")).strip()
+        if zh and ja and zh not in table:
+            table[zh] = ja
+    if not table:
+        return None
+    key = _strip_psy_wrap(text)
+    if key in table:
+        return table[key]
+    out = key
+    for zh in sorted(table, key=len, reverse=True):
+        ja = table[zh]
+        if zh in out and ja not in out:
+            out = out.replace(zh, ja)
+    if out == key:
+        return None
+    return out
 
 
 def _clean_emotion_params(raw):
@@ -1422,7 +1477,7 @@ def create_app(config_path="config.yaml"):
                     if idx is not None:
                         translation_map[idx] = t.get("translation", "")
                 for line in missing:
-                    corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
+                    corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
                     line["translated_text"] = corrected or (
                         translation_map.get(line["index"], "").strip() or line["text"]
                     )
@@ -1531,7 +1586,7 @@ def create_app(config_path="config.yaml"):
             if idx is not None:
                 translation_map[idx] = t.get("translation", "")
         for line in lines:
-            corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
+            corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
             line["translated_text"] = corrected or (
                 translation_map.get(line["index"], "").strip() or line["text"]
             )
@@ -1678,7 +1733,14 @@ def create_app(config_path="config.yaml"):
         except Exception as e:
             traceback.print_exc()
             return jsonify({"error": "日语翻译失败: " + str(e)}), 500
-        wg["translations"] = {str(t.get("index")): t.get("translation", "") for t in translations if t.get("index") is not None}
+        wg["translations"] = {}
+        for t in translations:
+            if t.get("index") is None:
+                continue
+            idx = int(t.get("index"))
+            d = next((x for x in dialogues if x["index"] == idx), None)
+            corrected = _exact_pronunciation(d["text"] if d else "", config.get("pronunciation", []))
+            wg["translations"][str(idx)] = corrected or t.get("translation", "")
         return jsonify({"status": "ok", "translations": wg["translations"]})
 
     @app.route("/api/webgal/analyze", methods=["POST"])
@@ -1742,8 +1804,12 @@ def create_app(config_path="config.yaml"):
                     traceback.print_exc()
                     return jsonify({"error": "日语翻译失败: " + str(e)}), 500
                 for t in translations:
-                    if t.get("index") is not None:
-                        existing[str(t.get("index"))] = t.get("translation", "")
+                    if t.get("index") is None:
+                        continue
+                    idx = int(t.get("index"))
+                    d = next((x for x in dialogues if x["index"] == idx), None)
+                    corrected = _exact_pronunciation(d["text"] if d else "", config.get("pronunciation", []))
+                    existing[str(idx)] = corrected or t.get("translation", "")
             wg["translations"] = existing
         else:
             wg["translations"] = {}
@@ -1838,14 +1904,13 @@ def create_app(config_path="config.yaml"):
                     if d["is_psy"]:
                         tts_text = tts_text.strip("（）()").strip()
                     if lang == "ja":
-                        corrected = correct_pronunciation(d["text"], config.get("pronunciation", []))
+                        corrected = _exact_pronunciation(d["text"], config.get("pronunciation", []))
                         if corrected:
                             tts_text = corrected
                         else:
                             tts_text = (wg.get("translations") or {}).get(str(idx), "") or ""
                             if not tts_text:
-                                fail(idx, "缺少日语翻译，请重新解析或翻译后再生成")
-                                continue
+                                tts_text = correct_pronunciation(d["text"], config.get("pronunciation", [])) or d["text"]
                     ref_prompt = ref.get("prompt_text") or ""
                     output_path = out_dir / f"{idx:04d}_{char}_{emotion}.wav"
                     emo_params = {}
@@ -1925,6 +1990,16 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "音频文件不存在"}), 404
         return send_file(path, mimetype="audio/wav")
 
+    @app.route("/api/webgal/pick-export-dir", methods=["POST"])
+    def webgal_pick_export_dir():
+        try:
+            picked = _pick_folder_dialog()
+        except Exception as e:
+            return jsonify({"error": "选择导出位置失败: " + str(e)}), 500
+        if not picked:
+            return jsonify({"status": "cancelled", "path": ""})
+        return jsonify({"status": "ok", "path": picked})
+
     @app.route("/api/webgal/export", methods=["POST"])
     def webgal_export():
         wg = state.get("webgal") or {}
@@ -1937,11 +2012,14 @@ def create_app(config_path="config.yaml"):
         folder_name = str(data.get("folder_name") or "").strip()
         if not folder_name:
             return jsonify({"error": "请输入导出文件夹名称"}), 400
+        output_dir = str(data.get("output_dir") or "").strip()
+        if output_dir and not Path(output_dir).is_dir():
+            return jsonify({"error": "指定的导出位置不存在，请重新选择"}), 400
         if re.search(r'[\\/:*?"<>|\r\n]', folder_name) or folder_name in (".", ".."):
             return jsonify({"error": "文件夹名称包含非法字符"}), 400
         if len(folder_name) > 64:
             return jsonify({"error": "文件夹名称过长"}), 400
-        export_root = project_root / "exports"
+        export_root = Path(output_dir) if output_dir else (project_root / "exports")
         export_root.mkdir(parents=True, exist_ok=True)
         export_dir = export_root / folder_name
         if export_dir.exists():
@@ -2099,7 +2177,7 @@ def create_app(config_path="config.yaml"):
                                     model=model,
                                 )
                                 translated = next((t.get("translation", "") for t in translations if t.get("index") == 0), "").strip()
-                                corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
+                                corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
                                 line["translated_text"] = corrected or translated or line["text"]
                             invalidate_segment()
                             record_event(
@@ -2998,7 +3076,7 @@ def create_app(config_path="config.yaml"):
                         try:
                             tts_text = line.get("translated_text") or line["text"]
                             if tts_lang == "ja":
-                                corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))
+                                corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
                                 if corrected:
                                     tts_text = corrected
                             duration = engine.synthesize_to_file(

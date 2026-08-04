@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260804t">
+<link rel="stylesheet" href="/static/style.css?v=20260804b">
 <style>
 .creator-tip {
   position: fixed;
@@ -228,6 +228,10 @@
         <div class="export-form">
           <input type="text" id="webgal-export-folder" placeholder="导出文件夹名称" autocomplete="off">
           <button id="btn-webgal-export" class="btn-secondary">导出</button>
+        </div>
+        <div class="export-form export-dir-row">
+          <button id="btn-webgal-pick-export-dir" class="btn-secondary">选择音频导出位置</button>
+          <span id="webgal-export-dir-label" class="export-dir-label">未选择，将导出到程序 exports 目录</span>
         </div>
         <button id="btn-webgal-open-export" class="btn-secondary hidden">打开导出文件夹</button>
         <span id="webgal-export-status" class="status-text"></span>
@@ -700,7 +704,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260804t"></script>
+<script src="/static/app.js?v=20260804b"></script>
 <script>
 (function () {
   var tips = [

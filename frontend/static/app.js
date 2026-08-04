@@ -1,4 +1,4 @@
-const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [], projectType: "srt", webgal: { source: "", dialogues: [], emotions: {}, translations: {}, generated: {}, failures: {}, generating: false, lastExport: "", psyVoice: false, psyCharacter: "", lang: "zh", analyzing: false, progress: { current: 0, total: 0 } } };
+const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [], projectType: "srt", webgal: { source: "", dialogues: [], emotions: {}, translations: {}, generated: {}, failures: {}, generating: false, lastExport: "", psyVoice: false, psyCharacter: "", lang: "zh", analyzing: false, progress: { current: 0, total: 0 }, exportDir: "" } };
 let audioPlayer = null;
 let analysisController = null;
 let webgalParseController = null;
@@ -3052,6 +3052,20 @@ function finishWebGalGeneration() {
   refreshRecentList();
 }
 
+async function pickWebGalExportDir() {
+  const statusEl = document.getElementById("webgal-export-status");
+  try {
+    const res = await api("/api/webgal/pick-export-dir", { method: "POST" });
+    if (!res.path) return;
+    state.webgal.exportDir = res.path;
+    const label = document.getElementById("webgal-export-dir-label");
+    if (label) label.textContent = "音频将导出到：" + res.path;
+    if (statusEl) { statusEl.textContent = ""; statusEl.className = "status-text"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "选择导出位置失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
 async function exportWebGal() {
   const folderName = document.getElementById("webgal-export-folder").value.trim();
   const statusEl = document.getElementById("webgal-export-status");
@@ -3062,7 +3076,7 @@ async function exportWebGal() {
   const btn = document.getElementById("btn-webgal-export");
   if (btn) btn.disabled = true;
   try {
-    const data = await api("/api/webgal/export", { method: "POST", body: JSON.stringify({ folder_name: folderName }) });
+    const data = await api("/api/webgal/export", { method: "POST", body: JSON.stringify({ folder_name: folderName, output_dir: state.webgal.exportDir || "" }) });
     state.webgal.lastExport = data.folder;
     const openBtn = document.getElementById("btn-webgal-open-export");
     if (openBtn) openBtn.classList.remove("hidden");
@@ -3124,6 +3138,8 @@ function initWebGal() {
   });
   const exportBtn = document.getElementById("btn-webgal-export");
   if (exportBtn) exportBtn.addEventListener("click", exportWebGal);
+  const pickDirBtn = document.getElementById("btn-webgal-pick-export-dir");
+  if (pickDirBtn) pickDirBtn.addEventListener("click", pickWebGalExportDir);
   const openBtn = document.getElementById("btn-webgal-open-export");
   if (openBtn) openBtn.addEventListener("click", async () => {
     if (!state.webgal.lastExport) return;

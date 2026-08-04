@@ -178,6 +178,9 @@ textarea { min-height: 240px; line-height: 1.6; }
 .download-links a { font-size: 14px; }
 .export-form { display: flex; gap: 10px; width: 100%; }
 .export-form input { flex: 1; }
+.export-dir-row { align-items: center; margin-top: 4px; }
+.export-dir-row .btn-secondary { flex: 0 0 auto; }
+.export-dir-label { font-size: 12px; color: #8ab4f8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .review-actions { margin-top: 16px; display: flex; align-items: center; gap: 16px; }
 .review-actions .status-text { margin-top: 0; }
 #line-count { font-size: 13px; color: #888; }
