@@ -243,6 +243,7 @@
         <button type="button" class="settings-tab" data-settings-tab="models">模型配置</button>
         <button type="button" class="settings-tab" data-settings-tab="voice">语音与情绪</button>
         <button type="button" class="settings-tab" data-settings-tab="webgal">WebGaL 设置</button>
+        <button type="button" class="settings-tab" data-settings-tab="qiniu">云共享</button>
         <button type="button" class="settings-tab" data-settings-tab="clean">清理空间</button>
         <button type="button" class="settings-tab" data-settings-tab="log">日志</button>
         <button type="button" class="settings-tab" data-settings-tab="legal">声明</button>
@@ -460,6 +461,83 @@
             <button type="button" id="btn-save-webgal-retranslate" class="btn-secondary btn-small btn-flex">保存</button>
           </div>
           <span id="webgal-retranslate-status" class="status-text"></span>
+        </div>
+      </div>
+    <section class="panel settings-page" data-settings-page="qiniu">
+      <div class="panel-header"><h2>云共享</h2></div>
+      <div class="panel-body">
+        <div class="side-section">
+          <h3 class="side-section-title">连接状态</h3>
+          <p class="side-hint">通过七牛云 Kodo 共享参考音频、预设和二创素材。凭证保存在本机，不会上传。</p>
+          <div id="qiniu-status-line" class="status-text">加载中...</div>
+          <div class="btn-row">
+            <button type="button" id="btn-qiniu-test" class="btn-secondary btn-small">测试连接</button>
+            <button type="button" id="btn-qiniu-refresh" class="btn-secondary btn-small">刷新素材</button>
+          </div>
+        </div>
+        <div class="side-section">
+          <h3 class="side-section-title">开发者模式</h3>
+          <p class="side-hint">输入开发者密码后可配置七牛云账号并管理共享素材。</p>
+          <div class="pron-add-row">
+            <input type="password" id="qiniu-dev-password" placeholder="开发者密码" autocomplete="off">
+            <button type="button" id="btn-qiniu-unlock" class="btn-secondary btn-small">解锁</button>
+            <button type="button" id="btn-qiniu-lock" class="btn-secondary btn-small hidden">退出</button>
+          </div>
+          <div id="qiniu-dev-config" class="hidden">
+            <div class="pron-add-row">
+              <input type="text" id="qiniu-access-key" placeholder="AccessKey" autocomplete="off">
+              <input type="password" id="qiniu-secret-key" placeholder="SecretKey" autocomplete="off">
+            </div>
+            <div class="pron-add-row">
+              <input type="text" id="qiniu-bucket" placeholder="存储空间名 Bucket" autocomplete="off">
+              <input type="text" id="qiniu-domain" placeholder="访问域名，如 xxx.qiniucdn.com" autocomplete="off">
+            </div>
+            <div class="pron-add-row">
+              <select id="qiniu-region">
+                <option value="z0">华东 z0</option>
+                <option value="z1">华北 z1</option>
+                <option value="z2">华南 z2</option>
+                <option value="na0">北美 na0</option>
+                <option value="as0">东南亚 as0</option>
+              </select>
+              <label class="wg-check"><input type="checkbox" id="qiniu-private"> 私有空间（下载需签名）</label>
+            </div>
+            <div class="pron-add-row">
+              <input type="password" id="qiniu-new-password" placeholder="新开发者密码（可选）" autocomplete="off">
+            </div>
+            <div class="btn-row">
+              <button type="button" id="btn-qiniu-save" class="btn-secondary btn-small btn-flex">保存配置</button>
+            </div>
+          </div>
+          <span id="qiniu-dev-status" class="status-text"></span>
+        </div>
+        <div class="side-section">
+          <h3 class="side-section-title">上传共享素材</h3>
+          <p class="side-hint">素材会附带作者与 B 站账号信息，显示在共享列表中。</p>
+          <div id="qiniu-upload" class="hidden">
+            <div class="pron-add-row">
+              <select id="qiniu-category">
+                <option value="参考音频">参考音频</option>
+                <option value="预设">预设</option>
+                <option value="二创素材">二创素材</option>
+              </select>
+              <input type="text" id="qiniu-author" placeholder="作者名" autocomplete="off">
+              <input type="text" id="qiniu-bilibili" placeholder="B站账号 / 链接" autocomplete="off">
+            </div>
+            <div class="pron-add-row">
+              <input type="text" id="qiniu-description" placeholder="简介（可选）" autocomplete="off">
+              <input type="file" id="qiniu-file">
+            </div>
+            <div class="btn-row">
+              <button type="button" id="btn-qiniu-upload" class="btn-secondary btn-small btn-flex">上传</button>
+            </div>
+          </div>
+          <span id="qiniu-upload-status" class="status-text"></span>
+        </div>
+        <div class="side-section">
+          <h3 class="side-section-title">共享素材列表</h3>
+          <div id="qiniu-shared-list" class="pron-list"><div class="model-empty">尚未加载</div></div>
+          <span id="qiniu-list-status" class="status-text"></span>
         </div>
       </div>
     </section>
