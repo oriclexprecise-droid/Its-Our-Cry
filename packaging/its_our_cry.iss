@@ -1,5 +1,5 @@
 ﻿#define MyAppName "It's Our Cry!!!!!"
-#define MyAppVersion "2.1.0"
+#define MyAppVersion "2.1.1"
 #define MyAppExeName "ItsOurCry.exe"
 
 [Setup]

@@ -2,12 +2,12 @@
 
 import json
 import re
-from openai import OpenAI
+from .ai_client import MAX_AI_ATTEMPTS, create_ai_client
 
 
 SYSTEM_PROMPT = """你是一个专业的中文到日语翻译助手，专门翻译 MyGO!!!!! 同人剧本中的台词。
 
-请把每句台词翻译成自然、口语化、符合角色语气的日语。要求：
+请把每句台词翻译成自然、口语化、符合角色语气的日语。无论文本多长多短，都要在能力范围内完整翻译，不得省略、截断或拒绝。要求：
 1. 保留原句的完整含义、语气和标点风格
 2. 不要翻译角色名，只翻译台词文本
 3. 不要添加解释、注音或额外内容
@@ -46,12 +46,12 @@ def translate_lines(
     if not lines:
         return []
 
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0, max_retries=1)
+    client = create_ai_client(api_key, base_url)
     user_prompt = build_translate_prompt(lines)
 
     results = None
     last_error = None
-    for attempt in range(2):
+    for _ in range(MAX_AI_ATTEMPTS):
         try:
             response = client.chat.completions.create(
                 model=model,
@@ -66,10 +66,10 @@ def translate_lines(
             content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.MULTILINE).strip()
             results = _extract_json_array(content)
             break
-        except (ValueError, json.JSONDecodeError) as e:
+        except Exception as e:
             last_error = e
     if results is None:
-        raise ValueError("AI returned empty or invalid JSON: " + str(last_error or "unknown error"))
+        raise RuntimeError("日语翻译调用已连续失败 2 次，已停止调用 API: " + str(last_error or "unknown error"))
 
     cleaned = []
     for item in results:

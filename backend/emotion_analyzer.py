@@ -2,7 +2,7 @@
 
 import json
 import re
-from openai import OpenAI
+from .ai_client import MAX_AI_ATTEMPTS, create_ai_client
 
 
 DEFAULT_EMOTIONS = [
@@ -31,6 +31,7 @@ def build_system_prompt(emotions):
     lines = [
         "你是一个情绪分析助手，专门分析 MyGO!!!!! 同人剧本中的台词情绪。",
         "给定剧本台词列表（每行包含角色和台词），请你为每句台词标注一种最合适的情绪。",
+        "无论剧本多长多短，都必须逐句在能力范围内判断情绪；文本过短或缺少上下文时按字面语气正常分析，不得拒绝处理或跳过。",
         "可选情绪类别（请只从下面选一个）：" + "、".join(emotions),
     ]
     desc_lines = []
@@ -98,6 +99,7 @@ def build_param_prompt(emotions, lines=None):
     parts = [
         "你是一个 GPT-SoVITS 语音合成参数调优助手，熟悉文字冒险/二创配音场景。",
         "请为以下每种情绪推荐一组语音合成参数，让语气更贴合情绪。",
+        "无论是否有剧本文本、文本多长多短，都必须在能力范围内给出建议：文本为空时按该情绪典型语气给出合理参数；文本过长时按已有片段概括判断，不得拒绝、跳过或返回空结果。",
         "只输出 JSON 对象，键是情绪名，值是该情绪的参数字典，不要输出其他内容。",
         "可调参数及范围：",
         "- temperature：0.1-1.5，越大表现力越强但越不稳定",
@@ -135,33 +137,39 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
     if not emotions:
         return {}
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0, max_retries=1)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": build_param_prompt(emotions, lines)},
-            {"role": "user", "content": "请为这些情绪给出参数建议。"},
-        ],
-        temperature=0.3,
-        max_tokens=1500,
-    )
-    content = (response.choices[0].message.content or "").strip()
-    content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.MULTILINE)
-    data = json.loads(content)
-    if not isinstance(data, dict):
-        raise ValueError("AI 返回的不是 JSON 对象")
-    cleaned = {}
-    for name, p in data.items():
-        if not isinstance(p, dict):
-            continue
-        cleaned[str(name).strip()] = _merge_param_suggestion(str(name).strip(), {
-            "temperature": _param_float(p.get("temperature"), 0.1, 1.5, 1.0),
-            "top_k": _param_int(p.get("top_k"), 1, 50, 15),
-            "top_p": _param_float(p.get("top_p"), 0.1, 1.0, 1.0),
-            "speed_factor": _param_float(p.get("speed_factor"), 0.5, 1.5, 1.0),
-            "seed": _param_int(p.get("seed"), -1, 2147483647, -1),
-        })
-    return cleaned
+    client = create_ai_client(api_key, base_url)
+    last_error = None
+    for _ in range(MAX_AI_ATTEMPTS):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": build_param_prompt(emotions, lines)},
+                    {"role": "user", "content": "请为这些情绪给出参数建议。"},
+                ],
+                temperature=0.3,
+                max_tokens=1500,
+            )
+            content = (response.choices[0].message.content or "").strip()
+            content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.MULTILINE)
+            data = json.loads(content)
+            if not isinstance(data, dict):
+                raise ValueError("AI 返回的不是 JSON 对象")
+            cleaned = {}
+            for name, p in data.items():
+                if not isinstance(p, dict):
+                    continue
+                cleaned[str(name).strip()] = _merge_param_suggestion(str(name).strip(), {
+                    "temperature": _param_float(p.get("temperature"), 0.1, 1.5, 1.0),
+                    "top_k": _param_int(p.get("top_k"), 1, 50, 15),
+                    "top_p": _param_float(p.get("top_p"), 0.1, 1.0, 1.0),
+                    "speed_factor": _param_float(p.get("speed_factor"), 0.5, 1.5, 1.0),
+                    "seed": _param_int(p.get("seed"), -1, 2147483647, -1),
+                })
+            return cleaned
+        except Exception as e:
+            last_error = e
+    raise RuntimeError("参数建议调用已连续失败 2 次，已停止调用 API: " + str(last_error))
 
 
 def _param_float(value, lo, hi, default):
@@ -206,7 +214,7 @@ def analyze_emotions(
     if not emotions:
         emotions = list(DEFAULT_EMOTIONS)
 
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0, max_retries=1)
+    client = create_ai_client(api_key, base_url)
 
     user_prompt = build_analysis_prompt(lines)
 
@@ -216,26 +224,36 @@ def analyze_emotions(
     elif lang == "auto":
         lang_hint = "\n注意：剧本可能混合中日文，请根据实际内容来判断。"
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": build_system_prompt(emotions) + lang_hint},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.3,
-        max_tokens=4096,
-    )
+    results = None
+    last_error = None
+    for _ in range(MAX_AI_ATTEMPTS):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": build_system_prompt(emotions) + lang_hint},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.3,
+                max_tokens=4096,
+            )
 
-    content = response.choices[0].message.content.strip()
+            content = response.choices[0].message.content.strip()
 
-    # 尝试解析 JSON（可能被包裹在代码块中）
-    json_match = re.search(r"\[.*\]", content, re.DOTALL)
-    if json_match:
-        content = json_match.group(0)
+            # 尝试解析 JSON（可能被包裹在代码块中）
+            json_match = re.search(r"\[.*\]", content, re.DOTALL)
+            if json_match:
+                content = json_match.group(0)
 
-    results = json.loads(content)
-    if not isinstance(results, list):
-        raise ValueError("AI 返回的不是列表格式: " + str(results)[:200])
+            parsed = json.loads(content)
+            if not isinstance(parsed, list):
+                raise ValueError("AI 返回的不是列表格式: " + str(parsed)[:200])
+            results = parsed
+            break
+        except Exception as e:
+            last_error = e
+    if results is None:
+        raise RuntimeError("情绪分析调用已连续失败 2 次，已停止调用 API: " + str(last_error))
 
     fallback = "思考" if "思考" in emotions else emotions[0]
     cleaned = []
