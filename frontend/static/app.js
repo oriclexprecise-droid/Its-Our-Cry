@@ -120,6 +120,7 @@ async function loadConfig() {
   updateDeployBanner(cfg.gptsovits_path);
   loadPronunciation();
   loadWebgalMap(cfg);
+  loadWebgalRetranslate(cfg);
   const savedAi = loadAIConfigFromStorage();
   if (savedAi) {
     applyAIConfig(savedAi);
@@ -3964,6 +3965,7 @@ async function resetEmotions() {
 
 let webgalMap = {};
 let webgalMapDefaults = {};
+let webgalRetranslateOnAnalyze = true;
 
 function initWebgalMap() {
   const addBtn = document.getElementById("btn-add-webgal-map");
@@ -3972,6 +3974,8 @@ function initWebgalMap() {
   if (saveBtn) saveBtn.addEventListener("click", saveWebgalMap);
   const resetBtn = document.getElementById("btn-reset-webgal-map");
   if (resetBtn) resetBtn.addEventListener("click", resetWebgalMap);
+  const retranslateBtn = document.getElementById("btn-save-webgal-retranslate");
+  if (retranslateBtn) retranslateBtn.addEventListener("click", saveWebgalRetranslate);
 }
 
 function webgalMapTargetOptions(selected) {
@@ -4020,6 +4024,27 @@ function loadWebgalMap(cfg) {
   const targetSel = document.getElementById("webgal-map-target");
   if (targetSel) targetSel.innerHTML = webgalMapTargetOptions((state.emotions && state.emotions[0]) || "");
   renderWebgalMap();
+}
+
+function loadWebgalRetranslate(cfg) {
+  webgalRetranslateOnAnalyze = cfg.webgal_retranslate_on_analyze !== false;
+  const el = document.getElementById("webgal-retranslate");
+  if (el) el.checked = !!webgalRetranslateOnAnalyze;
+}
+
+async function saveWebgalRetranslate() {
+  const el = document.getElementById("webgal-retranslate");
+  const statusEl = document.getElementById("webgal-retranslate-status");
+  const val = el ? el.checked : true;
+  if (statusEl) { statusEl.textContent = "正在保存..."; statusEl.className = "status-text"; }
+  try {
+    const res = await api("/api/webgal/settings", { method: "POST", body: JSON.stringify({ retranslate_on_analyze: val }) });
+    webgalRetranslateOnAnalyze = res.retranslate_on_analyze !== false;
+    if (el) el.checked = !!webgalRetranslateOnAnalyze;
+    if (statusEl) { statusEl.textContent = "已保存 WebGaL 翻译设置"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "保存失败: " + e.message; statusEl.className = "status-text error"; }
+  }
 }
 
 async function saveWebgalMap() {

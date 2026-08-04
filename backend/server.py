@@ -335,6 +335,7 @@ def _persist_user_settings(project_root, config):
             settings[key] = deepseek.get(field, "")
         settings["emotions"] = list(config.get("emotions", []))
         settings["webgal_emotion_map"] = dict(config.get("webgal_emotion_map") or {})
+        settings["webgal_retranslate_on_analyze"] = bool(config.get("webgal_retranslate_on_analyze", True))
         settings["emotion_params"] = config.get("emotion_params", {})
         settings["use_emotion_params"] = bool(config.get("use_emotion_params", True))
         settings["emotion_param_presets"] = config.get("emotion_param_presets", {})
@@ -460,6 +461,7 @@ def create_app(config_path="config.yaml"):
     config.setdefault("use_emotion_params", True)
     config.setdefault("emotion_param_presets", {})
     config.setdefault("webgal_emotion_map", dict(DEFAULT_EMOTION_MAP))
+    config.setdefault("webgal_retranslate_on_analyze", True)
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
     user_settings = {}
     user_settings_path = project_root / "user_settings.json"
@@ -511,6 +513,8 @@ def create_app(config_path="config.yaml"):
                 cleaned_map[key] = val
         if cleaned_map:
             config["webgal_emotion_map"] = cleaned_map
+    if "webgal_retranslate_on_analyze" in user_settings:
+        config["webgal_retranslate_on_analyze"] = bool(user_settings["webgal_retranslate_on_analyze"])
     dpapi_ok = _dpapi_encrypt("probe") is not None
 
     # 近期记录：本地 JSON 文件，不提交 git、不联网
@@ -985,6 +989,7 @@ def create_app(config_path="config.yaml"):
             "emotions": config["emotions"],
             "webgal_emotion_map": config.get("webgal_emotion_map", {}),
             "webgal_emotion_defaults": dict(DEFAULT_EMOTION_MAP),
+            "webgal_retranslate_on_analyze": bool(config.get("webgal_retranslate_on_analyze", True)),
             "has_api_key": has_key,
             "default_interval": DEFAULT_INTERVAL,
             "narration": config.get("narration", {}),
@@ -1549,6 +1554,14 @@ def create_app(config_path="config.yaml"):
         _persist_user_settings(project_root, config)
         return jsonify({"status": "ok", "map": config["webgal_emotion_map"]})
 
+    @app.route("/api/webgal/settings", methods=["POST"])
+    def save_webgal_settings():
+        data = request.get_json(silent=True) or {}
+        if "retranslate_on_analyze" in data:
+            config["webgal_retranslate_on_analyze"] = bool(data["retranslate_on_analyze"])
+            _persist_user_settings(project_root, config)
+        return jsonify({"status": "ok", "retranslate_on_analyze": bool(config.get("webgal_retranslate_on_analyze", True))})
+
     @app.route("/api/webgal/parse", methods=["POST"])
     def webgal_parse():
         data = request.get_json(silent=True) or {}
@@ -1678,17 +1691,26 @@ def create_app(config_path="config.yaml"):
                 emotion_map[idx] = e.get("emotion") or "思考"
         wg["emotions"] = {str(idx): emotion_map.get(idx, "思考") for idx in [d["index"] for d in dialogues]}
         if lang == "ja":
-            try:
-                translations = translate_lines(
-                    lines=lines,
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=model,
-                )
-            except Exception as e:
-                traceback.print_exc()
-                return jsonify({"error": "日语翻译失败: " + str(e)}), 500
-            wg["translations"] = {str(t.get("index")): t.get("translation", "") for t in translations if t.get("index") is not None}
+            existing = wg.get("translations") or {}
+            if config.get("webgal_retranslate_on_analyze", True):
+                missing = lines
+            else:
+                missing = [l for l in lines if not (existing.get(str(l["index"])) or "").strip()]
+            if missing:
+                try:
+                    translations = translate_lines(
+                        lines=missing,
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=model,
+                    )
+                except Exception as e:
+                    traceback.print_exc()
+                    return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+                for t in translations:
+                    if t.get("index") is not None:
+                        existing[str(t.get("index"))] = t.get("translation", "")
+            wg["translations"] = existing
         else:
             wg["translations"] = {}
         if state.get("analysis_cancel_seq", -1) >= seq:
