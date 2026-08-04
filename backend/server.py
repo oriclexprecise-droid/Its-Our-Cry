@@ -52,15 +52,28 @@ def _recent_version_meta(record, limit=DEFAULT_VERSION_LIMIT):
     ]
 
 
-def _same_recent_version(version, current):
+def _snapshot_signature(snap):
     try:
-        return (
-            version.get("script") == current.get("script")
-            and version.get("lang") == current.get("lang")
-            and version.get("lines") == current.get("lines")
-        )
+        return json.dumps({
+            "script": snap.get("script", ""),
+            "lines": snap.get("lines", []),
+            "lang": snap.get("lang", "zh"),
+            "generated": snap.get("generated", {}),
+            "failures": snap.get("failures", {}),
+            "merged_path": snap.get("merged_path"),
+            "srt_path": snap.get("srt_path"),
+            "time_info": snap.get("time_info", []),
+            "config": snap.get("config", {}),
+            "webgal": snap.get("webgal", {}),
+        }, ensure_ascii=False, sort_keys=True)
     except Exception:
-        return False
+        return None
+
+
+def _same_recent_version(version, current):
+    old_sig = _snapshot_signature(version)
+    new_sig = _snapshot_signature(current)
+    return old_sig is not None and old_sig == new_sig
 
 DEFAULT_PRONUNCIATION = [
     {"zh": "长崎素世", "ja": "長崎そよ"},
@@ -657,6 +670,7 @@ def create_app(config_path="config.yaml"):
             "time_info": copy.deepcopy(state.get("time_info", [])),
             "lang": state.get("lang", "zh"),
             "project_type": state.get("project_type", "srt"),
+            "config": record_config_snapshot(),
             "webgal": copy.deepcopy(state.get("webgal") or {}),
         }
 
@@ -799,6 +813,7 @@ def create_app(config_path="config.yaml"):
             "srt_path": state.get("srt_path"),
             "time_info": copy.deepcopy(state.get("time_info", [])),
             "config": record_config_snapshot(),
+            "project_type": state.get("project_type", "srt"),
             "webgal": webgal_snapshot,
         }
 
@@ -1459,7 +1474,7 @@ def create_app(config_path="config.yaml"):
     def webgal_sync():
         data = request.get_json(silent=True) or {}
         wg = state.get("webgal") or {}
-        keys = ("source", "lang", "dialogues", "emotions", "translations", "generated", "failures", "psyVoice", "psyCharacter", "lastExport")
+        keys = ("source", "lang", "entries", "dialogues", "emotions", "translations", "generated", "failures", "psyVoice", "psyCharacter", "lastExport")
         for key in keys:
             if key in data:
                 wg[key] = data[key]

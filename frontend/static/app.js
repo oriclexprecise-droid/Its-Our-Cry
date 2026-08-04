@@ -597,6 +597,7 @@ function refreshGenerated(p) {
   const generated = p.generated_indices || [];
   state.hasGenerated = generated.length > 0;
   state.failures = p.failures || {};
+  state.lastGenHash = JSON.stringify({ indices: generated, failures: p.failures || {} });
   const set = new Set(generated.map(String));
   document.querySelectorAll(".btn-line-action").forEach(btn => {
     const idx = btn.dataset.index;
@@ -979,6 +980,7 @@ async function loadRecentRecord(id) {
   try {
     const res = await api("/api/recent/" + id + "/load", { method: "POST" });
     const s = res.state || {};
+    if (s.config && s.config.narration) setNarrationInputs(s.config.narration);
     state.projectType = (res.record && res.record.project_type) || s.project_type || "srt";
     if (state.projectType === "webgal") {
       resetWebGalProject();
@@ -1177,6 +1179,7 @@ async function loadRecentVersion(recordId, versionId) {
   try {
     const res = await api("/api/recent/" + recordId + "/versions/" + versionId + "/load", { method: "POST" });
     const s = res.state || {};
+    if (s.config && s.config.narration) setNarrationInputs(s.config.narration);
     state.projectType = s.project_type || "srt";
     if (state.projectType === "webgal") {
       resetWebGalProject();
@@ -1238,15 +1241,29 @@ async function deleteRecentVersion(recordId, versionId) {
 
 function currentContentHash() {
   try {
+    const readVal = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
+    const fixedBtn = document.getElementById("narration-mode-fixed");
     return JSON.stringify({
+      projectType: state.projectType || "srt",
       script: state.script || "",
       lines: state.lines || [],
+      srtGenerated: state.lastGenHash || "",
       webgalSource: state.webgal.source || "",
+      webgalLang: state.webgal.lang || "zh",
       webgalEmotions: state.webgal.emotions || {},
       webgalTranslations: state.webgal.translations || {},
       webgalGenerated: state.webgal.generated || {},
       webgalFailures: state.webgal.failures || {},
-      webgalPsy: { voice: !!state.webgal.psyVoice, character: state.webgal.psyCharacter || "" }
+      webgalPsy: { voice: !!state.webgal.psyVoice, character: state.webgal.psyCharacter || "" },
+      webgalLastExport: state.webgal.lastExport || "",
+      narration: {
+        base: readVal("narration-base"),
+        per: readVal("narration-per"),
+        min: readVal("narration-min"),
+        max: readVal("narration-max"),
+        fixed: readVal("narration-fixed"),
+        fixedMode: !!(fixedBtn && fixedBtn.classList.contains("active"))
+      }
     });
   } catch (e) { return ""; }
 }
@@ -1405,6 +1422,7 @@ async function runHistory(dir) {
   try {
     const res = await api("/api/" + dir, { method: "POST" });
     const s = res.state || {};
+    if (s.config && s.config.narration) setNarrationInputs(s.config.narration);
     state.lines = s.lines || [];
     state.script = s.script || "";
     applyScriptText(state.script || "");
