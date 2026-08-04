@@ -2615,6 +2615,7 @@ function resetWebGalProject() {
   if (psyChar) psyChar.value = "";
   const langSel = document.getElementById("webgal-lang");
   if (langSel) langSel.value = "zh";
+  updateWebGalTranslateButton();
   ["webgal-settings", "webgal-review", "webgal-export"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add("hidden");
@@ -2689,6 +2690,7 @@ function restoreWebGalSnapshot(snap) {
   if (input) input.value = state.webgal.source;
   const langSel = document.getElementById("webgal-lang");
   if (langSel) langSel.value = state.webgal.lang;
+  updateWebGalTranslateButton();
   const psyVoiceEl = document.getElementById("webgal-psy-voice");
   if (psyVoiceEl) psyVoiceEl.checked = state.webgal.psyVoice;
   const psyCharEl = document.getElementById("webgal-psy-character");
@@ -2753,12 +2755,19 @@ async function translateWebGal(silent) {
   } finally {
     if (webgalTranslateController === controller) webgalTranslateController = null;
     if (analyzeBtn) analyzeBtn.disabled = false;
+    updateWebGalTranslateButton();
   }
 }
 
 function wgCurrentLang() {
   const el = document.getElementById("webgal-lang");
   return el ? (el.value || "zh") : state.webgal.lang;
+}
+
+function updateWebGalTranslateButton() {
+  const btn = document.getElementById("btn-webgal-translate");
+  if (!btn) return;
+  btn.disabled = wgCurrentLang() !== "ja" || state.webgal.analyzing || !!webgalTranslateController || state.webgal.generating;
 }
 
 function syncWebGalDraft() {
@@ -2803,6 +2812,7 @@ async function parseWebGal() {
     const data = await api("/api/webgal/parse", { method: "POST", body: JSON.stringify({ text, lang }) });
     state.webgal.source = text;
     state.webgal.lang = lang;
+    updateWebGalTranslateButton();
     state.webgal.dialogues = data.dialogues || [];
     state.webgal.emotions = {};
     state.webgal.translations = {};
@@ -3092,6 +3102,7 @@ async function restoreWebGalProject(scriptText, lang) {
   const langSel = document.getElementById("webgal-lang");
   if (input) input.value = scriptText || "";
   if (langSel) langSel.value = lang === "ja" ? "ja" : "zh";
+  updateWebGalTranslateButton();
   state.webgal.source = scriptText || "";
   state.webgal.lang = lang === "ja" ? "ja" : "zh";
   if (!(scriptText || "").trim()) {
@@ -3119,6 +3130,11 @@ function initWebGal() {
   if (parseBtn) parseBtn.addEventListener("click", parseWebGal);
   const analyzeBtn = document.getElementById("btn-webgal-analyze");
   if (analyzeBtn) analyzeBtn.addEventListener("click", analyzeWebGal);
+  const wgTranslateBtn = document.getElementById("btn-webgal-translate");
+  if (wgTranslateBtn) wgTranslateBtn.addEventListener("click", async () => {
+    if (!state.webgal.dialogues.length) { setWebGalStatus("请先解析脚本", "error"); return; }
+    await translateWebGal(false);
+  });
   const stopAnalyzeBtn = document.getElementById("btn-webgal-stop-analyze");
   if (stopAnalyzeBtn) stopAnalyzeBtn.addEventListener("click", stopWebGalAnalyze);
   const genBtn = document.getElementById("btn-webgal-generate");
@@ -3145,6 +3161,7 @@ function initWebGal() {
   const langSel = document.getElementById("webgal-lang");
   if (langSel) langSel.addEventListener("change", () => {
     state.webgal.lang = langSel.value;
+    updateWebGalTranslateButton();
     pushWebGalHistory();
   });
   const psyVoice = document.getElementById("webgal-psy-voice");
