@@ -270,8 +270,8 @@ function updateTranslateOnlyVisibility() {
   if (!btn) return;
   const langEl = document.getElementById("script-lang");
   const lang = langEl ? langEl.value : "zh";
-  btn.classList.toggle("hidden", lang !== "ja");
-  btn.disabled = state.generating || !!analysisController;
+  btn.classList.remove("hidden");
+  btn.disabled = lang !== "ja" || state.generating || !!analysisController;
 }
 
 document.getElementById("btn-analyze").addEventListener("click", runAnalyze);
@@ -3186,6 +3186,7 @@ initSplash();
 initDeployFlow();
 initCleanSpace();
 loadConfig();
+updateTranslateOnlyVisibility();
 refreshHistory();
 initBackgroundSettings();
 initRecentRecords();

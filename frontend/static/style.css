@@ -121,6 +121,7 @@ textarea { min-height: 240px; line-height: 1.6; }
 }
 .btn-secondary:hover { background: #1a4a7a; }
 .btn-small { padding: 5px 10px; font-size: 12px; border-radius: 5px; margin-top: 0; }
+.btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-secondary.btn-small { padding: 5px 10px; font-size: 12px; }
 #btn-select-mode.active { background: #e94560; border-color: #e94560; color: #fff; }
 .status-text { font-size: 13px; margin-top: 8px; }
