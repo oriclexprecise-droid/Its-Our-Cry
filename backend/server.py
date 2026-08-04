@@ -1415,6 +1415,41 @@ def create_app(config_path="config.yaml"):
             "dialogues": [dialogue_summary(d) for d in dialogues],
         })
 
+    @app.route("/api/webgal/translate", methods=["POST"])
+    def webgal_translate():
+        wg = state.get("webgal") or {}
+        dialogues = wg.get("dialogues") or []
+        if not dialogues:
+            return jsonify({"error": "请先解析脚本"}), 400
+        data = request.get_json(silent=True) or {}
+        lang = str(data.get("lang") or wg.get("lang") or state.get("lang") or "zh")
+        if lang not in ("zh", "ja"):
+            lang = "zh"
+        wg["lang"] = lang
+        state["lang"] = lang
+        if lang != "ja":
+            wg["translations"] = {}
+            return jsonify({"status": "ok", "translations": {}})
+        api_key = config["deepseek"]["api_key"]
+        if not api_key:
+            return jsonify({"error": "please configure DeepSeek API Key"}), 400
+        lines = [
+            {"index": d["index"], "character": d["character"], "text": d["text"]}
+            for d in dialogues
+        ]
+        try:
+            translations = translate_lines(
+                lines=lines,
+                api_key=api_key,
+                base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
+                model=config["deepseek"].get("model", "deepseek-v4-flash"),
+            )
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+        wg["translations"] = {str(t.get("index")): t.get("translation", "") for t in translations if t.get("index") is not None}
+        return jsonify({"status": "ok", "translations": wg["translations"]})
+
     @app.route("/api/webgal/analyze", methods=["POST"])
     def webgal_analyze():
         wg = state.get("webgal") or {}
@@ -1563,7 +1598,10 @@ def create_app(config_path="config.yaml"):
                         if corrected:
                             tts_text = corrected
                         else:
-                            tts_text = (wg.get("translations") or {}).get(str(idx), "") or tts_text
+                            tts_text = (wg.get("translations") or {}).get(str(idx), "") or ""
+                            if not tts_text:
+                                fail(idx, "缺少日语翻译，请重新解析或翻译后再生成")
+                                continue
                     ref_prompt = ref.get("prompt_text") or ""
                     output_path = out_dir / f"{idx:04d}_{char}_{emotion}.wav"
                     emo_params = {}

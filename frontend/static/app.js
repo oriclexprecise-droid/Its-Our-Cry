@@ -2439,6 +2439,41 @@ function resetWebGalProject() {
   setWebGalStatus("", "");
 }
 
+let webgalTranslateController = null;
+
+async function translateWebGal(silent) {
+  if (wgCurrentLang() !== "ja") {
+    state.webgal.translations = {};
+    renderWebGalLines();
+    return { ok: true };
+  }
+  const statusEl = document.getElementById("webgal-status");
+  const analyzeBtn = document.getElementById("btn-webgal-analyze");
+  if (!silent && statusEl) { statusEl.textContent = "正在日语翻译..."; statusEl.className = "status-text"; }
+  if (analyzeBtn) analyzeBtn.disabled = true;
+  if (webgalTranslateController) webgalTranslateController.abort();
+  const controller = new AbortController();
+  webgalTranslateController = controller;
+  try {
+    const data = await api("/api/webgal/translate", {
+      method: "POST",
+      body: JSON.stringify({ lang: "ja" }),
+      signal: controller.signal
+    });
+    state.webgal.translations = data.translations || {};
+    renderWebGalLines();
+    return { ok: true };
+  } catch (e) {
+    if (e.name !== "AbortError") {
+      setWebGalStatus("日语翻译失败: " + e.message, "error");
+    }
+    return { ok: false, error: e };
+  } finally {
+    if (webgalTranslateController === controller) webgalTranslateController = null;
+    if (analyzeBtn) analyzeBtn.disabled = false;
+  }
+}
+
 function wgCurrentLang() {
   const el = document.getElementById("webgal-lang");
   return el ? (el.value || "zh") : state.webgal.lang;
@@ -2481,7 +2516,14 @@ async function parseWebGal() {
       if (el) el.classList.remove("hidden");
     });
     renderWebGalLines();
-    setWebGalStatus("已解析 " + data.count + " 条对话，可以校对或让 AI 分析情绪", "success");
+    if (lang === "ja") {
+      const tr = await translateWebGal(false);
+      if (tr.ok) {
+        setWebGalStatus("已解析 " + data.count + " 条对话，日语翻译完成", "success");
+      }
+    } else {
+      setWebGalStatus("已解析 " + data.count + " 条对话，可以校对或让 AI 分析情绪", "success");
+    }
     syncWebGalDraft();
   } catch (e) {
     setWebGalStatus("解析失败: " + e.message, "error");
@@ -2602,6 +2644,13 @@ async function stopWebGalAnalyze() {
 async function generateWebGal(indices) {
   if (!state.webgal.dialogues.length) { setWebGalStatus("请先解析脚本", "error"); return; }
   if (state.webgal.generating) return;
+  if (wgCurrentLang() === "ja") {
+    const missing = state.webgal.dialogues.some(d => !state.webgal.translations[d.index]);
+    if (missing) {
+      const tr = await translateWebGal(true);
+      if (!tr.ok) { setWebGalStatus("日语翻译失败，已取消生成", "error"); return; }
+    }
+  }
   state.webgal.psyVoice = document.getElementById("webgal-psy-voice").checked;
   state.webgal.psyCharacter = document.getElementById("webgal-psy-character").value;
   const emotions = {};
