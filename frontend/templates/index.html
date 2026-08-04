@@ -50,7 +50,7 @@
     <div id="creator-tip" class="creator-tip"></div>
     <h1>It 's Our Cry!!!!!</h1>
     <div class="header-meta">
-      <span class="version-tag">Version 1.3.6</span>
+      <span class="version-tag">Version 1.4.0</span>
       <button id="btn-back-workbench" class="btn-secondary btn-small hidden" title="返回工作台">返回工作台</button>
       <button id="btn-undo" class="btn-secondary btn-small hidden" disabled title="撤销 (Ctrl+Z)">撤销</button>
       <button id="btn-redo" class="btn-secondary btn-small hidden" disabled title="重做 (Ctrl+Shift+Z)">重做</button>
@@ -166,6 +166,72 @@
     </section>
   </main>
   </div>
+
+<div id="view-webgal" class="hidden">
+  <main>
+    <section id="wg-input" class="panel">
+      <div class="panel-header"><h2>1. 粘贴 anogo 脚本</h2></div>
+      <div class="panel-body">
+        <textarea id="webgal-input" placeholder="粘贴 anogo 导出的无配音脚本...&#10;&#10;格式示例：&#10;changeBg: 宿舍/家中 -next;&#10;changeFigure: anon/casual-2023/model.json -id=anon -motion=anon/smile01 -expression=soyo/smile02 -next;&#10;千早爱音: 呐呐，soyorin -id -figureId=anon;"></textarea>
+        <div class="input-row">
+          <div class="lang-select-row">
+            <label>配音语言</label>
+            <select id="webgal-lang">
+              <option value="zh">中文</option>
+              <option value="ja">日语</option>
+            </select>
+          </div>
+          <button id="btn-webgal-parse" class="btn-primary">解析脚本</button>
+          <button id="btn-webgal-analyze" class="btn-secondary">可选：AI 分析情绪</button>
+          <button id="btn-webgal-stop-analyze" class="btn-secondary btn-small hidden">停止分析</button>
+        </div>
+        <div id="webgal-status" class="status-text"></div>
+      </div>
+    </section>
+    <section id="webgal-settings" class="panel hidden">
+      <div class="panel-header"><h2>2. 配音设置</h2></div>
+      <div class="panel-body wg-settings-row">
+        <label class="wg-check"><input type="checkbox" id="webgal-psy-voice"> 心理活动配音</label>
+        <div class="lang-select-row">
+          <label>心理活动配音角色</label>
+          <select id="webgal-psy-character"><option value="">沿用该行角色</option></select>
+        </div>
+        <span class="status-text">路人角色（老师、同学等）不会生成音频</span>
+      </div>
+    </section>
+    <section id="webgal-review" class="panel hidden">
+      <div class="panel-header">
+        <h2>3. 校对台词</h2>
+        <div class="panel-header-right"><span id="webgal-line-count"></span></div>
+      </div>
+      <div class="panel-body">
+        <div class="lines-table">
+          <div class="lines-header">
+            <span>#</span><span>角色</span><span>台词</span><span>figureId</span><span>情绪</span><span>操作</span>
+          </div>
+          <div id="webgal-lines-container"></div>
+        </div>
+        <div class="review-actions">
+          <button id="btn-webgal-generate" class="btn-primary">生成全部语音</button>
+          <button id="btn-webgal-cancel" class="btn-secondary btn-small hidden">取消生成</button>
+          <span id="webgal-progress-text" class="status-text hidden"></span>
+        </div>
+        <div id="webgal-failures" class="status-text"></div>
+      </div>
+    </section>
+    <section id="webgal-export" class="panel hidden">
+      <div class="panel-header"><h2>4. 导出 WebGaL 脚本</h2></div>
+      <div class="panel-body download-links">
+        <div class="export-form">
+          <input type="text" id="webgal-export-folder" placeholder="导出文件夹名称" autocomplete="off">
+          <button id="btn-webgal-export" class="btn-secondary">导出</button>
+        </div>
+        <button id="btn-webgal-open-export" class="btn-secondary hidden">打开导出文件夹</button>
+        <span id="webgal-export-status" class="status-text"></span>
+      </div>
+    </section>
+  </main>
+</div>
 
   <div id="view-settings" class="hidden">
     <div class="settings-shell">
@@ -552,7 +618,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260804l"></script>
+<script src="/static/app.js?v=20260804m"></script>
 <script>
 (function () {
   var tips = [

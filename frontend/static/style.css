@@ -601,6 +601,20 @@ textarea { min-height: 240px; line-height: 1.6; }
 .line-item .char-input:focus { border-color: #4ecca3; }
 .line-item .char-input:disabled { opacity: 0.6; cursor: not-allowed; }
 
+.wg-settings-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.wg-check { display: flex; align-items: center; gap: 6px; color: #eaf2ff; font-size: 13px; cursor: pointer; user-select: none; }
+.wg-check input { width: 16px; height: 16px; accent-color: #e94560; cursor: pointer; }
+.wg-psy-select { min-width: 140px; }
+#webgal-lines-container .line-item .wg-fig { color: #8ab4f8; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#webgal-lines-container .line-item .wg-psy-note { color: #ffd166; font-size: 12px; }
+#webgal-lines-container .line-item .wg-audio-ok { color: #4ecca3; font-size: 12px; }
+#webgal-lines-container .line-item .wg-audio-fail { color: #ff6b9d; font-size: 12px; }
+#webgal-review .lines-header,
+#webgal-lines-container .line-item {
+  grid-template-columns: 48px 110px minmax(0, 1fr) 110px 104px 150px;
+}
+#webgal-lines-container .line-item .line-actions { flex-wrap: wrap; gap: 6px; }
+
 .recent-list { display: flex; flex-direction: column; gap: 10px; }
 .recent-empty { color: #7a8bb0; font-size: 13px; padding: 10px 0; }
 .recent-item { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; background: rgba(15, 52, 96, 0.45); border: 1px solid #1a4a7a; border-radius: 6px; }

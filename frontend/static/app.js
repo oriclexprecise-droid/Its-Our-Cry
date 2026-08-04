@@ -1,4 +1,4 @@
-const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [], projectType: "srt" };
+const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [], projectType: "srt", webgal: { source: "", dialogues: [], emotions: {}, translations: {}, generated: {}, failures: {}, generating: false, lastExport: "", psyVoice: false, psyCharacter: "", lang: "zh", analyzing: false, progress: { current: 0, total: 0 } } };
 let audioPlayer = null;
 let analysisController = null;
 let projectSelectedIds = new Set();
@@ -636,11 +636,13 @@ function toast(message, kind) {
 function showProjectPicker() {
   const projects = document.getElementById("view-projects");
   const workbench = document.getElementById("view-workbench");
+  const webgal = document.getElementById("view-webgal");
   const settings = document.getElementById("view-settings");
   const dropdown = document.getElementById("recent-dropdown");
   if (dropdown) dropdown.classList.add("hidden");
   if (projects) projects.classList.remove("hidden");
   if (workbench) workbench.classList.add("hidden");
+  if (webgal) webgal.classList.add("hidden");
   if (settings) settings.classList.add("hidden");
   ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-recent"].forEach(id => {
     const el = document.getElementById(id);
@@ -690,6 +692,12 @@ async function confirmNewProject() {
     await api("/api/recent/create", { method: "POST", body: JSON.stringify({ name, project_type: projectType }) });
     state.projectType = projectType;
     const typeName = projectType === "webgal" ? "WebGaL 板块" : "SRT 工作台";
+    if (projectType === "webgal") {
+      resetWebGalProject();
+      const wgLangEl = document.getElementById("webgal-lang");
+      if (wgLangEl) wgLangEl.value = "zh";
+      state.webgal.lang = "zh";
+    }
     state.lines = [];
     state.script = "";
     state.failures = {};
@@ -841,7 +849,10 @@ function setRecentStatus(msg, kind) {
 
 async function syncScriptDraft() {
   const scriptEl = document.getElementById("script-input");
-  const text = scriptEl ? scriptEl.value : state.script || "";
+  const webgalEl = document.getElementById("webgal-input");
+  const text = state.projectType === "webgal"
+    ? (webgalEl ? webgalEl.value : state.webgal.source)
+    : (scriptEl ? scriptEl.value : state.script || "");
   state.script = text;
   const seq = ++scriptDraftSeq;
   try {
@@ -925,7 +936,15 @@ async function loadRecentRecord(id) {
   try {
     const res = await api("/api/recent/" + id + "/load", { method: "POST" });
     const s = res.state || {};
-    state.projectType = (res.record && res.record.project_type) || "srt";
+    state.projectType = (res.record && res.record.project_type) || s.project_type || "srt";
+    if (state.projectType === "webgal") {
+      await restoreWebGalProject(s.script || "", s.lang || "zh");
+      closeProjectsModal();
+      setRecentStatus("已载入项目" + (res.record && res.record.saved_at ? "：" + res.record.saved_at : ""), "success");
+      refreshRecentList();
+      toast("已载入 WebGaL 项目，撤销/重做已重置");
+      return;
+    }
     state.lines = s.lines || [];
     state.script = s.script || "";
     applyScriptText(state.script || "", { resetHistory: true });
@@ -1107,6 +1126,13 @@ async function loadRecentVersion(recordId, versionId) {
     const res = await api("/api/recent/" + recordId + "/versions/" + versionId + "/load", { method: "POST" });
     const s = res.state || {};
     state.projectType = s.project_type || "srt";
+    if (state.projectType === "webgal") {
+      await restoreWebGalProject(s.script || "", s.lang || "zh");
+      setRecentStatus("已载入版本" + (res.version && res.version.saved_at ? "：" + res.version.saved_at : ""), "success");
+      refreshRecentList();
+      toast("已载入版本，撤销/重做已重置");
+      return;
+    }
     state.lines = s.lines || [];
     state.script = s.script || "";
     applyScriptText(state.script || "", { resetHistory: true });
@@ -1151,13 +1177,13 @@ async function deleteRecentVersion(recordId, versionId) {
 
 function currentContentHash() {
   try {
-    return JSON.stringify({ script: state.script || "", lines: state.lines || [] });
+    return JSON.stringify({ script: state.script || "", lines: state.lines || [], webgalSource: state.webgal.source || "" });
   } catch (e) { return ""; }
 }
 
 async function maybeAutoSaveVersion() {
   if (!recentSettings.version_auto_save) return;
-  if (state.generating || analysisController) return;
+  if (state.generating || analysisController || state.webgal.analyzing) return;
   const now = Date.now();
   const intervalMs = (Math.max(1, parseInt(recentSettings.auto_save_interval, 10) || 5)) * 60000;
   if (now - lastAutoVersionAt < intervalMs) return;
@@ -2354,7 +2380,431 @@ async function pollDeployDownload() {
     statusEl.className = "status-text error";
   }
 }
+// ===== WebGaL 板块 =====
+let webgalPollTimer = null;
+let webgalAnalyzeController = null;
+let webgalDraftTimer = null;
+let webgalDraftSeq = 0;
+
+function setWebGalStatus(message, kind) {
+  const el = document.getElementById("webgal-status");
+  if (!el) return;
+  el.textContent = message || "";
+  el.className = "status-text" + (kind ? " " + kind : "");
+}
+
+function populateWebGalPsyCharacters() {
+  const sel = document.getElementById("webgal-psy-character");
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">沿用该行角色</option>' + state.chars.map(c => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join("");
+  if (current && state.chars.indexOf(current) !== -1) sel.value = current;
+}
+
+function resetWebGalProject() {
+  state.webgal = {
+    source: "", dialogues: [], emotions: {}, translations: {}, generated: {}, failures: {},
+    generating: false, lastExport: "", psyVoice: false, psyCharacter: "", lang: "zh", analyzing: false,
+    progress: { current: 0, total: 0 }
+  };
+  if (webgalPollTimer) { clearInterval(webgalPollTimer); webgalPollTimer = null; }
+  if (webgalAnalyzeController) { webgalAnalyzeController.abort(); webgalAnalyzeController = null; }
+  const input = document.getElementById("webgal-input");
+  if (input) input.value = "";
+  const psyVoice = document.getElementById("webgal-psy-voice");
+  if (psyVoice) psyVoice.checked = false;
+  const psyChar = document.getElementById("webgal-psy-character");
+  if (psyChar) psyChar.value = "";
+  const langSel = document.getElementById("webgal-lang");
+  if (langSel) langSel.value = "zh";
+  ["webgal-settings", "webgal-review", "webgal-export"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  });
+  const container = document.getElementById("webgal-lines-container");
+  if (container) container.innerHTML = "";
+  const count = document.getElementById("webgal-line-count");
+  if (count) count.textContent = "";
+  const failures = document.getElementById("webgal-failures");
+  if (failures) failures.textContent = "";
+  const progress = document.getElementById("webgal-progress-text");
+  if (progress) { progress.textContent = ""; progress.classList.add("hidden"); }
+  const openBtn = document.getElementById("btn-webgal-open-export");
+  if (openBtn) openBtn.classList.add("hidden");
+  const exportStatus = document.getElementById("webgal-export-status");
+  if (exportStatus) { exportStatus.textContent = ""; exportStatus.className = "status-text"; }
+  const exportInput = document.getElementById("webgal-export-folder");
+  if (exportInput) exportInput.value = "";
+  setWebGalStatus("", "");
+}
+
+function wgCurrentLang() {
+  const el = document.getElementById("webgal-lang");
+  return el ? (el.value || "zh") : state.webgal.lang;
+}
+
+function syncWebGalDraft() {
+  const input = document.getElementById("webgal-input");
+  const text = input ? input.value : "";
+  state.webgal.source = text;
+  state.script = text;
+  clearTimeout(webgalDraftTimer);
+  const seq = ++webgalDraftSeq;
+  webgalDraftTimer = setTimeout(() => {
+    api("/api/script", { method: "POST", body: JSON.stringify({ text, seq }) }).catch(() => {});
+  }, 400);
+}
+
+async function parseWebGal() {
+  if (state.webgal.generating) { setWebGalStatus("生成中，请稍后再解析", "error"); return; }
+  const text = (document.getElementById("webgal-input").value || "").trim();
+  if (!text) { setWebGalStatus("请先粘贴 anogo 脚本", "error"); return; }
+  setWebGalStatus("正在解析脚本...", "");
+  try {
+    const lang = wgCurrentLang();
+    const data = await api("/api/webgal/parse", { method: "POST", body: JSON.stringify({ text, lang }) });
+    state.webgal.source = text;
+    state.webgal.lang = lang;
+    state.webgal.dialogues = data.dialogues || [];
+    state.webgal.emotions = {};
+    state.webgal.translations = {};
+    state.webgal.generated = {};
+    state.webgal.failures = {};
+    state.webgal.progress = { current: 0, total: 0 };
+    state.webgal.lastExport = "";
+    state.webgal.psyVoice = document.getElementById("webgal-psy-voice").checked;
+    state.webgal.psyCharacter = document.getElementById("webgal-psy-character").value;
+    populateWebGalPsyCharacters();
+    ["webgal-settings", "webgal-review", "webgal-export"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove("hidden");
+    });
+    renderWebGalLines();
+    setWebGalStatus("已解析 " + data.count + " 条对话，可以校对或让 AI 分析情绪", "success");
+    syncWebGalDraft();
+  } catch (e) {
+    setWebGalStatus("解析失败: " + e.message, "error");
+  }
+}
+
+function renderWebGalLines() {
+  const container = document.getElementById("webgal-lines-container");
+  if (!container) return;
+  const wg = state.webgal;
+  const countEl = document.getElementById("webgal-line-count");
+  if (countEl) countEl.textContent = "共 " + wg.dialogues.length + " 条对话";
+  container.innerHTML = wg.dialogues.map(d => {
+    const idx = d.index;
+    const emotion = wg.emotions[idx] || d.emotion || "思考";
+    const opts = state.emotions.map(e => '<option value="' + esc(e) + '"' + (e === emotion ? " selected" : "") + '>' + esc(e) + '</option>').join("");
+    const gen = wg.generated[idx];
+    const failMsg = wg.failures[idx];
+    const psyNote = d.is_psy
+      ? (wg.psyVoice ? (wg.psyCharacter ? "心理活动 → 配给 " + esc(wg.psyCharacter) : "心理活动 · 沿用角色配音") : "心理活动 · 不配音")
+      : "";
+    const extraNote = (!d.is_psy && state.chars.indexOf(d.character) === -1) ? "路人 · 不配音" : "";
+    const note = psyNote || extraNote;
+    const canVoice = (d.is_psy && wg.psyVoice) || (!d.is_psy && state.chars.indexOf(d.character) !== -1);
+    const audioState = gen ? '<span class="wg-audio-ok">已生成</span>' : (failMsg ? '<span class="wg-audio-fail">' + esc(failMsg) + '</span>' : '');
+    const actions = canVoice
+      ? '<button type="button" class="btn-line-action wg-play" data-index="' + idx + '"' + (gen ? "" : " disabled") + '>试听</button>'
+        + '<button type="button" class="btn-line-action wg-regen" data-index="' + idx + '"' + (gen || failMsg ? "" : " disabled") + '>重新生成</button>'
+        + audioState
+      : '<span class="wg-psy-note">不生成</span>' + audioState;
+    return '<div class="line-item">'
+      + '<span class="idx">#' + (idx + 1) + '</span>'
+      + '<span class="char">' + esc(d.character) + '</span>'
+      + '<span class="line-texts">'
+      + '<span class="text">' + esc(d.text) + '</span>'
+      + (wg.translations[idx] ? '<span class="translated">日语：' + esc(wg.translations[idx]) + '</span>' : '')
+      + (note ? '<span class="wg-psy-note">' + note + '</span>' : '')
+      + '</span>'
+      + '<span class="wg-fig">' + (d.figure_id ? esc(d.figure_id) : "—") + '</span>'
+      + '<select class="emotion-select" data-index="' + idx + '"' + (canVoice ? "" : " disabled") + '>' + opts + '</select>'
+      + '<span class="line-actions">' + actions + '</span>'
+      + '</div>';
+  }).join("");
+  container.querySelectorAll(".emotion-select").forEach(sel => {
+    sel.addEventListener("change", () => {
+      state.webgal.emotions[parseInt(sel.dataset.index, 10)] = sel.value;
+    });
+  });
+  container.querySelectorAll(".wg-play").forEach(btn => {
+    btn.addEventListener("click", () => playWebGalAudio(parseInt(btn.dataset.index, 10), btn));
+  });
+  container.querySelectorAll(".wg-regen").forEach(btn => {
+    btn.addEventListener("click", () => generateWebGal([parseInt(btn.dataset.index, 10)]));
+  });
+}
+
+function playWebGalAudio(idx, btn) {
+  if (!audioPlayer) audioPlayer = new Audio();
+  if (!audioPlayer.paused && audioPlayer.dataset && audioPlayer.dataset.wgIdx === String(idx)) {
+    audioPlayer.pause();
+    if (btn) btn.textContent = "试听";
+    return;
+  }
+  audioPlayer.src = "/api/webgal/audio/" + idx + "?t=" + Date.now();
+  audioPlayer.dataset = audioPlayer.dataset || {};
+  audioPlayer.dataset.wgIdx = String(idx);
+  audioPlayer.onended = () => { if (btn) btn.textContent = "试听"; };
+  audioPlayer.play().then(() => { if (btn) btn.textContent = "停止"; }).catch(() => { if (btn) btn.textContent = "试听"; });
+}
+
+async function analyzeWebGal() {
+  if (!state.webgal.dialogues.length) { setWebGalStatus("请先解析脚本", "error"); return; }
+  if (state.webgal.generating) { setWebGalStatus("生成中，请稍后再分析", "error"); return; }
+  if (state.webgal.analyzing) return;
+  setWebGalStatus("正在分析情绪...", "");
+  const btn = document.getElementById("btn-webgal-analyze");
+  if (btn) btn.disabled = true;
+  const stopBtn = document.getElementById("btn-webgal-stop-analyze");
+  if (stopBtn) stopBtn.classList.remove("hidden");
+  if (webgalAnalyzeController) webgalAnalyzeController.abort();
+  const controller = new AbortController();
+  webgalAnalyzeController = controller;
+  state.webgal.analyzing = true;
+  try {
+    const data = await api("/api/webgal/analyze", {
+      method: "POST",
+      body: JSON.stringify({ lang: wgCurrentLang() }),
+      signal: controller.signal
+    });
+    if (data.status === "cancelled") {
+      setWebGalStatus("已停止分析", "");
+      return;
+    }
+    state.webgal.emotions = data.emotions || {};
+    state.webgal.translations = data.translations || {};
+    renderWebGalLines();
+    setWebGalStatus("情绪分析完成，已填充 " + Object.keys(state.webgal.emotions).length + " 条", "success");
+  } catch (e) {
+    if (e.name === "AbortError") {
+      setWebGalStatus("已停止分析", "");
+    } else {
+      setWebGalStatus("情绪分析失败: " + e.message, "error");
+    }
+  } finally {
+    state.webgal.analyzing = false;
+    webgalAnalyzeController = null;
+    if (btn) btn.disabled = false;
+    if (stopBtn) stopBtn.classList.add("hidden");
+  }
+}
+
+async function stopWebGalAnalyze() {
+  if (webgalAnalyzeController) webgalAnalyzeController.abort();
+  try { await api("/api/analyze/cancel", { method: "POST" }); } catch (e) {}
+  setWebGalStatus("正在停止分析...", "");
+}
+
+async function generateWebGal(indices) {
+  if (!state.webgal.dialogues.length) { setWebGalStatus("请先解析脚本", "error"); return; }
+  if (state.webgal.generating) return;
+  state.webgal.psyVoice = document.getElementById("webgal-psy-voice").checked;
+  state.webgal.psyCharacter = document.getElementById("webgal-psy-character").value;
+  const emotions = {};
+  state.webgal.dialogues.forEach(d => {
+    emotions[d.index] = state.webgal.emotions[d.index] || d.emotion || "思考";
+  });
+  const statusEl = document.getElementById("webgal-progress-text");
+  if (statusEl) {
+    statusEl.classList.remove("hidden");
+    statusEl.textContent = indices && indices.length ? "正在生成 " + indices.length + " 条..." : "正在生成 " + state.webgal.dialogues.length + " 条...";
+    statusEl.className = "status-text";
+  }
+  const genBtn = document.getElementById("btn-webgal-generate");
+  const cancelBtn = document.getElementById("btn-webgal-cancel");
+  if (genBtn) genBtn.disabled = true;
+  if (cancelBtn) cancelBtn.classList.remove("hidden");
+  try {
+    const data = await api("/api/webgal/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        emotions,
+        psy_voice: state.webgal.psyVoice,
+        psy_character: state.webgal.psyCharacter,
+        lang: wgCurrentLang(),
+        indices: indices || undefined
+      })
+    });
+    state.webgal.generating = true;
+    state.webgal.progress = { current: 0, total: data.total || 0 };
+    startWebGalPolling();
+  } catch (e) {
+    if (statusEl) {
+      statusEl.textContent = "生成失败: " + e.message;
+      statusEl.className = "status-text error";
+    }
+    if (genBtn) genBtn.disabled = false;
+    if (cancelBtn) cancelBtn.classList.add("hidden");
+  }
+}
+
+function startWebGalPolling() {
+  if (webgalPollTimer) clearInterval(webgalPollTimer);
+  const poll = async () => {
+    try {
+      const p = await api("/api/webgal/progress");
+      state.webgal.generating = !!p.generating;
+      state.webgal.progress = p.progress || { current: 0, total: 0 };
+      state.webgal.failures = p.failures || {};
+      const gen = {};
+      Object.keys(p.generated || {}).forEach(k => { gen[parseInt(k, 10)] = p.generated[k]; });
+      state.webgal.generated = gen;
+      updateWebGalProgress();
+      renderWebGalLines();
+      if (!state.webgal.generating) {
+        if (webgalPollTimer) { clearInterval(webgalPollTimer); webgalPollTimer = null; }
+        finishWebGalGeneration();
+      }
+    } catch (e) {
+      if (webgalPollTimer) { clearInterval(webgalPollTimer); webgalPollTimer = null; }
+      state.webgal.generating = false;
+      finishWebGalGeneration();
+    }
+  };
+  poll();
+  webgalPollTimer = setInterval(poll, 1500);
+}
+
+function updateWebGalProgress() {
+  const el = document.getElementById("webgal-progress-text");
+  const p = state.webgal.progress || { current: 0, total: 0 };
+  if (el) {
+    if (state.webgal.generating) {
+      el.classList.remove("hidden");
+      el.textContent = "生成中: " + p.current + "/" + p.total;
+      el.className = "status-text";
+    } else {
+      el.classList.add("hidden");
+    }
+  }
+  const failEl = document.getElementById("webgal-failures");
+  if (failEl) {
+    const fails = Object.values(state.webgal.failures || {});
+    failEl.textContent = fails.length ? "未生成：" + fails.join("；") : "";
+    failEl.className = "status-text" + (fails.length ? " error" : "");
+  }
+}
+
+function finishWebGalGeneration() {
+  const genBtn = document.getElementById("btn-webgal-generate");
+  const cancelBtn = document.getElementById("btn-webgal-cancel");
+  if (genBtn) genBtn.disabled = false;
+  if (cancelBtn) cancelBtn.classList.add("hidden");
+  const p = state.webgal.progress || { current: 0, total: 0 };
+  const voiced = Object.keys(state.webgal.generated).length;
+  const failed = Object.keys(state.webgal.failures).length;
+  updateWebGalProgress();
+  renderWebGalLines();
+  if (p.total > 0) {
+    toast("生成完成：语音 " + voiced + " 条" + (failed ? "，未生成 " + failed + " 条" : ""), failed ? "error" : "success");
+  }
+  refreshRecentList();
+}
+
+async function exportWebGal() {
+  const folderName = document.getElementById("webgal-export-folder").value.trim();
+  const statusEl = document.getElementById("webgal-export-status");
+  if (!statusEl) return;
+  if (!folderName) { statusEl.textContent = "请输入导出文件夹名称"; statusEl.className = "status-text error"; return; }
+  statusEl.textContent = "正在导出...";
+  statusEl.className = "status-text";
+  const btn = document.getElementById("btn-webgal-export");
+  if (btn) btn.disabled = true;
+  try {
+    const data = await api("/api/webgal/export", { method: "POST", body: JSON.stringify({ folder_name: folderName }) });
+    state.webgal.lastExport = data.folder;
+    const openBtn = document.getElementById("btn-webgal-open-export");
+    if (openBtn) openBtn.classList.remove("hidden");
+    statusEl.textContent = "导出完成：音频 " + data.voiced + " 条" + (data.unvoiced ? "，未生成 " + data.unvoiced + " 条" : "") + " → " + data.folder;
+    statusEl.className = "status-text success";
+    toast("WebGaL 导出完成", "success");
+    refreshRecentList();
+  } catch (e) {
+    statusEl.textContent = "导出失败: " + e.message;
+    statusEl.className = "status-text error";
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function restoreWebGalProject(scriptText, lang) {
+  resetWebGalProject();
+  const input = document.getElementById("webgal-input");
+  const langSel = document.getElementById("webgal-lang");
+  if (input) input.value = scriptText || "";
+  if (langSel) langSel.value = lang === "ja" ? "ja" : "zh";
+  state.webgal.source = scriptText || "";
+  state.webgal.lang = lang === "ja" ? "ja" : "zh";
+  if (!(scriptText || "").trim()) {
+    showWorkbench();
+    return;
+  }
+  try {
+    const data = await api("/api/webgal/parse", { method: "POST", body: JSON.stringify({ text: scriptText, lang: state.webgal.lang }) });
+    state.webgal.dialogues = data.dialogues || [];
+    populateWebGalPsyCharacters();
+    ["webgal-settings", "webgal-review", "webgal-export"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove("hidden");
+    });
+    renderWebGalLines();
+    setWebGalStatus("已恢复项目：" + data.count + " 条对话", "success");
+  } catch (e) {
+    setWebGalStatus("恢复项目失败: " + e.message, "error");
+  }
+  showWorkbench();
+}
+
+function initWebGal() {
+  const parseBtn = document.getElementById("btn-webgal-parse");
+  if (parseBtn) parseBtn.addEventListener("click", parseWebGal);
+  const analyzeBtn = document.getElementById("btn-webgal-analyze");
+  if (analyzeBtn) analyzeBtn.addEventListener("click", analyzeWebGal);
+  const stopAnalyzeBtn = document.getElementById("btn-webgal-stop-analyze");
+  if (stopAnalyzeBtn) stopAnalyzeBtn.addEventListener("click", stopWebGalAnalyze);
+  const genBtn = document.getElementById("btn-webgal-generate");
+  if (genBtn) genBtn.addEventListener("click", () => generateWebGal(null));
+  const cancelBtn = document.getElementById("btn-webgal-cancel");
+  if (cancelBtn) cancelBtn.addEventListener("click", async () => {
+    try { await api("/api/webgal/cancel", { method: "POST" }); } catch (e) {}
+    const el = document.getElementById("webgal-progress-text");
+    if (el) { el.textContent = "正在取消..."; el.className = "status-text"; }
+  });
+  const exportBtn = document.getElementById("btn-webgal-export");
+  if (exportBtn) exportBtn.addEventListener("click", exportWebGal);
+  const openBtn = document.getElementById("btn-webgal-open-export");
+  if (openBtn) openBtn.addEventListener("click", async () => {
+    if (!state.webgal.lastExport) return;
+    try {
+      await api("/api/open_folder", { method: "POST", body: JSON.stringify({ path: state.webgal.lastExport }) });
+    } catch (e) {
+      await showAlertModal("打开失败: " + e.message);
+    }
+  });
+  const input = document.getElementById("webgal-input");
+  if (input) input.addEventListener("input", syncWebGalDraft);
+  const langSel = document.getElementById("webgal-lang");
+  if (langSel) langSel.addEventListener("change", () => {
+    state.webgal.lang = langSel.value;
+  });
+  const psyVoice = document.getElementById("webgal-psy-voice");
+  if (psyVoice) psyVoice.addEventListener("change", () => {
+    state.webgal.psyVoice = psyVoice.checked;
+    renderWebGalLines();
+  });
+  const psyChar = document.getElementById("webgal-psy-character");
+  if (psyChar) psyChar.addEventListener("change", () => {
+    state.webgal.psyCharacter = psyChar.value;
+    renderWebGalLines();
+  });
+  populateWebGalPsyCharacters();
+  resetWebGalProject();
+}
 function initSplash() {
+
   const overlay = document.getElementById("splash-overlay");
   const video = document.getElementById("splash-video");
   const skip = document.getElementById("splash-skip");
@@ -2404,6 +2854,7 @@ function openSettingsTab(tab) {
 
 function showSettings(tab) {
   const workbench = document.getElementById("view-workbench");
+  const webgal = document.getElementById("view-webgal");
   const settings = document.getElementById("view-settings");
   const projects = document.getElementById("view-projects");
   if (!workbench || !settings) return;
@@ -2414,6 +2865,7 @@ function showSettings(tab) {
   const recentBtn = document.getElementById("btn-recent");
   if (recentBtn) recentBtn.classList.add("hidden");
   workbench.classList.add("hidden");
+  if (webgal) webgal.classList.add("hidden");
   settings.classList.remove("hidden");
   document.getElementById("btn-back-workbench").classList.remove("hidden");
   if (!tab) {
@@ -2427,11 +2879,14 @@ function showSettings(tab) {
 
 function showWorkbench() {
   const workbench = document.getElementById("view-workbench");
+  const webgal = document.getElementById("view-webgal");
   const settings = document.getElementById("view-settings");
   const projects = document.getElementById("view-projects");
   if (!workbench || !settings) return;
   if (projects) projects.classList.add("hidden");
-  workbench.classList.remove("hidden");
+  const isWebGal = state.projectType === "webgal";
+  workbench.classList.toggle("hidden", isWebGal);
+  if (webgal) webgal.classList.toggle("hidden", !isWebGal);
   settings.classList.add("hidden");
   document.getElementById("btn-back-workbench").classList.add("hidden");
   ["btn-undo", "btn-redo", "btn-refresh", "btn-settings", "btn-recent"].forEach(id => {
@@ -3421,4 +3876,5 @@ if (refreshBtn && refreshModal) {
     if (e.target === refreshModal) refreshModal.classList.add("hidden");
   });
 }
+initWebGal();
 showProjectPicker();

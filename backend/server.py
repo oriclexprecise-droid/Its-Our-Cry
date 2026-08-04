@@ -29,6 +29,7 @@ from .translator import translate_lines
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
 from .feedback import read_events, record_event
 from .cleanup import clean_items, scan_cleanable
+from .webgal import dialogue_summary, parse_script, render_script, short_name_for
 
 
 DEFAULT_INTERVAL = 0.5
@@ -579,6 +580,20 @@ def create_app(config_path="config.yaml"):
         "history_limit": 50,
         "current_record_id": None,
         "project_type": "srt",
+        "webgal": {
+            "source": "",
+            "entries": [],
+            "dialogues": [],
+            "emotions": {},
+            "translations": {},
+            "generated": {},
+            "failures": {},
+            "progress": {"current": 0, "total": 0},
+            "generating": False,
+            "cancel_requested": False,
+            "last_export": "",
+            "lang": "zh",
+        },
         "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
         "deploy_model_copy": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total": 0, "current": ""},
         "deploy_clone": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target_dir": ""},
@@ -1321,6 +1336,343 @@ def create_app(config_path="config.yaml"):
     def cancel_analysis():
         state["analysis_cancel_seq"] = state.get("analysis_seq", 0)
         return jsonify({"status": "ok"})
+
+    @app.route("/api/webgal/parse", methods=["POST"])
+    def webgal_parse():
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text") or "")
+        if not text.strip():
+            return jsonify({"error": "请先粘贴 anogo 脚本"}), 400
+        lang = str(data.get("lang") or state.get("lang") or "zh")
+        if lang not in ("zh", "ja"):
+            lang = "zh"
+        entries = parse_script(text)
+        dialogues = [e for e in entries if e["type"] == "dialogue"]
+        if not dialogues:
+            return jsonify({"error": "没有解析到对话行，请确认粘贴的是 anogo 脚本"}), 400
+        state["script"] = text
+        state["lang"] = lang
+        state["webgal"] = {
+            "source": text,
+            "entries": entries,
+            "dialogues": dialogues,
+            "emotions": {},
+            "translations": {},
+            "generated": {},
+            "failures": {},
+            "progress": {"current": 0, "total": 0},
+            "generating": False,
+            "cancel_requested": False,
+            "last_export": "",
+            "lang": lang,
+        }
+        return jsonify({
+            "status": "ok",
+            "count": len(dialogues),
+            "lang": lang,
+            "dialogues": [dialogue_summary(d) for d in dialogues],
+        })
+
+    @app.route("/api/webgal/analyze", methods=["POST"])
+    def webgal_analyze():
+        wg = state.get("webgal") or {}
+        dialogues = wg.get("dialogues") or []
+        if not dialogues:
+            return jsonify({"error": "请先解析脚本"}), 400
+        api_key = config["deepseek"]["api_key"]
+        if not api_key:
+            return jsonify({"error": "please configure DeepSeek API Key"}), 400
+        data = request.get_json(silent=True) or {}
+        lang = str(data.get("lang") or wg.get("lang") or state.get("lang") or "zh")
+        if lang not in ("zh", "ja"):
+            lang = "zh"
+        wg["lang"] = lang
+        state["lang"] = lang
+        seq = state.get("analysis_seq", 0) + 1
+        state["analysis_seq"] = seq
+        lines = [
+            {"index": d["index"], "character": d["character"], "text": d["text"]}
+            for d in dialogues
+        ]
+        try:
+            emotions = analyze_emotions(
+                lines=lines,
+                api_key=api_key,
+                base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
+                model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                lang=lang,
+                emotions=config["emotions"],
+            )
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "emotion analysis failed: " + str(e)}), 500
+        if state.get("analysis_cancel_seq", -1) >= seq:
+            return jsonify({"status": "cancelled"}), 200
+        emotion_map = {}
+        for e in emotions:
+            idx = e.get("index")
+            if isinstance(idx, int) and not isinstance(idx, bool):
+                emotion_map[idx] = e.get("emotion") or "思考"
+        wg["emotions"] = {str(idx): emotion_map.get(idx, "思考") for idx in [d["index"] for d in dialogues]}
+        if lang == "ja":
+            try:
+                translations = translate_lines(
+                    lines=lines,
+                    api_key=api_key,
+                    base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
+                    model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                )
+            except Exception as e:
+                traceback.print_exc()
+                return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+            wg["translations"] = {str(t.get("index")): t.get("translation", "") for t in translations if t.get("index") is not None}
+        else:
+            wg["translations"] = {}
+        if state.get("analysis_cancel_seq", -1) >= seq:
+            return jsonify({"status": "cancelled"}), 200
+        return jsonify({"status": "ok", "emotions": wg["emotions"], "translations": wg.get("translations", {})})
+
+    @app.route("/api/webgal/generate", methods=["POST"])
+    def webgal_generate():
+        wg = state.get("webgal") or {}
+        dialogues = wg.get("dialogues") or []
+        if not dialogues:
+            return jsonify({"error": "请先解析脚本"}), 400
+        if wg.get("generating"):
+            return jsonify({"error": "generation in progress"}), 409
+        data = request.get_json(silent=True) or {}
+        emotions = data.get("emotions") or {}
+        psy_voice = bool(data.get("psy_voice"))
+        psy_character = str(data.get("psy_character") or "").strip()
+        lang = str(data.get("lang") or wg.get("lang") or state.get("lang") or "zh")
+        if lang not in ("zh", "ja"):
+            lang = "zh"
+        wg["lang"] = lang
+        state["lang"] = lang
+        requested = data.get("indices")
+        if not requested:
+            requested = [d["index"] for d in dialogues]
+        requested = [i for i in requested if isinstance(i, int) and any(d["index"] == i for d in dialogues)]
+        if not requested:
+            return jsonify({"error": "没有可生成的台词"}), 400
+
+        for d in dialogues:
+            d["emotion"] = str(emotions.get(str(d["index"])) or d.get("emotion") or "思考")
+            d["voice_psy"] = psy_voice
+            d["psy_character"] = psy_character
+
+        wg["generating"] = True
+        wg["cancel_requested"] = False
+        wg["failures"] = {}
+        wg["progress"] = {"current": 0, "total": len(requested)}
+        for idx in requested:
+            wg["generated"].pop(str(idx), None)
+
+        def fail(idx, message):
+            wg["generated"].pop(str(idx), None)
+            wg["failures"][str(idx)] = message
+            wg["progress"]["current"] += 1
+
+        def generate_webgal_worker():
+            try:
+                worker_script = project_root / "backend" / "tts_worker.py"
+                engine = get_engine(
+                    config["gptsovits_path"],
+                    project_root=project_root,
+                    worker_script=str(worker_script) if worker_script.exists() else None,
+                )
+                engine.load()
+                out_dir = Path(config["output_dir"]) / "webgal"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                for idx in requested:
+                    if wg["cancel_requested"]:
+                        break
+                    d = next(x for x in dialogues if x["index"] == idx)
+                    char = d["character"]
+                    if d["is_psy"] and psy_voice and psy_character:
+                        char = psy_character
+                    if d["is_psy"] and not psy_voice:
+                        fail(idx, "心理活动未开启配音")
+                        continue
+                    if char not in config["characters"]:
+                        fail(idx, f"路人/未配置角色「{d['character']}」，不生成音频")
+                        continue
+                    emotion = d["emotion"]
+                    if emotion not in config["emotions"]:
+                        fail(idx, f"情绪「{emotion}」不在当前情绪列表，请重新分析或手动选择")
+                        continue
+                    ref = pick_ref_audio(char, emotion)
+                    if ref is None:
+                        fail(idx, f"缺少参考音频：{char}「{emotion}」")
+                        continue
+                    try:
+                        engine.switch_character(
+                            config["characters"][char]["model"],
+                            config["characters"][char].get("gpt_model"),
+                        )
+                    except Exception as e:
+                        fail(idx, f"角色模型加载失败：{str(e)[-200:]}")
+                        continue
+                    tts_text = d["text"]
+                    if d["is_psy"]:
+                        tts_text = tts_text.strip("（）()").strip()
+                    if lang == "ja":
+                        corrected = correct_pronunciation(d["text"], config.get("pronunciation", []))
+                        if corrected:
+                            tts_text = corrected
+                        else:
+                            tts_text = (wg.get("translations") or {}).get(str(idx), "") or tts_text
+                    ref_prompt = ref.get("prompt_text") or ""
+                    output_path = out_dir / f"{idx:04d}_{char}_{emotion}.wav"
+                    emo_params = {}
+                    if config.get("use_emotion_params", True):
+                        emo_params = config.get("emotion_params", {}).get(emotion) or {}
+                    tts_cfg = config["tts"]
+
+                    def _param(key, default):
+                        v = emo_params.get(key)
+                        return default if v is None or v == "" else v
+
+                    try:
+                        duration = engine.synthesize_to_file(
+                            text=tts_text,
+                            ref_audio_path=ref["path"],
+                            prompt_text=ref_prompt,
+                            output_path=str(output_path),
+                            text_lang=lang,
+                            prompt_lang=_detect_prompt_lang(ref_prompt, lang),
+                            text_split_method=tts_cfg.get("text_split_method", "cut5"),
+                            batch_size=tts_cfg.get("batch_size", 1),
+                            speed_factor=_param("speed_factor", tts_cfg.get("speed_factor", 1.0)),
+                            fragment_interval=tts_cfg.get("fragment_interval", 0.3),
+                            temperature=_param("temperature", tts_cfg.get("temperature", 1.0)),
+                            top_k=_param("top_k", tts_cfg.get("top_k", 15)),
+                            top_p=_param("top_p", tts_cfg.get("top_p", 1.0)),
+                            seed=_param("seed", tts_cfg.get("seed", -1)),
+                        )
+                    except Exception as e:
+                        fail(idx, f"{char} 生成失败：{str(e)[-300:]}")
+                        continue
+                    wg["generated"][str(idx)] = {
+                        "path": str(output_path),
+                        "duration": duration,
+                        "character": char,
+                        "emotion": emotion,
+                    }
+                    wg["progress"]["current"] += 1
+            except Exception as e:
+                traceback.print_exc()
+                state["error"] = str(e)
+            finally:
+                wg["generating"] = False
+
+        threading.Thread(target=generate_webgal_worker, daemon=True).start()
+        return jsonify({"status": "started", "total": len(requested)})
+
+    @app.route("/api/webgal/cancel", methods=["POST"])
+    def webgal_cancel():
+        wg = state.get("webgal") or {}
+        if not wg.get("generating"):
+            return jsonify({"status": "ok", "already_stopped": True})
+        wg["cancel_requested"] = True
+        return jsonify({"status": "cancelling"})
+
+    @app.route("/api/webgal/progress", methods=["GET"])
+    def webgal_progress():
+        wg = state.get("webgal") or {}
+        return jsonify({
+            "generating": bool(wg.get("generating")),
+            "progress": wg.get("progress", {"current": 0, "total": 0}),
+            "failures": wg.get("failures", {}),
+            "generated": {
+                k: {"duration": v.get("duration")}
+                for k, v in (wg.get("generated") or {}).items()
+            },
+        })
+
+    @app.route("/api/webgal/audio/<int:index>", methods=["GET"])
+    def webgal_audio(index):
+        wg = state.get("webgal") or {}
+        gen = (wg.get("generated") or {}).get(str(index))
+        if not gen:
+            return jsonify({"error": "该台词还没有音频"}), 404
+        path = gen["path"]
+        if not Path(path).exists():
+            return jsonify({"error": "音频文件不存在"}), 404
+        return send_file(path, mimetype="audio/wav")
+
+    @app.route("/api/webgal/export", methods=["POST"])
+    def webgal_export():
+        wg = state.get("webgal") or {}
+        dialogues = wg.get("dialogues") or []
+        if not dialogues:
+            return jsonify({"error": "请先解析脚本"}), 400
+        if wg.get("generating"):
+            return jsonify({"error": "生成中，请稍后再导出"}), 409
+        data = request.get_json(silent=True) or {}
+        folder_name = str(data.get("folder_name") or "").strip()
+        if not folder_name:
+            return jsonify({"error": "请输入导出文件夹名称"}), 400
+        if re.search(r'[\\/:*?"<>|\r\n]', folder_name) or folder_name in (".", ".."):
+            return jsonify({"error": "文件夹名称包含非法字符"}), 400
+        if len(folder_name) > 64:
+            return jsonify({"error": "文件夹名称过长"}), 400
+        export_root = project_root / "exports"
+        export_root.mkdir(parents=True, exist_ok=True)
+        export_dir = export_root / folder_name
+        if export_dir.exists():
+            return jsonify({
+                "error": f"文件夹「{folder_name}」已存在，请换一个名称或手动删除旧文件夹",
+                "code": "folder_exists",
+            }), 409
+        export_dir.mkdir(parents=True)
+        try:
+            audio_map = {}
+            created = []
+            for d in dialogues:
+                gen = (wg.get("generated") or {}).get(str(d["index"]))
+                if not gen or not Path(gen["path"]).exists():
+                    continue
+                short_dir = short_name_for(gen.get("character") or d["character"])
+                target_dir = export_dir / short_dir
+                target_dir.mkdir(parents=True, exist_ok=True)
+                target = target_dir / Path(gen["path"]).name
+                shutil.copy2(gen["path"], str(target))
+                audio_map[d["index"]] = (short_dir + "/" + target.name).replace("\\", "/")
+                created.append(str(target))
+            output_script = render_script(wg.get("entries") or [], audio_map)
+            script_path = export_dir / "script.txt"
+            script_path.write_text(output_script, encoding="utf-8")
+            (export_dir / "original_script.txt").write_text(wg.get("source") or "", encoding="utf-8")
+            unvoiced = []
+            for d in dialogues:
+                if d["index"] in audio_map:
+                    continue
+                msg = (wg.get("failures") or {}).get(str(d["index"]))
+                unvoiced.append(f"#{d['index'] + 1} {d['character']}：{d['text']} —— {msg or '未生成音频'}")
+            (export_dir / "unvoiced.txt").write_text("\n".join(unvoiced), encoding="utf-8")
+            created.append(str(script_path))
+            created.append(str(export_dir / "original_script.txt"))
+            created.append(str(export_dir / "unvoiced.txt"))
+            try:
+                attach_export_to_record({
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "folder": str(export_dir),
+                    "webgal": True,
+                })
+            except Exception:
+                pass
+            wg["last_export"] = str(export_dir)
+            return jsonify({
+                "status": "ok",
+                "folder": str(export_dir),
+                "files": created,
+                "voiced": len(audio_map),
+                "unvoiced": len(unvoiced),
+            })
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": "导出失败: " + str(e)}), 500
 
     @app.route("/api/line/<int:index>", methods=["PUT"])
     def update_line(index):
