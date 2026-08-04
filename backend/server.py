@@ -15,8 +15,6 @@ import uuid
 import wave
 import zipfile
 import copy
-import hashlib
-import io
 from pathlib import Path
 from typing import Optional
 
@@ -31,7 +29,6 @@ from .translator import translate_lines
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
 from .feedback import read_events, record_event
 from .cleanup import clean_items, scan_cleanable
-from .qiniu_cloud import QiniuCloud
 from .webgal import DEFAULT_EMOTION_MAP, dialogue_summary, parse_script as parse_webgal_script, render_script, short_name_for
 
 
@@ -339,18 +336,6 @@ def _persist_user_settings(project_root, config):
         settings["emotions"] = list(config.get("emotions", []))
         settings["webgal_emotion_map"] = dict(config.get("webgal_emotion_map") or {})
         settings["webgal_retranslate_on_analyze"] = bool(config.get("webgal_retranslate_on_analyze", True))
-        settings["qiniu_access_key"] = config.get("qiniu_access_key", "")
-        qiniu_sk = config.get("qiniu_secret_key", "")
-        if qiniu_sk:
-            encrypted_sk = _dpapi_encrypt(qiniu_sk)
-            settings["qiniu_secret_key"] = encrypted_sk or qiniu_sk
-        else:
-            settings["qiniu_secret_key"] = ""
-        settings["qiniu_bucket"] = config.get("qiniu_bucket", "")
-        settings["qiniu_domain"] = config.get("qiniu_domain", "")
-        settings["qiniu_region"] = config.get("qiniu_region", "z0")
-        settings["qiniu_private"] = bool(config.get("qiniu_private", False))
-        settings["qiniu_dev_password_hash"] = config.get("qiniu_dev_password_hash", "")
         settings["emotion_params"] = config.get("emotion_params", {})
         settings["use_emotion_params"] = bool(config.get("use_emotion_params", True))
         settings["emotion_param_presets"] = config.get("emotion_param_presets", {})
@@ -477,13 +462,6 @@ def create_app(config_path="config.yaml"):
     config.setdefault("emotion_param_presets", {})
     config.setdefault("webgal_emotion_map", dict(DEFAULT_EMOTION_MAP))
     config.setdefault("webgal_retranslate_on_analyze", True)
-    config.setdefault("qiniu_access_key", "")
-    config.setdefault("qiniu_secret_key", "")
-    config.setdefault("qiniu_bucket", "")
-    config.setdefault("qiniu_domain", "")
-    config.setdefault("qiniu_region", "z0")
-    config.setdefault("qiniu_private", False)
-    config.setdefault("qiniu_dev_password_hash", "")
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
     user_settings = {}
     user_settings_path = project_root / "user_settings.json"
@@ -537,18 +515,6 @@ def create_app(config_path="config.yaml"):
             config["webgal_emotion_map"] = cleaned_map
     if "webgal_retranslate_on_analyze" in user_settings:
         config["webgal_retranslate_on_analyze"] = bool(user_settings["webgal_retranslate_on_analyze"])
-    stored_qiniu_sk = user_settings.get("qiniu_secret_key", "")
-    if stored_qiniu_sk:
-        decrypted_sk = _dpapi_decrypt(stored_qiniu_sk)
-        if decrypted_sk:
-            config["qiniu_secret_key"] = decrypted_sk
-        elif not str(stored_qiniu_sk).startswith("dpapi:"):
-            config["qiniu_secret_key"] = stored_qiniu_sk
-    for field in ("qiniu_access_key", "qiniu_bucket", "qiniu_domain", "qiniu_region", "qiniu_dev_password_hash"):
-        if user_settings.get(field):
-            config[field] = user_settings[field]
-    if "qiniu_private" in user_settings:
-        config["qiniu_private"] = bool(user_settings["qiniu_private"])
     dpapi_ok = _dpapi_encrypt("probe") is not None
 
     # 近期记录：本地 JSON 文件，不提交 git、不联网
@@ -1595,174 +1561,6 @@ def create_app(config_path="config.yaml"):
             config["webgal_retranslate_on_analyze"] = bool(data["retranslate_on_analyze"])
             _persist_user_settings(project_root, config)
         return jsonify({"status": "ok", "retranslate_on_analyze": bool(config.get("webgal_retranslate_on_analyze", True))})
-
-    def _qiniu_client():
-        return QiniuCloud(
-            access_key=config.get("qiniu_access_key", ""),
-            secret_key=config.get("qiniu_secret_key", ""),
-            bucket=config.get("qiniu_bucket", ""),
-            domain=config.get("qiniu_domain", ""),
-            region=config.get("qiniu_region", "z0"),
-            private=bool(config.get("qiniu_private", False)),
-        )
-
-    def _qiniu_dev_ok(password):
-        expected = config.get("qiniu_dev_password_hash", "")
-        if not expected:
-            return True
-        return bool(password) and hashlib.sha256(str(password).encode("utf-8")).hexdigest() == expected
-
-    @app.route("/api/qiniu/config", methods=["GET"])
-    def get_qiniu_config():
-        ak = str(config.get("qiniu_access_key", ""))
-        masked = ""
-        if len(ak) > 8:
-            masked = ak[:4] + "****" + ak[-4:]
-        elif ak:
-            masked = "****"
-        return jsonify({
-            "configured": bool(config.get("qiniu_bucket") and config.get("qiniu_domain")),
-            "access_key_masked": masked,
-            "bucket": config.get("qiniu_bucket", ""),
-            "domain": config.get("qiniu_domain", ""),
-            "region": config.get("qiniu_region", "z0"),
-            "private": bool(config.get("qiniu_private", False)),
-            "dev_password_set": bool(config.get("qiniu_dev_password_hash", "")),
-        })
-
-    @app.route("/api/qiniu/dev_check", methods=["POST"])
-    def check_qiniu_dev():
-        data = request.get_json(silent=True) or {}
-        if _qiniu_dev_ok(data.get("dev_password")):
-            return jsonify({"status": "ok", "first_time": not bool(config.get("qiniu_dev_password_hash", ""))})
-        return jsonify({"error": "开发者密码错误"}), 403
-
-    @app.route("/api/qiniu/config", methods=["POST"])
-    def save_qiniu_config():
-        data = request.get_json(silent=True) or {}
-        if config.get("qiniu_dev_password_hash") and not _qiniu_dev_ok(data.get("dev_password")):
-            return jsonify({"error": "开发者密码错误"}), 403
-        config["qiniu_access_key"] = str(data.get("access_key") or "").strip()
-        config["qiniu_secret_key"] = str(data.get("secret_key") or "").strip()
-        config["qiniu_bucket"] = str(data.get("bucket") or "").strip()
-        config["qiniu_domain"] = str(data.get("domain") or "").strip().rstrip("/")
-        config["qiniu_region"] = str(data.get("region") or "z0").strip()
-        config["qiniu_private"] = bool(data.get("private", False))
-        new_password = str(data.get("new_password") or "").strip()
-        if new_password:
-            config["qiniu_dev_password_hash"] = hashlib.sha256(new_password.encode("utf-8")).hexdigest()
-        _persist_user_settings(project_root, config)
-        return jsonify({"status": "ok"})
-
-    @app.route("/api/qiniu/test", methods=["POST"])
-    def test_qiniu_connection():
-        data = request.get_json(silent=True) or {}
-        if config.get("qiniu_dev_password_hash") and not _qiniu_dev_ok(data.get("dev_password")):
-            return jsonify({"error": "开发者密码错误"}), 403
-        client = _qiniu_client()
-        if not client.configured:
-            return jsonify({"error": "请先填写完整的云存储配置"}), 400
-        try:
-            items, _, _ = client.list_files(prefix="shared/", limit=1)
-            return jsonify({"status": "ok", "item_count": len(items)})
-        except Exception as e:
-            return jsonify({"error": "连接失败: " + str(e)}), 400
-
-    @app.route("/api/qiniu/list", methods=["GET"])
-    def list_qiniu_shared():
-        client = _qiniu_client()
-        if not client.configured:
-            return jsonify({"error": "云端尚未配置"}), 400
-        marker = request.args.get("marker") or None
-        try:
-            items, marker_out, _ = client.list_files(prefix="shared/", limit=100, marker=marker)
-            out = []
-            for it in items:
-                key = it.get("key", "")
-                if not key:
-                    continue
-                meta = client.get_json("meta/" + key) or {}
-                out.append({
-                    "key": key,
-                    "name": key.rsplit("/", 1)[-1],
-                    "size": it.get("fsize", 0),
-                    "mtime": it.get("putTime", 0),
-                    "category": meta.get("category", "二创素材"),
-                    "author": meta.get("author", ""),
-                    "bilibili": meta.get("bilibili", ""),
-                    "description": meta.get("description", ""),
-                    "created_at": meta.get("created_at", ""),
-                })
-            return jsonify({"items": out, "marker": marker_out, "configured": True})
-        except Exception as e:
-            return jsonify({"error": "获取共享素材失败: " + str(e)}), 400
-
-    @app.route("/api/qiniu/download", methods=["POST"])
-    def qiniu_download_url():
-        data = request.get_json(silent=True) or {}
-        key = str(data.get("key") or "")
-        client = _qiniu_client()
-        if not client.configured:
-            return jsonify({"error": "云端尚未配置"}), 400
-        if not key or not key.startswith("shared/"):
-            return jsonify({"error": "文件 key 不正确"}), 400
-        try:
-            return jsonify({"url": client.download_url(key)})
-        except Exception as e:
-            return jsonify({"error": "生成下载链接失败: " + str(e)}), 400
-
-    @app.route("/api/qiniu/upload", methods=["POST"])
-    def upload_qiniu_shared():
-        data = request.form
-        if config.get("qiniu_dev_password_hash") and not _qiniu_dev_ok(data.get("dev_password")):
-            return jsonify({"error": "开发者密码错误"}), 403
-        client = _qiniu_client()
-        if not client.configured:
-            return jsonify({"error": "云端尚未配置"}), 400
-        f = request.files.get("file")
-        if not f or not f.filename:
-            return jsonify({"error": "请选择要上传的文件"}), 400
-        category = str(data.get("category") or "二创素材").strip()
-        cat_map = {"参考音频": "ref_audio", "预设": "presets", "二创素材": "assets"}
-        cat_dir = cat_map.get(category, "assets")
-        safe_name = re.sub(r"[\\/:*?\"<>|\s]+", "_", f.filename)[:120] or "file"
-        key = "shared/{}/{}_{}".format(cat_dir, int(time.time() * 1000), safe_name)
-        meta = {
-            "category": category,
-            "author": str(data.get("author") or "").strip(),
-            "bilibili": str(data.get("bilibili") or "").strip(),
-            "description": str(data.get("description") or "").strip(),
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "filename": f.filename,
-        }
-        try:
-            f.stream.seek(0)
-            client.upload_file(key, f.stream, filename=f.filename, content_type=f.mimetype or "application/octet-stream")
-            client.upload_file("meta/" + key + ".json", io.BytesIO(json.dumps(meta, ensure_ascii=False).encode("utf-8")), filename="meta.json", content_type="application/json")
-            return jsonify({"status": "ok", "key": key})
-        except Exception as e:
-            return jsonify({"error": "上传失败: " + str(e)}), 400
-
-    @app.route("/api/qiniu/delete", methods=["POST"])
-    def delete_qiniu_shared():
-        data = request.get_json(silent=True) or {}
-        if config.get("qiniu_dev_password_hash") and not _qiniu_dev_ok(data.get("dev_password")):
-            return jsonify({"error": "开发者密码错误"}), 403
-        key = str(data.get("key") or "")
-        client = _qiniu_client()
-        if not client.configured:
-            return jsonify({"error": "云端尚未配置"}), 400
-        if not key or not key.startswith("shared/"):
-            return jsonify({"error": "文件 key 不正确"}), 400
-        try:
-            client.delete_file(key)
-            try:
-                client.delete_file("meta/" + key + ".json")
-            except Exception:
-                pass
-            return jsonify({"status": "ok"})
-        except Exception as e:
-            return jsonify({"error": "删除失败: " + str(e)}), 400
 
     @app.route("/api/webgal/parse", methods=["POST"])
     def webgal_parse():
