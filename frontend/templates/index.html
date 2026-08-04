@@ -239,6 +239,7 @@
         <button type="button" class="settings-tab active" data-settings-tab="deploy">部署</button>
         <button type="button" class="settings-tab" data-settings-tab="models">模型配置</button>
         <button type="button" class="settings-tab" data-settings-tab="voice">语音与情绪</button>
+        <button type="button" class="settings-tab" data-settings-tab="webgal">WebGaL 设置</button>
         <button type="button" class="settings-tab" data-settings-tab="clean">清理空间</button>
         <button type="button" class="settings-tab" data-settings-tab="log">日志</button>
         <button type="button" class="settings-tab" data-settings-tab="legal">声明</button>
@@ -429,7 +430,26 @@
           </div>
         </div>
       </div>
-    </section>
+    <section class="panel settings-page" data-settings-page="webgal">
+      <div class="panel-header"><h2>WebGaL 设置</h2></div>
+      <div class="panel-body">
+        <div class="side-section">
+          <h3 class="side-section-title">脚本情绪映射</h3>
+          <p class="side-hint">解析 anogo 脚本时以 changeFigure 的 -expression 表情为准，缺失时回退 -motion；表情词映射到系统情绪后用于选择参考音频，导出脚本仍保持原样。</p>
+          <div id="webgal-map-list" class="pron-list"><div class="model-empty">加载中...</div></div>
+          <div class="pron-add-row">
+            <input type="text" id="webgal-map-key" placeholder="脚本表情词，如 smile / crying" autocomplete="off">
+            <select id="webgal-map-target"></select>
+            <button type="button" id="btn-add-webgal-map" class="btn-secondary btn-small">添加</button>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="btn-save-webgal-map" class="btn-secondary btn-small btn-flex">保存映射</button>
+            <button type="button" id="btn-reset-webgal-map" class="btn-secondary btn-small">恢复默认</button>
+          </div>
+          <span id="webgal-map-status" class="status-text"></span>
+        </div>
+      </div>
+    </section>    </section>
     <section class="panel settings-page" data-settings-page="deploy">
       <div class="panel-header"><h2>部署</h2></div>
       <div class="panel-body deploy-body">

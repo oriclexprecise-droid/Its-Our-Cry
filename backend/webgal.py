@@ -23,12 +23,64 @@ COMMAND_RE = re.compile(
 )
 
 
+DEFAULT_EMOTION_MAP = {
+    "smile": "微笑",
+    "serious": "认真",
+    "thinking": "思考",
+    "angry": "生气",
+    "surprised": "惊讶",
+    "shame": "害羞",
+    "kandou": "感动",
+    "kime": "决心",
+    "idle": "思考",
+    "cry": "哭泣",
+}
+
+EXPRESSION_RE = re.compile(r"-expression\s*=\s*([^\s;]+)", re.IGNORECASE)
+MOTION_RE = re.compile(r"-motion\s*=\s*([^\s;]+)", re.IGNORECASE)
+EMOTION_LINE_RE = re.compile(r"^(动作|表情)\s*[:：]\s*(.+)$")
+
 def short_name_for(character, short_names=None):
     """角色 -> 音频目录短名（爱音/素世...），未知角色回退到原名。"""
     table = dict(DEFAULT_SHORT_NAMES)
     if short_names:
         table.update(short_names)
     return table.get(character) or character
+
+
+def _normalize_emotion_map(emotion_map):
+    table = {}
+    for k, v in (emotion_map or {}).items():
+        key = str(k).strip().lower()
+        val = str(v).strip()
+        if key and val:
+            table[key] = val
+    return table
+
+
+def _expression_stem(value):
+    part = value.strip()
+    if "/" in part:
+        part = part.rsplit("/", 1)[-1].strip()
+    part = re.sub(r"(_ingameV2.*|_e\d+.*)$", "", part, flags=re.IGNORECASE)
+    while re.search(r"[_\d]+$", part):
+        part = re.sub(r"[_\d]+$", "", part)
+    return part.lower().strip("_")
+
+
+def _resolve_emotion(value, table, system_emotions):
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    system = [str(e).strip() for e in (system_emotions or []) if str(e).strip()]
+    candidates = [raw, raw.lower(), _expression_stem(raw)]
+    for c in candidates:
+        if c in system:
+            return c
+    for c in candidates:
+        if c in table:
+            return table[c]
+    return ""
 
 
 def _split_dialogue(line):
@@ -45,10 +97,12 @@ def _split_dialogue(line):
     return character, rest
 
 
-def parse_script(text):
+def parse_script(text, emotion_map=None, system_emotions=None):
     """解析 anogo 脚本，返回逐行 entries。"""
     entries = []
     dialogue_index = 0
+    table = _normalize_emotion_map(emotion_map if emotion_map is not None else DEFAULT_EMOTION_MAP)
+    pending_emotion = ""
     for raw_line in (text or "").splitlines():
         raw = raw_line.rstrip()
         stripped = raw.strip()
@@ -63,7 +117,18 @@ def parse_script(text):
                 "text": stripped[1:].strip().rstrip(";").strip(),
             })
             continue
+        emotion_line = EMOTION_LINE_RE.match(stripped)
+        if emotion_line:
+            pending_emotion = _resolve_emotion(emotion_line.group(2), table, system_emotions)
+            entries.append({"type": "command", "raw": raw, "cmd": emotion_line.group(1)})
+            continue
         if COMMAND_RE.match(stripped):
+            expr_m = EXPRESSION_RE.search(stripped)
+            mot_m = MOTION_RE.search(stripped)
+            if expr_m:
+                pending_emotion = _resolve_emotion(expr_m.group(1), table, system_emotions)
+            elif mot_m:
+                pending_emotion = _resolve_emotion(mot_m.group(1), table, system_emotions)
             entries.append({"type": "command", "raw": raw, "cmd": stripped.split(":", 1)[0]})
             continue
         parts = _split_dialogue(stripped)
@@ -96,7 +161,7 @@ def parse_script(text):
             "has_id": has_id,
             "existing_audio": existing_audio,
             "is_psy": is_psy,
-            "emotion": "",
+            "emotion": pending_emotion,
             "voice_psy": False,
             "psy_character": "",
         })

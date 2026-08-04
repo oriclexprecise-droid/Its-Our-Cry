@@ -29,7 +29,7 @@ from .translator import translate_lines
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
 from .feedback import read_events, record_event
 from .cleanup import clean_items, scan_cleanable
-from .webgal import dialogue_summary, parse_script, render_script, short_name_for
+from .webgal import DEFAULT_EMOTION_MAP, dialogue_summary, parse_script, render_script, short_name_for
 
 
 DEFAULT_INTERVAL = 0.5
@@ -321,6 +321,7 @@ def _persist_user_settings(project_root, config):
         for field, key in (("base_url", "deepseek_base_url"), ("model", "deepseek_model"), ("name", "deepseek_name")):
             settings[key] = deepseek.get(field, "")
         settings["emotions"] = list(config.get("emotions", []))
+        settings["webgal_emotion_map"] = dict(config.get("webgal_emotion_map") or {})
         settings["emotion_params"] = config.get("emotion_params", {})
         settings["use_emotion_params"] = bool(config.get("use_emotion_params", True))
         settings["emotion_param_presets"] = config.get("emotion_param_presets", {})
@@ -445,6 +446,7 @@ def create_app(config_path="config.yaml"):
     config.setdefault("emotion_params", {})
     config.setdefault("use_emotion_params", True)
     config.setdefault("emotion_param_presets", {})
+    config.setdefault("webgal_emotion_map", dict(DEFAULT_EMOTION_MAP))
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
     user_settings = {}
     user_settings_path = project_root / "user_settings.json"
@@ -487,6 +489,15 @@ def create_app(config_path="config.yaml"):
         ]
     else:
         config["pronunciation"] = [dict(x) for x in DEFAULT_PRONUNCIATION]
+    if isinstance(user_settings.get("webgal_emotion_map"), dict):
+        cleaned_map = {}
+        for k, v in user_settings["webgal_emotion_map"].items():
+            key = str(k).strip().lower()
+            val = str(v).strip()
+            if key and val:
+                cleaned_map[key] = val
+        if cleaned_map:
+            config["webgal_emotion_map"] = cleaned_map
     dpapi_ok = _dpapi_encrypt("probe") is not None
 
     # 近期记录：本地 JSON 文件，不提交 git、不联网
@@ -917,6 +928,8 @@ def create_app(config_path="config.yaml"):
         return jsonify({
             "characters": list(config["characters"].keys()),
             "emotions": config["emotions"],
+            "webgal_emotion_map": config.get("webgal_emotion_map", {}),
+            "webgal_emotion_defaults": dict(DEFAULT_EMOTION_MAP),
             "has_api_key": has_key,
             "default_interval": DEFAULT_INTERVAL,
             "narration": config.get("narration", {}),
@@ -1337,6 +1350,35 @@ def create_app(config_path="config.yaml"):
         state["analysis_cancel_seq"] = state.get("analysis_seq", 0)
         return jsonify({"status": "ok"})
 
+    @app.route("/api/webgal/emotion_map", methods=["GET"])
+    def get_webgal_emotion_map():
+        return jsonify({
+            "map": config.get("webgal_emotion_map", {}),
+            "defaults": dict(DEFAULT_EMOTION_MAP),
+        })
+
+    @app.route("/api/webgal/emotion_map", methods=["POST"])
+    def save_webgal_emotion_map():
+        data = request.get_json(silent=True) or {}
+        raw = data.get("map")
+        if not isinstance(raw, dict):
+            return jsonify({"error": "映射格式不正确"}), 400
+        cleaned = {}
+        for k, v in raw.items():
+            key = str(k).strip().lower()
+            val = str(v).strip()
+            if key and val:
+                cleaned[key] = val
+        config["webgal_emotion_map"] = cleaned
+        _persist_user_settings(project_root, config)
+        return jsonify({"status": "ok", "map": cleaned})
+
+    @app.route("/api/webgal/emotion_map/reset", methods=["POST"])
+    def reset_webgal_emotion_map():
+        config["webgal_emotion_map"] = dict(DEFAULT_EMOTION_MAP)
+        _persist_user_settings(project_root, config)
+        return jsonify({"status": "ok", "map": config["webgal_emotion_map"]})
+
     @app.route("/api/webgal/parse", methods=["POST"])
     def webgal_parse():
         data = request.get_json(silent=True) or {}
@@ -1346,7 +1388,7 @@ def create_app(config_path="config.yaml"):
         lang = str(data.get("lang") or state.get("lang") or "zh")
         if lang not in ("zh", "ja"):
             lang = "zh"
-        entries = parse_script(text)
+        entries = parse_script(text, emotion_map=config.get("webgal_emotion_map"), system_emotions=config.get("emotions", []))
         dialogues = [e for e in entries if e["type"] == "dialogue"]
         if not dialogues:
             return jsonify({"error": "没有解析到对话行，请确认粘贴的是 anogo 脚本"}), 400
@@ -1356,7 +1398,7 @@ def create_app(config_path="config.yaml"):
             "source": text,
             "entries": entries,
             "dialogues": dialogues,
-            "emotions": {},
+            "emotions": {str(d["index"]): d["emotion"] for d in dialogues if d.get("emotion")},
             "translations": {},
             "generated": {},
             "failures": {},

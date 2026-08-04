@@ -85,6 +85,7 @@ async function loadConfig() {
   loadCleanPath(cfg);
   updateDeployBanner(cfg.gptsovits_path);
   loadPronunciation();
+  loadWebgalMap(cfg);
   const savedAi = loadAIConfigFromStorage();
   if (savedAi) {
     applyAIConfig(savedAi);
@@ -3603,6 +3604,93 @@ async function resetEmotions() {
   }
 }
 
+let webgalMap = {};
+let webgalMapDefaults = {};
+
+function initWebgalMap() {
+  const addBtn = document.getElementById("btn-add-webgal-map");
+  if (addBtn) addBtn.addEventListener("click", addWebgalMapRow);
+  const saveBtn = document.getElementById("btn-save-webgal-map");
+  if (saveBtn) saveBtn.addEventListener("click", saveWebgalMap);
+  const resetBtn = document.getElementById("btn-reset-webgal-map");
+  if (resetBtn) resetBtn.addEventListener("click", resetWebgalMap);
+}
+
+function webgalMapTargetOptions(selected) {
+  return (state.emotions || []).map(e => '<option value="' + esc(e) + '"' + (e === selected ? " selected" : "") + '>' + esc(e) + '</option>').join("");
+}
+
+function renderWebgalMap() {
+  const listEl = document.getElementById("webgal-map-list");
+  if (!listEl) return;
+  const keys = Object.keys(webgalMap || {});
+  if (!keys.length) {
+    listEl.innerHTML = '<div class="model-empty">暂无映射，添加脚本表情词后保存</div>';
+    return;
+  }
+  listEl.innerHTML = keys.map(k => (
+    '<div class="webgal-map-row">'
+    + '<span class="webgal-map-key">' + esc(k) + '</span>'
+    + '<select class="webgal-map-target" data-key="' + esc(k) + '">' + webgalMapTargetOptions(webgalMap[k]) + '</select>'
+    + '<button type="button" class="webgal-map-del" data-key="' + esc(k) + '" title="删除">×</button>'
+    + '</div>'
+  )).join("");
+  listEl.querySelectorAll(".webgal-map-del").forEach(btn => {
+    btn.addEventListener("click", () => { delete webgalMap[btn.dataset.key]; renderWebgalMap(); });
+  });
+}
+
+function addWebgalMapRow() {
+  const keyInput = document.getElementById("webgal-map-key");
+  const targetSel = document.getElementById("webgal-map-target");
+  const statusEl = document.getElementById("webgal-map-status");
+  const key = keyInput ? keyInput.value.trim() : "";
+  const target = targetSel ? targetSel.value : "";
+  if (!key || !target) {
+    if (statusEl) { statusEl.textContent = "请填写脚本表情词并选择目标情绪"; statusEl.className = "status-text error"; }
+    return;
+  }
+  webgalMap[key.toLowerCase()] = target;
+  if (keyInput) keyInput.value = "";
+  renderWebgalMap();
+  if (statusEl) { statusEl.textContent = "已添加，记得保存"; statusEl.className = "status-text"; }
+}
+
+function loadWebgalMap(cfg) {
+  webgalMap = cfg.webgal_emotion_map || {};
+  webgalMapDefaults = cfg.webgal_emotion_defaults || {};
+  const targetSel = document.getElementById("webgal-map-target");
+  if (targetSel) targetSel.innerHTML = webgalMapTargetOptions((state.emotions && state.emotions[0]) || "");
+  renderWebgalMap();
+}
+
+async function saveWebgalMap() {
+  const statusEl = document.getElementById("webgal-map-status");
+  if (statusEl) { statusEl.textContent = "正在保存..."; statusEl.className = "status-text"; }
+  try {
+    const res = await api("/api/webgal/emotion_map", { method: "POST", body: JSON.stringify({ map: webgalMap }) });
+    webgalMap = res.map || webgalMap;
+    renderWebgalMap();
+    if (statusEl) { statusEl.textContent = "已保存 WebGaL 情绪映射"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "保存失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
+async function resetWebgalMap() {
+  if (!(await showConfirmModal("确定恢复默认的 WebGaL 情绪映射吗？自定义映射会被清除。"))) return;
+  const statusEl = document.getElementById("webgal-map-status");
+  if (statusEl) { statusEl.textContent = "正在恢复..."; statusEl.className = "status-text"; }
+  try {
+    const res = await api("/api/webgal/emotion_map/reset", { method: "POST" });
+    webgalMap = res.map || {};
+    renderWebgalMap();
+    if (statusEl) { statusEl.textContent = "已恢复默认映射"; statusEl.className = "status-text success"; }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = "重置失败: " + e.message; statusEl.className = "status-text error"; }
+  }
+}
+
 let emotionParams = {};
 let emotionParamsEnabled = true;
 let emotionPresets = [];
@@ -3852,6 +3940,7 @@ function initModelConfig() {
 initAIConfig();
 initNarrationConfig();
 initPronunciationConfig();
+initWebgalMap();
 initModelConfig();
 initEmotions();
 initEmotionParams();

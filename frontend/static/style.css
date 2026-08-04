@@ -315,6 +315,12 @@ textarea { min-height: 240px; line-height: 1.6; }
 .pron-add-row { display: flex; gap: 8px; margin-bottom: 4px; }
 .pron-add-row input { flex: 1; min-width: 0; padding: 8px 10px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 6px; color: #e0e0e0; font-size: 13px; font-family: inherit; outline: none; }
 .pron-add-row input:focus { border-color: #4ecca3; }
+.pron-add-row select { flex: 0 0 150px; min-width: 0; padding: 8px 10px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 6px; color: #e0e0e0; font-size: 13px; font-family: inherit; outline: none; }
+.webgal-map-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 6px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 6px; }
+.webgal-map-key { flex: 0 0 130px; color: #e0e0e0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.webgal-map-target { flex: 1; min-width: 0; padding: 6px 8px; background: #0a2540; border: 1px solid #1a4a7a; border-radius: 6px; color: #e0e0e0; font-size: 13px; font-family: inherit; outline: none; }
+.webgal-map-del { flex: 0 0 auto; background: none; border: none; color: #ff6b9d; font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 6px; }
+.webgal-map-del:hover { color: #fff; }
 .side-hint { font-size: 12px; color: #aaa; margin: -4px 0 10px; line-height: 1.5; }
 .panel { border: 1px solid #1a3350; }
 .side-panel > .panel-body { padding: 16px; }
