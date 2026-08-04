@@ -2660,7 +2660,7 @@ async function translateWebGal(silent) {
     return { ok: true };
   } catch (e) {
     if (e.name !== "AbortError") {
-      setWebGalStatus("日语翻译失败: " + e.message, "error");
+      setWebGalStatus(e.message || "日语翻译失败", "error");
     }
     return { ok: false, error: e };
   } finally {

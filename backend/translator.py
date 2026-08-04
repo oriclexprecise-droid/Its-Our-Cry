@@ -26,37 +26,50 @@ def build_translate_prompt(lines: list[dict]) -> str:
     return "\n".join(script_lines)
 
 
+def _extract_json_array(content):
+    start = content.find("[")
+    if start == -1:
+        raise ValueError("AI returned no JSON array")
+    obj, _ = json.JSONDecoder().raw_decode(content[start:])
+    if not isinstance(obj, list):
+        raise ValueError("AI did not return a JSON list")
+    return obj
+
+
 def translate_lines(
     lines: list[dict],
     api_key: str,
     base_url: str = "https://api.deepseek.com",
     model: str = "deepseek-v4-flash",
 ) -> list[dict]:
-    """调用 DeepSeek API 把台词翻译成日语。"""
+    """Translate script lines to Japanese via DeepSeek API."""
     if not lines:
         return []
 
     client = OpenAI(api_key=api_key, base_url=base_url)
     user_prompt = build_translate_prompt(lines)
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.4,
-        max_tokens=4096,
-    )
-
-    content = response.choices[0].message.content.strip()
-    json_match = re.search(r"\[.*\]", content, re.DOTALL)
-    if json_match:
-        content = json_match.group(0)
-
-    results = json.loads(content)
-    if not isinstance(results, list):
-        raise ValueError("AI 返回的不是列表格式: " + str(results)[:200])
+    results = None
+    last_error = None
+    for attempt in range(2):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.4,
+                max_tokens=4096,
+            )
+            content = (response.choices[0].message.content or "").strip()
+            content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.MULTILINE).strip()
+            results = _extract_json_array(content)
+            break
+        except (ValueError, json.JSONDecodeError) as e:
+            last_error = e
+    if results is None:
+        raise ValueError("AI returned empty or invalid JSON: " + str(last_error or "unknown error"))
 
     cleaned = []
     for item in results:
