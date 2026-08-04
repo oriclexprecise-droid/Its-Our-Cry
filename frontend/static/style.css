@@ -723,7 +723,7 @@ textarea { min-height: 240px; line-height: 1.6; }
 .project-picker-sub { color: #a9c9ff; font-size: 15px; margin: 0 0 26px; }
 .project-picker-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(240px, 320px));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 300px));
   gap: 20px;
   justify-content: center;
 }
@@ -762,6 +762,11 @@ textarea { min-height: 240px; line-height: 1.6; }
 }
 .project-card-title { font-size: 20px; font-weight: 700; color: #fff; }
 .project-card-desc { font-size: 13px; color: #a9c9ff; }
+.project-card-cloud .project-card-icon {
+  color: #4ecca3;
+  background: rgba(78, 204, 163, 0.12);
+  border-color: rgba(78, 204, 163, 0.4);
+}
 .projects-list {
   display: flex;
   flex-direction: column;
