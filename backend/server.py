@@ -1369,8 +1369,8 @@ def create_app(config_path="config.yaml"):
                     translations = translate_lines(
                         lines=missing,
                         api_key=api_key,
-                        base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
-                        model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                        base_url=base_url,
+                        model=model,
                     )
                 except Exception as e:
                     traceback.print_exc()
@@ -1476,8 +1476,8 @@ def create_app(config_path="config.yaml"):
             translations = translate_lines(
                 lines=lines,
                 api_key=api_key,
-                base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
-                model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                base_url=base_url,
+                model=model,
             )
         except Exception as e:
             traceback.print_exc()
@@ -1615,6 +1615,8 @@ def create_app(config_path="config.yaml"):
         api_key = config["deepseek"]["api_key"]
         if not api_key:
             return jsonify({"error": "please configure DeepSeek API Key"}), 400
+        base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
         lines = [
             {"index": d["index"], "character": d["character"], "text": d["text"]}
             for d in dialogues
@@ -1623,8 +1625,8 @@ def create_app(config_path="config.yaml"):
             translations = translate_lines(
                 lines=lines,
                 api_key=api_key,
-                base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
-                model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                base_url=base_url,
+                model=model,
             )
         except Exception as e:
             traceback.print_exc()
@@ -1649,6 +1651,8 @@ def create_app(config_path="config.yaml"):
         state["lang"] = lang
         seq = state.get("analysis_seq", 0) + 1
         state["analysis_seq"] = seq
+        base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
         lines = [
             {"index": d["index"], "character": d["character"], "text": d["text"]}
             for d in dialogues
@@ -1657,8 +1661,8 @@ def create_app(config_path="config.yaml"):
             emotions = analyze_emotions(
                 lines=lines,
                 api_key=api_key,
-                base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
-                model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                base_url=base_url,
+                model=model,
                 lang=lang,
                 emotions=config["emotions"],
             )
@@ -1678,8 +1682,8 @@ def create_app(config_path="config.yaml"):
                 translations = translate_lines(
                     lines=lines,
                     api_key=api_key,
-                    base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
-                    model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                    base_url=base_url,
+                    model=model,
                 )
             except Exception as e:
                 traceback.print_exc()
@@ -2035,8 +2039,8 @@ def create_app(config_path="config.yaml"):
                                 translations = translate_lines(
                                     lines=[single],
                                     api_key=api_key,
-                                    base_url=config["deepseek"].get("base_url", "https://api.deepseek.com"),
-                                    model=config["deepseek"].get("model", "deepseek-v4-flash"),
+                                    base_url=base_url,
+                                    model=model,
                                 )
                                 translated = next((t.get("translation", "") for t in translations if t.get("index") == 0), "").strip()
                                 corrected = correct_pronunciation(line["text"], config.get("pronunciation", []))

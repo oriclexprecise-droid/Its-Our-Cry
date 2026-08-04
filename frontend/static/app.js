@@ -1,17 +1,40 @@
 const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [], projectType: "srt", webgal: { source: "", dialogues: [], emotions: {}, translations: {}, generated: {}, failures: {}, generating: false, lastExport: "", psyVoice: false, psyCharacter: "", lang: "zh", analyzing: false, progress: { current: 0, total: 0 } } };
 let audioPlayer = null;
 let analysisController = null;
+let webgalTranslateController = null;
 let projectSelectedIds = new Set();
 
 async function api(url, opts = {}) {
-  const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    const error = new Error(err.error || "HTTP " + res.status);
-    if (err.code) error.code = err.code;
-    throw error;
+  const timeoutMs = opts.timeout || 180000;
+  const externalSignal = opts.signal;
+  const controller = new AbortController();
+  let timedOut = false;
+  const onAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", onAbort, { once: true });
   }
-  return res.json();
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts, signal: controller.signal });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const error = new Error(err.error || "HTTP " + res.status);
+      if (err.code) error.code = err.code;
+      throw error;
+    }
+    return res.json();
+  } catch (e) {
+    if (timedOut) {
+      const error = new Error("请求超时，请检查网络或稍后重试");
+      error.code = "TIMEOUT";
+      throw error;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener("abort", onAbort);
+  }
 }
 
 function showConfirmModal(message, options) {
@@ -135,9 +158,10 @@ async function runAnalyze() {
   if (analysisController) analysisController.abort();
   const controller = new AbortController();
   analysisController = controller;
+  refreshHistoryButtons();
   const stopBtn = document.getElementById("btn-stop-analyze");
   stopBtn.classList.remove("hidden");
-  await syncScriptDraft();
+  syncScriptDraft();
   try {
     const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }), signal: controller.signal });
     if (data.status === "cancelled") {
@@ -196,6 +220,7 @@ async function runAnalyze() {
     stopBtn.classList.add("hidden");
     document.getElementById("btn-analyze").disabled = false;
     updateTranslateOnlyVisibility();
+    refreshHistoryButtons();
   }
 }
 
@@ -212,9 +237,10 @@ async function runTranslateOnly() {
   if (analysisController) analysisController.abort();
   const controller = new AbortController();
   analysisController = controller;
+  refreshHistoryButtons();
   const stopBtn = document.getElementById("btn-stop-analyze");
   stopBtn.classList.remove("hidden");
-  await syncScriptDraft();
+  syncScriptDraft();
   try {
     const data = await api("/api/translate", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang: "ja", base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }), signal: controller.signal });
     if (data.status === "cancelled") {
@@ -262,6 +288,7 @@ async function runTranslateOnly() {
     stopBtn.classList.add("hidden");
     document.getElementById("btn-analyze").disabled = false;
     updateTranslateOnlyVisibility();
+    refreshHistoryButtons();
   }
 }
 
@@ -295,6 +322,11 @@ document.addEventListener("keydown", (e) => {
   const isZ = mod && (e.key === "z" || e.key === "Z");
   const isY = mod && (e.key === "y" || e.key === "Y");
   if (!isZ && !isY) return;
+  if (state.generating || state.webgal.generating || analysisController || state.webgal.analyzing || webgalTranslateController) {
+    e.preventDefault();
+    toast("AI 处理中，请取消后再撤销/重做", "error");
+    return;
+  }
   const el = document.activeElement;
   const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
   if (typing) {
@@ -514,6 +546,7 @@ function renderLines() {
       if (analysisController) analysisController.abort();
       const controller = new AbortController();
       analysisController = controller;
+      refreshHistoryButtons();
       const stopBtn = document.getElementById("btn-stop-line-analyze");
       stopBtn.classList.remove("hidden");
       try {
@@ -580,6 +613,7 @@ function renderLines() {
       } finally {
         if (analysisController === controller) analysisController = null;
         stopBtn.classList.add("hidden");
+        refreshHistoryButtons();
       }
     });
   });
@@ -1462,6 +1496,13 @@ function updateHistoryButtons(h) {
   const undoBtn = document.getElementById("btn-undo");
   const redoBtn = document.getElementById("btn-redo");
   if (!undoBtn || !redoBtn) return;
+  if (state.generating || state.webgal.generating || analysisController || state.webgal.analyzing || webgalTranslateController) {
+    undoBtn.disabled = true;
+    redoBtn.disabled = true;
+    undoBtn.title = "AI 处理中，暂不可用";
+    redoBtn.title = "AI 处理中，暂不可用";
+    return;
+  }
   if (state.projectType === "webgal") {
     const uc = Math.max(0, webgalHistoryIndex);
     const rc = Math.max(0, webgalHistory.length - 1 - webgalHistoryIndex);
@@ -2722,8 +2763,6 @@ function webgalRedo() {
   return true;
 }
 
-let webgalTranslateController = null;
-
 async function translateWebGal(silent) {
   if (wgCurrentLang() !== "ja") {
     state.webgal.translations = {};
@@ -2737,6 +2776,8 @@ async function translateWebGal(silent) {
   if (webgalTranslateController) webgalTranslateController.abort();
   const controller = new AbortController();
   webgalTranslateController = controller;
+  refreshHistoryButtons();
+  updateWebGalTranslateButton();
   try {
     const data = await api("/api/webgal/translate", {
       method: "POST",
@@ -2756,6 +2797,7 @@ async function translateWebGal(silent) {
     if (webgalTranslateController === controller) webgalTranslateController = null;
     if (analyzeBtn) analyzeBtn.disabled = false;
     updateWebGalTranslateButton();
+    refreshHistoryButtons();
   }
 }
 
@@ -2921,6 +2963,8 @@ async function analyzeWebGal() {
   const controller = new AbortController();
   webgalAnalyzeController = controller;
   state.webgal.analyzing = true;
+  refreshHistoryButtons();
+  updateWebGalTranslateButton();
   try {
     const data = await api("/api/webgal/analyze", {
       method: "POST",
@@ -2947,6 +2991,7 @@ async function analyzeWebGal() {
     webgalAnalyzeController = null;
     if (btn) btn.disabled = false;
     if (stopBtn) stopBtn.classList.add("hidden");
+    refreshHistoryButtons();
   }
 }
 
