@@ -24,6 +24,7 @@ Set-Location $root
   --hidden-import clr_loader --hidden-import pythonnet `
   --collect-all pythonnet --collect-all clr_loader `
   --collect-all py7zr `
+  --add-data "$PSScriptRoot\release_config.yaml;config_default.yaml" `
   --hidden-import win32crypt --hidden-import pywintypes `
   --hidden-import tkinter --hidden-import tkinter.filedialog `
   --key ItsOurCry2026Key! `

@@ -43,6 +43,97 @@ def _write_log(root, text):
         pass
 
 
+_FALLBACK_CONFIG_YAML = """\
+# It's Our Cry!!!!! 默认配置（首次启动自动生成）
+gptsovits_path: ""
+
+characters:
+  千早爱音:
+    model: "SoVITS_weights_v2ProPlus/MyGO_千早爱音_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_千早爱音_v2pp.ckpt"
+    ref_audio_dir: "reference_audio/千早爱音"
+  要乐奈:
+    model: "SoVITS_weights_v2ProPlus/MyGO_要乐奈_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_要乐奈_v2pp.ckpt"
+    ref_audio_dir: "reference_audio/要乐奈"
+  高松灯:
+    model: "SoVITS_weights_v2ProPlus/MyGO_高松灯_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_高松灯_v2pp.ckpt"
+    ref_audio_dir: "reference_audio/高松灯"
+  椎名立希:
+    model: "SoVITS_weights_v2ProPlus/MyGO_椎名立希_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_椎名立希_v2pp.ckpt"
+    ref_audio_dir: "reference_audio/椎名立希"
+  长崎素世:
+    model: "SoVITS_weights_v2ProPlus/MyGO_长崎素世_v2pp.pth"
+    gpt_model: "GPT_weights_v2ProPlus/MyGO_长崎素世_v2pp.ckpt"
+    ref_audio_dir: "reference_audio/长崎素世"
+
+emotions:
+  - 生气
+  - 告别
+  - 哭泣
+  - 感动
+  - 决心
+  - 悲伤
+  - 认真
+  - 害羞
+  - 微笑
+  - 惊讶
+  - 思考
+
+deepseek:
+  api_key: ""
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-v4-flash"
+
+tts:
+  text_lang: "zh"
+  prompt_lang: "zh"
+  text_split_method: "cut5"
+  batch_size: 1
+  speed_factor: 1.0
+  fragment_interval: 0.3
+  temperature: 1.0
+  top_k: 15
+  top_p: 1.0
+  seed: -1
+
+narration:
+  base_duration: 2.0
+  per_char: 0.32
+  min_duration: 1.5
+  max_duration: 8.0
+  fixed_duration: 0.0
+
+output_dir: "output"
+"""
+
+
+def _ensure_config(root):
+    for candidate in (root / "config.yaml", root / "config" / "config.yaml"):
+        if candidate.exists():
+            return candidate
+    default_sources = []
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        default_sources.append(Path(sys._MEIPASS) / "config_default.yaml")
+    default_sources.append(Path(__file__).resolve().parent / "packaging" / "release_config.yaml")
+    default_text = None
+    for src in default_sources:
+        try:
+            if src.exists():
+                default_text = src.read_text(encoding="utf-8")
+                break
+        except Exception:
+            continue
+    if not default_text:
+        default_text = _FALLBACK_CONFIG_YAML
+    target = root / "config.yaml"
+    target.write_text(default_text, encoding="utf-8")
+    _write_log(root, "config.yaml missing, created default at " + str(target))
+    return target
+
+
 def _find_edge():
     roots = [
         os.environ.get("PROGRAMFILES(X86)"),
@@ -108,9 +199,7 @@ def main():
         raise
 
     try:
-        config_path = root / "config.yaml"
-        if not config_path.exists():
-            config_path = root / "config" / "config.yaml"
+        config_path = _ensure_config(root)
         app = create_app(str(config_path))
         _write_log(root, "app created")
 

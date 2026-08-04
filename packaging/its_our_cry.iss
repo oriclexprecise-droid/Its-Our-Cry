@@ -1,5 +1,5 @@
 ﻿#define MyAppName "It's Our Cry!!!!!"
-#define MyAppVersion "2.1.1"
+#define MyAppVersion "2.1.2"
 #define MyAppExeName "ItsOurCry.exe"
 
 [Setup]
@@ -30,7 +30,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "installer\inno_payload\app\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "release\It's Our Cry\config.yaml"; DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
+Source: "installer\inno_payload\app\config.yaml"; DestDir: "{app}"; Flags: onlyifdoesntexist
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}\{#MyAppName}.lnk"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Comment: "{#MyAppName} 配音工作台"
