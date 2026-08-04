@@ -2859,7 +2859,9 @@ function showSettings(tab) {
   const settings = document.getElementById("view-settings");
   const projects = document.getElementById("view-projects");
   if (!workbench || !settings) return;
-  settingsReturnTo = (projects && !projects.classList.contains("hidden")) ? "projects" : "workbench";
+  if (settings.classList.contains("hidden")) {
+    settingsReturnTo = (projects && !projects.classList.contains("hidden")) ? "projects" : "workbench";
+  }
   if (projects) projects.classList.add("hidden");
   const recentDropdown = document.getElementById("recent-dropdown");
   if (recentDropdown) recentDropdown.classList.add("hidden");
