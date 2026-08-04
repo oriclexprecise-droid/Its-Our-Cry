@@ -2019,7 +2019,7 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "文件夹名称包含非法字符"}), 400
         if len(folder_name) > 64:
             return jsonify({"error": "文件夹名称过长"}), 400
-        export_root = Path(output_dir) if output_dir else (project_root / "exports")
+        export_root = project_root / "exports"
         export_root.mkdir(parents=True, exist_ok=True)
         export_dir = export_root / folder_name
         if export_dir.exists():
@@ -2042,6 +2042,12 @@ def create_app(config_path="config.yaml"):
                 shutil.copy2(gen["path"], str(target))
                 audio_map[d["index"]] = (short_dir + "/" + target.name).replace("\\", "/")
                 created.append(str(target))
+                if output_dir:
+                    game_dir = Path(output_dir) / short_dir
+                    game_dir.mkdir(parents=True, exist_ok=True)
+                    game_target = game_dir / Path(gen["path"]).name
+                    shutil.copy2(gen["path"], str(game_target))
+                    created.append(str(game_target))
             output_script = render_script(wg.get("entries") or [], audio_map)
             script_path = export_dir / "script.txt"
             script_path.write_text(output_script, encoding="utf-8")
@@ -2071,6 +2077,7 @@ def create_app(config_path="config.yaml"):
                 "files": created,
                 "voiced": len(audio_map),
                 "unvoiced": len(unvoiced),
+                "audio_copy_dir": str(Path(output_dir)) if output_dir else "",
             })
         except Exception as e:
             traceback.print_exc()

@@ -3059,7 +3059,7 @@ async function pickWebGalExportDir() {
     if (!res.path) return;
     state.webgal.exportDir = res.path;
     const label = document.getElementById("webgal-export-dir-label");
-    if (label) label.textContent = "音频将导出到：" + res.path;
+    if (label) label.textContent = "已选游戏音频目录：" + res.path + "（完整导出仍存程序 exports）";
     if (statusEl) { statusEl.textContent = ""; statusEl.className = "status-text"; }
   } catch (e) {
     if (statusEl) { statusEl.textContent = "选择导出位置失败: " + e.message; statusEl.className = "status-text error"; }
@@ -3080,7 +3080,9 @@ async function exportWebGal() {
     state.webgal.lastExport = data.folder;
     const openBtn = document.getElementById("btn-webgal-open-export");
     if (openBtn) openBtn.classList.remove("hidden");
-    statusEl.textContent = "导出完成：音频 " + data.voiced + " 条" + (data.unvoiced ? "，未生成 " + data.unvoiced + " 条" : "") + " → " + data.folder;
+    let msg = "导出完成：完整包 → " + data.folder + "，音频 " + data.voiced + " 条" + (data.unvoiced ? "，未生成 " + data.unvoiced + " 条" : "");
+    if (data.audio_copy_dir) msg += "；游戏音频已另存 → " + data.audio_copy_dir;
+    statusEl.textContent = msg;
     statusEl.className = "status-text success";
     toast("WebGaL 导出完成", "success");
     refreshRecentList();
