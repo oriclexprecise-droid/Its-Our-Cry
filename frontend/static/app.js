@@ -3122,7 +3122,8 @@ function showSettings(tab) {
   workbench.classList.add("hidden");
   if (webgal) webgal.classList.add("hidden");
   settings.classList.remove("hidden");
-  document.getElementById("btn-back-workbench").classList.remove("hidden");
+  const backWorkbenchBtn = document.getElementById("btn-back-workbench");
+  if (backWorkbenchBtn) backWorkbenchBtn.classList.toggle("hidden", settingsReturnTo !== "workbench");
   const exitHomeBtn = document.getElementById("btn-exit-home");
   if (exitHomeBtn) exitHomeBtn.classList.remove("hidden");
   if (!tab) {
