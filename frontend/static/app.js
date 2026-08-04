@@ -1,4 +1,4 @@
-const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [] };
+const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [], projectType: "srt" };
 let audioPlayer = null;
 let analysisController = null;
 let projectSelectedIds = new Set();
@@ -659,6 +659,7 @@ function createNewProject() {
   const status = document.getElementById("new-project-status");
   if (!modal || !input) return;
   input.value = "";
+  document.querySelectorAll('input[name="new-project-type"]').forEach(r => { r.checked = (r.value === "srt"); });
   if (status) { status.textContent = ""; status.className = "status-text"; }
   modal.classList.remove("hidden");
   setTimeout(() => input.focus(), 30);
@@ -684,7 +685,11 @@ async function confirmNewProject() {
   if (state.generating) { toast("生成中，请稍后再新建项目", "error"); return; }
   if (btn) btn.disabled = true;
   try {
-    await api("/api/recent/create", { method: "POST", body: JSON.stringify({ name }) });
+    const typeEl = document.querySelector('input[name="new-project-type"]:checked');
+    const projectType = typeEl ? typeEl.value : "srt";
+    await api("/api/recent/create", { method: "POST", body: JSON.stringify({ name, project_type: projectType }) });
+    state.projectType = projectType;
+    const typeName = projectType === "webgal" ? "WebGaL 板块" : "SRT 工作台";
     state.lines = [];
     state.script = "";
     state.failures = {};
@@ -712,7 +717,7 @@ async function confirmNewProject() {
     closeNewProjectModal();
     showWorkbench();
     refreshRecentList();
-    toast("已创建项目“" + name + "”，撤销/重做已重置");
+    toast("已创建项目“" + name + "”（" + typeName + "），撤销/重做已重置");
   } catch (e) {
     if (status) { status.textContent = "创建失败: " + e.message; status.className = "status-text error"; }
   } finally {
@@ -744,12 +749,13 @@ async function openProjectsModal() {
     }
     list.innerHTML = records.map(r => {
       const projectName = r.name || r.first_line || "未命名项目";
+      const typeBadge = r.project_type === "webgal" ? '<span class="recent-badge">WebGaL</span>' : '<span class="recent-badge">SRT</span>';
       const first = r.first_line ? '<div class="recent-preview" title="' + esc(r.first_line) + '">' + esc(r.first_line) + '</div>' : "";
       const meta = (r.line_count ? r.line_count + " 条" : "仅剧本") + " · " + r.voice_count + " 条语音" + (r.fail_count > 0 ? " · 仅字幕 " + r.fail_count + " 条" : "") + " · " + (r.version_count || 0) + " 个小版本";
       return '<div class="project-item">'
         + '<label class="project-select" title="选择该项目"><input type="checkbox" class="project-select-box" data-id="' + esc(r.id) + '"></label>'
         + '<div class="project-item-main">'
-        + '<div class="project-item-head"><span class="project-item-name">' + esc(projectName) + '</span><span class="recent-badge">' + (r.source === "manual" ? "手动" : "自动") + " · " + (r.lang === "ja" ? "日语" : "中文") + "</span></div>"
+        + '<div class="project-item-head"><span class="project-item-name">' + esc(projectName) + '</span>' + typeBadge + '<span class="recent-badge">' + (r.source === "manual" ? "手动" : "自动") + " · " + (r.lang === "ja" ? "日语" : "中文") + "</span></div>"
         + '<div class="project-item-time">' + esc(r.saved_at || "") + '</div>'
         + first
         + '<div class="recent-meta">' + esc(meta) + "</div>"
@@ -801,7 +807,8 @@ async function refreshRecentList() {
     const record = cur.record;
     if (titleEl) {
       const projectName = record ? (record.name || record.first_line || "未命名项目") : "未命名项目";
-      titleEl.textContent = "当前项目：" + projectName;
+      const typeName = record && record.project_type === "webgal" ? "WebGaL 板块" : "SRT 工作台";
+      titleEl.textContent = "当前项目：" + projectName + " · " + typeName;
     }
     const versions = (record && record.versions) || [];
     if (!versions.length) {
@@ -918,6 +925,7 @@ async function loadRecentRecord(id) {
   try {
     const res = await api("/api/recent/" + id + "/load", { method: "POST" });
     const s = res.state || {};
+    state.projectType = (res.record && res.record.project_type) || "srt";
     state.lines = s.lines || [];
     state.script = s.script || "";
     applyScriptText(state.script || "", { resetHistory: true });
@@ -1098,6 +1106,7 @@ async function loadRecentVersion(recordId, versionId) {
   try {
     const res = await api("/api/recent/" + recordId + "/versions/" + versionId + "/load", { method: "POST" });
     const s = res.state || {};
+    state.projectType = s.project_type || "srt";
     state.lines = s.lines || [];
     state.script = s.script || "";
     applyScriptText(state.script || "", { resetHistory: true });

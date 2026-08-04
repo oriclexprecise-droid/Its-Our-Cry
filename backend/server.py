@@ -578,6 +578,7 @@ def create_app(config_path="config.yaml"):
         "history_redo": [],
         "history_limit": 50,
         "current_record_id": None,
+        "project_type": "srt",
         "deploy_install": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total_commands": 0, "command_index": 0, "current_packages": []},
         "deploy_model_copy": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "total": 0, "current": ""},
         "deploy_clone": {"running": False, "done": False, "success": None, "log": [], "progress": 0, "target_dir": ""},
@@ -629,6 +630,7 @@ def create_app(config_path="config.yaml"):
             "srt_path": state.get("srt_path"),
             "time_info": copy.deepcopy(state.get("time_info", [])),
             "lang": state.get("lang", "zh"),
+            "project_type": state.get("project_type", "srt"),
         }
 
     def history_payload():
@@ -775,7 +777,8 @@ def create_app(config_path="config.yaml"):
                         break
                 record = {
                     "id": uuid.uuid4().hex,
-                    "name": first_name or "?????",
+                    "name": first_name or "未命名项目",
+                    "project_type": state.get("project_type", "srt"),
                     "created_at": now,
                     "updated_at": now,
                     "versions": [],
@@ -783,6 +786,7 @@ def create_app(config_path="config.yaml"):
                 }
                 state["current_record_id"] = record["id"]
                 records.insert(0, record)
+            record["project_type"] = state.get("project_type") or record.get("project_type") or "srt"
             versions = record.setdefault("versions", [])
             if not force and versions and _same_recent_version(versions[0], snapshot):
                 return record, None, False
@@ -839,6 +843,7 @@ def create_app(config_path="config.yaml"):
         return {
             "id": record.get("id"),
             "name": str(record.get("name") or ""),
+            "project_type": record.get("project_type") or "srt",
             "created_at": record.get("created_at") or record.get("saved_at"),
             "saved_at": latest.get("saved_at") or record.get("saved_at"),
             "updated_at": record.get("updated_at") or record.get("saved_at"),
@@ -880,6 +885,7 @@ def create_app(config_path="config.yaml"):
         state["progress"] = {"current": 0, "total": 0}
         state["srt_only"] = False
         state["current_record_id"] = record.get("id")
+        state["project_type"] = record.get("project_type") or "srt"
 
     def restore_workbench_from_record(record):
         versions = record.get("versions") or []
@@ -2135,6 +2141,7 @@ def create_app(config_path="config.yaml"):
         if state.get("generating"):
             return jsonify({"error": "生成中，请稍后再新建项目"}), 409
         state["current_record_id"] = None
+        state["project_type"] = "srt"
         state["lang"] = "zh"
         state["script"] = ""
         state["lines"] = []
@@ -2154,13 +2161,17 @@ def create_app(config_path="config.yaml"):
     @app.route("/api/recent/create", methods=["POST"])
     def create_recent_project():
         if state.get("generating"):
-            return jsonify({"error": "????????????"}), 409
+            return jsonify({"error": "生成中，请稍后再新建项目"}), 409
         data = request.get_json(silent=True) or {}
-        name = str(data.get("name") or "").strip()[:60] or "?????"
+        name = str(data.get("name") or "").strip()[:60] or "未命名项目"
+        project_type = str(data.get("project_type") or "srt").strip().lower()
+        if project_type not in ("srt", "webgal"):
+            project_type = "srt"
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         record = {
             "id": uuid.uuid4().hex,
             "name": name,
+            "project_type": project_type,
             "saved_at": now,
             "created_at": now,
             "updated_at": now,
@@ -2173,6 +2184,7 @@ def create_app(config_path="config.yaml"):
             enforce_recent_limit(records)
             persist_recent_records(records)
         state["current_record_id"] = record["id"]
+        state["project_type"] = project_type
         state["lang"] = "zh"
         state["script"] = ""
         state["lines"] = []
