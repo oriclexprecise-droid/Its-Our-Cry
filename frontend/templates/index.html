@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260804r">
+<link rel="stylesheet" href="/static/style.css?v=20260804s">
 <style>
 .creator-tip {
   position: fixed;
@@ -242,6 +242,7 @@
         <button type="button" class="settings-tab active" data-settings-tab="deploy">部署</button>
         <button type="button" class="settings-tab" data-settings-tab="models">模型配置</button>
         <button type="button" class="settings-tab" data-settings-tab="voice">语音与情绪</button>
+        <button type="button" class="settings-tab" data-settings-tab="share">导入导出</button>
         <button type="button" class="settings-tab" data-settings-tab="webgal">WebGaL 设置</button>
         <button type="button" class="settings-tab" data-settings-tab="clean">清理空间</button>
         <button type="button" class="settings-tab" data-settings-tab="log">日志</button>
@@ -432,9 +433,14 @@
             <span id="emotion-presets-status" class="status-text"></span>
           </div>
         </div>
+      </div>
+    </section>
+    <section class="panel settings-page" data-settings-page="share">
+      <div class="panel-header"><h2>导入导出</h2></div>
+      <div class="panel-body">
         <div class="side-section">
-          <h3 class="side-section-title">导出 / 导入 · 参数预设</h3>
-          <p class="side-hint">导出为 JSON 分享给其他创作者，导入后立即覆盖本地对应配置。</p>
+          <h3 class="side-section-title">参数预设（JSON）</h3>
+          <p class="side-hint">把本地配置导出分享给其他创作者，导入后立即覆盖对应配置。</p>
           <div class="share-row">
             <span class="share-label">纠音词典（日语模式）</span>
             <button type="button" id="btn-export-pronunciation" class="btn-secondary btn-small">导出</button>
@@ -445,21 +451,26 @@
             <button type="button" id="btn-export-emotion-params" class="btn-secondary btn-small">导出</button>
             <button type="button" id="btn-import-emotion-params" class="btn-secondary btn-small">导入</button>
           </div>
-          <span id="voice-share-status" class="status-text"></span>
+          <div class="share-row">
+            <span class="share-label">脚本情绪映射（WebGaL）</span>
+            <button type="button" id="btn-export-webgal-map" class="btn-secondary btn-small">导出</button>
+            <button type="button" id="btn-import-webgal-map" class="btn-secondary btn-small">导入</button>
+          </div>
         </div>
         <div class="side-section">
-          <h3 class="side-section-title">导出 / 导入 · 参考音频库</h3>
-          <p class="side-hint">打包全部角色的参考音频、字幕与情绪列表为 ZIP，导入时自动解压并合并，同名文件会被覆盖。</p>
+          <h3 class="side-section-title">参考音频库 + 情绪管理（ZIP）</h3>
+          <p class="side-hint">打包全部角色的参考音频、字幕与情绪列表，导入时自动解压合并，同名文件会被覆盖。</p>
           <div class="share-row">
-            <span class="share-label">参考音频库 + 情绪管理（ZIP）</span>
+            <span class="share-label">参考音频库 + 情绪管理</span>
             <button type="button" id="btn-export-ref-audio" class="btn-secondary btn-small">导出</button>
             <button type="button" id="btn-import-ref-audio" class="btn-secondary btn-small">导入</button>
           </div>
-          <span id="ref-share-status" class="status-text"></span>
         </div>
         <input type="file" id="share-import-file" class="hidden" accept=".json,.zip">
+        <span id="share-status" class="status-text"></span>
       </div>
     </section>
+
     <section class="panel settings-page" data-settings-page="webgal">
       <div class="panel-header"><h2>WebGaL 设置</h2></div>
       <div class="panel-body">
@@ -486,16 +497,6 @@
             <button type="button" id="btn-save-webgal-retranslate" class="btn-secondary btn-small btn-flex">保存</button>
           </div>
           <span id="webgal-retranslate-status" class="status-text"></span>
-        </div>
-        <div class="side-section">
-          <h3 class="side-section-title">导出 / 导入 · 脚本情绪映射</h3>
-          <p class="side-hint">把 anogo 表情词到系统情绪的映射导出为 JSON 分享给其他创作者。</p>
-          <div class="share-row">
-            <span class="share-label">脚本情绪映射</span>
-            <button type="button" id="btn-export-webgal-map" class="btn-secondary btn-small">导出</button>
-            <button type="button" id="btn-import-webgal-map" class="btn-secondary btn-small">导入</button>
-          </div>
-          <span id="webgal-share-status" class="status-text"></span>
         </div>
       </div>
     </section>
@@ -696,7 +697,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260804r"></script>
+<script src="/static/app.js?v=20260804s"></script>
 <script>
 (function () {
   var tips = [

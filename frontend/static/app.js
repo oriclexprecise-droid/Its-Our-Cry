@@ -4324,11 +4324,7 @@ function initShareImportExport() {
   const fileInput = document.getElementById("share-import-file");
   if (!fileInput) return;
   let pendingKind = null;
-  const statusFor = kind => {
-    if (kind === "webgal_map") return document.getElementById("webgal-share-status");
-    if (kind === "audio") return document.getElementById("ref-share-status");
-    return document.getElementById("voice-share-status");
-  };
+  const statusFor = () => document.getElementById("share-status");
   const triggerImport = kind => {
     pendingKind = kind;
     fileInput.value = "";
@@ -4373,10 +4369,10 @@ function initShareImportExport() {
     fileInput.value = "";
   });
   const exports = [
-    ["btn-export-pronunciation", "pronunciation", "voice-share-status"],
-    ["btn-export-emotion-params", "emotion_params", "voice-share-status"],
-    ["btn-export-webgal-map", "webgal_map", "webgal-share-status"],
-    ["btn-export-ref-audio", "audio", "ref-share-status"]
+    ["btn-export-pronunciation", "pronunciation", "share-status"],
+    ["btn-export-emotion-params", "emotion_params", "share-status"],
+    ["btn-export-webgal-map", "webgal_map", "share-status"],
+    ["btn-export-ref-audio", "audio", "share-status"]
   ];
   exports.forEach(item => {
     const btn = document.getElementById(item[0]);
