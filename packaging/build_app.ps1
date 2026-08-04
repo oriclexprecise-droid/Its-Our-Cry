@@ -25,6 +25,7 @@ Set-Location $root
   --collect-all pythonnet --collect-all clr_loader `
   --collect-all py7zr `
   --hidden-import win32crypt --hidden-import pywintypes `
+  --hidden-import tkinter --hidden-import tkinter.filedialog `
   --key ItsOurCry2026Key! `
   launcher.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller 构建失败' }

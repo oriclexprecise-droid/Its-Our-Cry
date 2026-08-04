@@ -78,6 +78,36 @@ def _same_recent_version(version, current):
     new_sig = _snapshot_signature(current)
     return old_sig is not None and old_sig == new_sig
 
+def _pick_save_dialog(default_name, filetypes, initial_dir=None):
+    """Open a native Windows save dialog; returns chosen path or empty string."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        kwargs = {
+            "title": "选择导出保存位置",
+            "initialfile": str(default_name or "its_our_cry_export.json"),
+            "defaultextension": str(filetypes.get("ext", "")),
+            "filetypes": [(str(filetypes.get("desc", "文件")), str(filetypes.get("pattern", "*.*")))],
+            "parent": root,
+        }
+        if initial_dir:
+            try:
+                Path(initial_dir).mkdir(parents=True, exist_ok=True)
+                kwargs["initialdir"] = str(initial_dir)
+            except Exception:
+                pass
+        path = filedialog.asksaveasfilename(**kwargs)
+        root.destroy()
+        return str(path or "").strip()
+    except Exception:
+        return ""
+
 DEFAULT_PRONUNCIATION = [
     {"zh": "长崎素世", "ja": "長崎そよ"},
     {"zh": "soyo", "ja": "そよ"},
@@ -2465,29 +2495,77 @@ def create_app(config_path="config.yaml"):
             }
         return None
 
-    @app.route("/api/share/export", methods=["GET"])
+    @app.route("/api/share/export", methods=["GET", "POST"])
     def share_export():
-        kind = str(request.args.get("type") or "").strip()
         now = time.strftime("%Y%m%d_%H%M%S")
-        if kind == "audio":
-            return _share_export_audio(now)
-        payload = _share_param_payload(kind)
-        if payload is None:
+        save_path = ""
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            kind = str(data.get("type") or "").strip()
+            save_path = str(data.get("save_path") or "").strip()
+        else:
+            kind = str(request.args.get("type") or "").strip()
+        if kind != "audio" and _share_param_payload(kind) is None:
             return jsonify({"error": "未知导出类型"}), 400
-        names = {
-            "pronunciation": "its_our_cry_纠音词典_" + now + ".json",
-            "emotion_params": "its_our_cry_情绪参数模板_" + now + ".json",
-            "webgal_map": "its_our_cry_脚本情绪映射_" + now + ".json",
-        }
+        default_name = _share_export_filename(kind, now)
+        if save_path:
+            return _share_write_export(kind, save_path, now)
+        if request.method == "POST":
+            picked = _pick_save_dialog(default_name, _share_filetypes(kind), project_root / "exports")
+            if not picked:
+                return jsonify({"status": "cancelled", "message": "已取消导出"})
+            return _share_write_export(kind, picked, now)
+        if kind == "audio":
+            return _share_send_audio(now)
+        payload = _share_param_payload(kind)
         raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         return send_file(
             io.BytesIO(raw),
             as_attachment=True,
-            download_name=names[kind],
+            download_name=default_name,
             mimetype="application/json",
         )
 
-    def _share_export_audio(now):
+    def _share_export_filename(kind, now):
+        names = {
+            "pronunciation": "its_our_cry_纠音词典_" + now + ".json",
+            "emotion_params": "its_our_cry_情绪参数模板_" + now + ".json",
+            "webgal_map": "its_our_cry_脚本情绪映射_" + now + ".json",
+            "audio": "its_our_cry_参考音频库_" + now + ".zip",
+        }
+        return names.get(kind, "its_our_cry_export_" + now + ".json")
+
+    def _share_filetypes(kind):
+        if kind == "audio":
+            return {"desc": "ZIP 压缩包", "pattern": "*.zip", "ext": ".zip"}
+        return {"desc": "JSON 预设", "pattern": "*.json", "ext": ".json"}
+
+    def _share_write_export(kind, save_path, now):
+        try:
+            target = Path(save_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if kind == "audio":
+                tmp = _share_build_audio_zip(now)
+                try:
+                    shutil.copyfile(str(tmp), str(target))
+                finally:
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+            else:
+                payload = _share_param_payload(kind)
+                target.write_bytes(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+            record_event({
+                "type": "share_export",
+                "message": "导出分享文件：" + target.name,
+                "payload": {"kind": kind, "path": str(target)},
+            }, project_root)
+            return jsonify({"status": "ok", "path": str(target), "dir": str(target.parent), "message": "导出完成：" + str(target)})
+        except Exception as e:
+            return jsonify({"error": "导出失败: " + str(e)}), 500
+
+    def _share_build_audio_zip(now):
         tmp = Path(tempfile.gettempdir()) / ("its_our_cry_audio_" + uuid.uuid4().hex + ".zip")
         manifest_files = []
         characters = []
@@ -2533,11 +2611,18 @@ def create_app(config_path="config.yaml"):
                     "characters": characters,
                     "files": manifest_files,
                 }, ensure_ascii=False, indent=2))
-        except Exception as e:
+        except Exception:
             try:
                 tmp.unlink(missing_ok=True)
             except Exception:
                 pass
+            raise
+        return tmp
+
+    def _share_send_audio(now):
+        try:
+            tmp = _share_build_audio_zip(now)
+        except Exception as e:
             return jsonify({"error": "导出失败: " + str(e)}), 500
 
         @after_this_request

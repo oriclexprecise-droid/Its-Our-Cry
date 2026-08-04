@@ -4368,6 +4368,18 @@ function initShareImportExport() {
     }
     fileInput.value = "";
   });
+  let lastShareExportPath = "";
+  const openExportBtn = document.getElementById("btn-share-open-export");
+  if (openExportBtn) {
+    openExportBtn.addEventListener("click", async () => {
+      if (!lastShareExportPath) return;
+      try {
+        await api("/api/open_folder", { method: "POST", body: JSON.stringify({ path: lastShareExportPath }) });
+      } catch (e) {
+        await showAlertModal("打开失败: " + e.message);
+      }
+    });
+  }
   const exports = [
     ["btn-export-pronunciation", "pronunciation", "share-status"],
     ["btn-export-emotion-params", "emotion_params", "share-status"],
@@ -4380,9 +4392,20 @@ function initShareImportExport() {
     btn.addEventListener("click", async () => {
       const statusEl = document.getElementById(item[2]);
       if (item[1] === "audio" && !(await showConfirmModal("导出全部参考音频、字幕与情绪列表为 ZIP 压缩包？文件较大时可能需要等待。"))) return;
-      if (statusEl) { statusEl.textContent = "正在生成导出文件..."; statusEl.className = "status-text"; }
-      window.location = "/api/share/export?type=" + item[1];
-      if (statusEl) { statusEl.textContent = "导出文件已开始下载"; statusEl.className = "status-text success"; }
+      if (statusEl) { statusEl.textContent = "正在准备导出，请在弹出窗口中选择保存位置..."; statusEl.className = "status-text"; }
+      try {
+        const timeout = item[1] === "audio" ? 600000 : 180000;
+        const res = await api("/api/share/export", { method: "POST", timeout, body: JSON.stringify({ type: item[1] }) });
+        if (res.status === "cancelled") {
+          if (statusEl) { statusEl.textContent = "已取消导出"; statusEl.className = "status-text"; }
+          return;
+        }
+        lastShareExportPath = res.dir || "";
+        if (statusEl) { statusEl.textContent = "导出完成：" + (res.path || ""); statusEl.className = "status-text success"; }
+        if (openExportBtn) openExportBtn.classList.remove("hidden");
+      } catch (e) {
+        if (statusEl) { statusEl.textContent = "导出失败: " + e.message; statusEl.className = "status-text error"; }
+      }
     });
   });
   const imports = [
