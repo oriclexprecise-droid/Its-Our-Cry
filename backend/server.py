@@ -778,6 +778,7 @@ def create_app(config_path="config.yaml"):
         wg = state.get("webgal") or {}
         webgal_snapshot = {
             "source": wg.get("source", ""),
+            "entries": copy.deepcopy(wg.get("entries", [])),
             "lang": wg.get("lang", state.get("lang", "zh")),
             "dialogues": copy.deepcopy(wg.get("dialogues", [])),
             "emotions": dict(wg.get("emotions") or {}),
