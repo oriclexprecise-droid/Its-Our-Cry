@@ -1411,11 +1411,8 @@ def create_app(config_path="config.yaml"):
             if raw.strip() and skipped_no not in parsed_line_nos:
                 skipped.append({"line_no": skipped_no, "text": raw.strip()[:100]})
 
-        state["script"] = script_text
-        state["lines"] = lines
-        state["emotions"] = emotions
-        state["lang"] = lang
         if not reused:
+            push_history("日语翻译" if translated_only else "重新分析剧本")
             state["generated"] = {}
             state["time_info"] = []
             state["merged_path"] = None
@@ -1424,7 +1421,10 @@ def create_app(config_path="config.yaml"):
             state["progress"] = {"current": 0, "total": 0}
             state["srt_only"] = False
             state["current_record_id"] = None
-            push_history("日语翻译" if translated_only else "重新分析剧本")
+        state["script"] = script_text
+        state["lines"] = lines
+        state["emotions"] = emotions
+        state["lang"] = lang
 
         return jsonify({"lines": lines, "proofread": proofread, "skipped": skipped, "reused": reused, "emotions_reused": emotions_reused})
 
@@ -1497,6 +1497,7 @@ def create_app(config_path="config.yaml"):
                 translation_map.get(line["index"], "").strip() or line["text"]
             )
 
+        push_history("日语翻译")
         state["script"] = script_text.strip() or state.get("script", "")
         state["lines"] = lines
         state["lang"] = "ja"
@@ -1508,7 +1509,6 @@ def create_app(config_path="config.yaml"):
         state["progress"] = {"current": 0, "total": 0}
         state["srt_only"] = False
         state["current_record_id"] = None
-        push_history("日语翻译")
         record_event(
             {"type": "translate", "message": f"日语翻译完成：共 {len(lines)} 条台词", "payload": {"count": len(lines)}},
             project_root=project_root,
