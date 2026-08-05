@@ -2389,7 +2389,12 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "该台词还没有音频"}), 404
         path = gen["path"]
         if not Path(path).exists():
-            return jsonify({"error": "音频文件不存在"}), 404
+            found = _find_segment_file(index, "segments")
+            if found:
+                path = found
+                gen["path"] = found
+            else:
+                return jsonify({"error": "音频文件不存在"}), 404
         return send_file(path, mimetype="audio/wav")
 
     @app.route("/api/webgal/pick-export-dir", methods=["POST"])
@@ -2402,6 +2407,33 @@ def create_app(config_path="config.yaml"):
             return jsonify({"status": "cancelled", "path": ""})
         return jsonify({"status": "ok", "path": picked})
 
+    def _export_folder_name(raw):
+        text = str(raw or "").strip()
+        if not text:
+            return "", "请输入导出文件夹名称"
+        if "/" in text or "\\" in text:
+            text = Path(text.rstrip("/\\")).name
+        if not text or text in (".", ".."):
+            return "", "文件夹名称包含非法字符"
+        if re.search(r'[\\/:*?"<>|\r\n]', text) or text in (".", ".."):
+            return "", "文件夹名称包含非法字符"
+        if len(text) > 64:
+            return "", "文件夹名称过长"
+        return text, ""
+
+    def _find_segment_file(index, subdir):
+        base = Path(config["output_dir"]) / subdir
+        if not base.is_dir():
+            return None
+        try:
+            matches = list(base.glob(f"{index:04d}_*.wav"))
+        except Exception:
+            return None
+        if not matches:
+            return None
+        matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return str(matches[0])
+
     @app.route("/api/webgal/export", methods=["POST"])
     def webgal_export():
         wg = state.get("webgal") or {}
@@ -2411,16 +2443,12 @@ def create_app(config_path="config.yaml"):
         if wg.get("generating"):
             return jsonify({"error": "生成中，请稍后再导出"}), 409
         data = request.get_json(silent=True) or {}
-        folder_name = str(data.get("folder_name") or "").strip()
-        if not folder_name:
-            return jsonify({"error": "请输入导出文件夹名称"}), 400
+        folder_name, folder_err = _export_folder_name(data.get("folder_name"))
+        if folder_err:
+            return jsonify({"error": folder_err}), 400
         output_dir = str(data.get("output_dir") or "").strip()
         if output_dir and not Path(output_dir).is_dir():
             return jsonify({"error": "指定的导出位置不存在，请重新选择"}), 400
-        if re.search(r'[\\/:*?"<>|\r\n]', folder_name) or folder_name in (".", ".."):
-            return jsonify({"error": "文件夹名称包含非法字符"}), 400
-        if len(folder_name) > 64:
-            return jsonify({"error": "文件夹名称过长"}), 400
         export_root = project_root / "exports"
         export_root.mkdir(parents=True, exist_ok=True)
         export_dir = export_root / folder_name
@@ -3507,6 +3535,8 @@ def create_app(config_path="config.yaml"):
                         jobs.append({
                             "id": idx,
                             "char": char,
+                            "model_path": char_config["model"],
+                            "gpt_model_path": char_config.get("gpt_model"),
                             "text": tts_text,
                             "ref_audio_path": ref_audio,
                             "output_path": str(output_path),
@@ -3637,7 +3667,12 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "该台词还没有音频"}), 404
         path = gen["path"]
         if not Path(path).exists():
-            return jsonify({"error": "音频文件不存在"}), 404
+            found = _find_segment_file(index, "webgal")
+            if found:
+                path = found
+                gen["path"] = found
+            else:
+                return jsonify({"error": "音频文件不存在"}), 404
         return send_file(path, mimetype="audio/wav")
 
     @app.route("/api/merge", methods=["POST"])
@@ -3996,13 +4031,9 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "还没有已生成的内容，请先生成语音或字幕"}), 400
 
         data = request.get_json() or {}
-        folder_name = str(data.get("folder_name", "")).strip()
-        if not folder_name:
-            return jsonify({"error": "请输入导出文件夹名称"}), 400
-        if re.search(r'[\\/:*?"<>|\r\n]', folder_name) or folder_name in (".", ".."):
-            return jsonify({"error": "文件夹名称包含非法字符"}), 400
-        if len(folder_name) > 64:
-            return jsonify({"error": "文件夹名称过长"}), 400
+        folder_name, folder_err = _export_folder_name(data.get("folder_name", ""))
+        if folder_err:
+            return jsonify({"error": folder_err}), 400
 
         export_root = project_root / "exports"
         export_root.mkdir(parents=True, exist_ok=True)
