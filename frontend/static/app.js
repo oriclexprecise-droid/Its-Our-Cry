@@ -139,6 +139,8 @@ async function loadConfig() {
   }
   const lowPerfEl = document.getElementById("low-perf-mode");
   if (lowPerfEl) lowPerfEl.checked = !!cfg.low_perf_mode;
+  const segSizeEl = document.getElementById("client-segment-size");
+  if (segSizeEl) segSizeEl.value = cfg.client_prompt_segment_size || 100;
   if (cfg.dpapi_ok === false) {
     const status = document.getElementById("ai-config-status");
     if (status) {
@@ -3949,6 +3951,28 @@ function initLowPerfConfig() {
   });
 }
 
+function initClientSegmentConfig() {
+  const btn = document.getElementById("btn-save-client-segment");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const status = document.getElementById("client-segment-status");
+    const raw = parseInt(document.getElementById("client-segment-size").value, 10);
+    const val = Math.max(10, Math.min(500, raw || 100));
+    try {
+      await api("/api/config", { method: "POST", body: JSON.stringify({ client_prompt_segment_size: val }) });
+      if (status) {
+        status.textContent = "已保存：客户端提示词每段 " + val + " 行";
+        status.className = "status-text success";
+      }
+    } catch (e) {
+      if (status) {
+        status.textContent = "保存失败: " + e.message;
+        status.className = "status-text error";
+      }
+    }
+  });
+}
+
 function initAIConfig() {
   const saved = loadAIConfigFromStorage();
   if (saved) applyAIConfig(saved);
@@ -4888,6 +4912,7 @@ function initShareImportExport() {
 }
 
 initLowPerfConfig();
+initClientSegmentConfig();
 initAiUsagePanel();
 initAIConfig();
 initNarrationConfig();

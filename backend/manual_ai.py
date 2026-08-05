@@ -108,7 +108,7 @@ def build_client_prompt(lines, emotions, lang="zh", mode="analyze", characters=N
     return "\n".join(parts)
 
 
-def build_client_prompt_segments(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None, segment_size=60):
+def build_client_prompt_segments(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None, segment_size=100):
     """把长剧本按行切段（在台词边界截断），每段一个提示词；最后一段让 AI 汇总完整 JSON。"""
     lines = list(lines or [])
     if not lines:

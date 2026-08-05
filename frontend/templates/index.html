@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260805i">
+<link rel="stylesheet" href="/static/style.css?v=20260805j">
 <style>
 .creator-tip {
   position: fixed;
@@ -407,6 +407,17 @@
           <span id="recent-settings-status" class="status-text"></span>
         </div>
         <div class="side-section">
+          <h3 class="side-section-title">客户端生成</h3>
+          <div class="api-field">
+            <label for="client-segment-size">客户端提示词每段台词行数（10-500）</label>
+            <input type="number" id="client-segment-size" min="10" max="500" step="1" value="100">
+          </div>
+          <div class="btn-row">
+            <button type="button" id="btn-save-client-segment" class="btn-secondary btn-small btn-flex">保存分段设置</button>
+          </div>
+          <span id="client-segment-status" class="status-text"></span>
+        </div>
+        <div class="side-section">
           <h3 class="side-section-title">外观</h3>
           <div class="api-field">
             <label for="bg-select">背景图</label>
@@ -802,7 +813,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260805i"></script>
+<script src="/static/app.js?v=20260805j"></script>
 <script>
 (function () {
   var tips = [

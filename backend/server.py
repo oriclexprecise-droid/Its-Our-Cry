@@ -444,6 +444,7 @@ def _persist_user_settings(project_root, config):
         settings["use_emotion_params"] = bool(config.get("use_emotion_params", True))
         settings["emotion_param_presets"] = config.get("emotion_param_presets", {})
         settings["low_perf_mode"] = bool(config.get("low_perf_mode", False))
+        settings["client_prompt_segment_size"] = int(config.get("client_prompt_segment_size", 100))
         settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -568,6 +569,7 @@ def create_app(config_path="config.yaml"):
     config.setdefault("webgal_emotion_map", dict(DEFAULT_EMOTION_MAP))
     config.setdefault("webgal_retranslate_on_analyze", True)
     config.setdefault("low_perf_mode", False)
+    config.setdefault("client_prompt_segment_size", 100)
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
     user_settings = {}
     user_settings_path = project_root / "user_settings.json"
@@ -630,6 +632,11 @@ def create_app(config_path="config.yaml"):
         config["webgal_retranslate_on_analyze"] = bool(user_settings["webgal_retranslate_on_analyze"])
     if "low_perf_mode" in user_settings:
         config["low_perf_mode"] = bool(user_settings["low_perf_mode"])
+    if "client_prompt_segment_size" in user_settings:
+        try:
+            config["client_prompt_segment_size"] = max(10, min(500, int(user_settings["client_prompt_segment_size"])))
+        except (TypeError, ValueError):
+            config["client_prompt_segment_size"] = 100
     dpapi_ok = _dpapi_encrypt("probe") is not None
 
     # 近期记录：本地 JSON 文件，不提交 git、不联网
@@ -1147,6 +1154,7 @@ def create_app(config_path="config.yaml"):
             "webgal_emotion_defaults": dict(DEFAULT_EMOTION_MAP),
             "webgal_retranslate_on_analyze": bool(config.get("webgal_retranslate_on_analyze", True)),
             "low_perf_mode": bool(config.get("low_perf_mode", False)),
+            "client_prompt_segment_size": int(config.get("client_prompt_segment_size", 100)),
             "has_api_key": has_key,
             "default_interval": DEFAULT_INTERVAL,
             "narration": config.get("narration", {}),
@@ -1181,6 +1189,11 @@ def create_app(config_path="config.yaml"):
             config["gptsovits_path"] = str(data["gptsovits_path"] or "").strip()
         if "low_perf_mode" in data:
             config["low_perf_mode"] = bool(data["low_perf_mode"])
+        if "client_prompt_segment_size" in data:
+            try:
+                config["client_prompt_segment_size"] = max(10, min(500, int(data["client_prompt_segment_size"])))
+            except (TypeError, ValueError):
+                config["client_prompt_segment_size"] = 100
         _persist_user_settings(project_root, config)
         return jsonify({"status": "ok"})
 
@@ -1655,6 +1668,7 @@ def create_app(config_path="config.yaml"):
             mode="analyze",
             characters=[str(l.get("character") or "").strip() for l in lines],
             name_readings=config.get("pronunciation", []),
+            segment_size=int(config.get("client_prompt_segment_size", 100)),
         )
         return jsonify({"segments": segments, "prompt": "\n\n".join(s["prompt"] for s in segments)})
 
@@ -2093,6 +2107,7 @@ def create_app(config_path="config.yaml"):
             mode=mode,
             characters=[str(d.get("character") or "").strip() for d in dialogues],
             name_readings=config.get("pronunciation", []),
+            segment_size=int(config.get("client_prompt_segment_size", 100)),
         )
         return jsonify({"segments": segments, "prompt": "\n\n".join(s["prompt"] for s in segments)})
 
