@@ -429,6 +429,7 @@ def _persist_user_settings(project_root, config):
         settings["emotion_params"] = config.get("emotion_params", {})
         settings["use_emotion_params"] = bool(config.get("use_emotion_params", True))
         settings["emotion_param_presets"] = config.get("emotion_param_presets", {})
+        settings["low_perf_mode"] = bool(config.get("low_perf_mode", False))
         settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -552,6 +553,7 @@ def create_app(config_path="config.yaml"):
     config.setdefault("emotion_param_presets", {})
     config.setdefault("webgal_emotion_map", dict(DEFAULT_EMOTION_MAP))
     config.setdefault("webgal_retranslate_on_analyze", True)
+    config.setdefault("low_perf_mode", False)
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
     user_settings = {}
     user_settings_path = project_root / "user_settings.json"
@@ -605,6 +607,8 @@ def create_app(config_path="config.yaml"):
             config["webgal_emotion_map"] = cleaned_map
     if "webgal_retranslate_on_analyze" in user_settings:
         config["webgal_retranslate_on_analyze"] = bool(user_settings["webgal_retranslate_on_analyze"])
+    if "low_perf_mode" in user_settings:
+        config["low_perf_mode"] = bool(user_settings["low_perf_mode"])
     dpapi_ok = _dpapi_encrypt("probe") is not None
 
     # 近期记录：本地 JSON 文件，不提交 git、不联网
@@ -691,6 +695,7 @@ def create_app(config_path="config.yaml"):
         "cancel_requested": False,
         "cancelled": False,
         "progress": {"current": 0, "total": 0},
+        "cancel_file": None,
         "failures": {},
         "time_info": [],
         "history_undo": [],
@@ -1085,6 +1090,7 @@ def create_app(config_path="config.yaml"):
             "webgal_emotion_map": config.get("webgal_emotion_map", {}),
             "webgal_emotion_defaults": dict(DEFAULT_EMOTION_MAP),
             "webgal_retranslate_on_analyze": bool(config.get("webgal_retranslate_on_analyze", True)),
+            "low_perf_mode": bool(config.get("low_perf_mode", False)),
             "has_api_key": has_key,
             "default_interval": DEFAULT_INTERVAL,
             "narration": config.get("narration", {}),
@@ -1117,6 +1123,8 @@ def create_app(config_path="config.yaml"):
                 config["deepseek"][field] = data[key]
         if "gptsovits_path" in data:
             config["gptsovits_path"] = str(data["gptsovits_path"] or "").strip()
+        if "low_perf_mode" in data:
+            config["low_perf_mode"] = bool(data["low_perf_mode"])
         _persist_user_settings(project_root, config)
         return jsonify({"status": "ok"})
 
@@ -2028,6 +2036,8 @@ def create_app(config_path="config.yaml"):
                 engine.load()
                 out_dir = Path(config["output_dir"]) / "webgal"
                 out_dir.mkdir(parents=True, exist_ok=True)
+
+                jobs = []
                 for idx in requested:
                     if wg["cancel_requested"]:
                         break
@@ -2048,14 +2058,6 @@ def create_app(config_path="config.yaml"):
                     ref = pick_ref_audio(char, emotion)
                     if ref is None:
                         fail(idx, f"缺少参考音频：{char}「{emotion}」")
-                        continue
-                    try:
-                        engine.switch_character(
-                            config["characters"][char]["model"],
-                            config["characters"][char].get("gpt_model"),
-                        )
-                    except Exception as e:
-                        fail(idx, f"角色模型加载失败：{str(e)[-200:]}")
                         continue
                     tts_text = d["text"]
                     if d["is_psy"]:
@@ -2079,33 +2081,88 @@ def create_app(config_path="config.yaml"):
                         v = emo_params.get(key)
                         return default if v is None or v == "" else v
 
-                    try:
-                        duration = engine.synthesize_to_file(
-                            text=tts_text,
-                            ref_audio_path=ref["path"],
-                            prompt_text=ref_prompt,
-                            output_path=str(output_path),
-                            text_lang=lang,
-                            prompt_lang=_detect_prompt_lang(ref_prompt, lang),
-                            text_split_method=tts_cfg.get("text_split_method", "cut5"),
-                            batch_size=tts_cfg.get("batch_size", 1),
-                            speed_factor=_param("speed_factor", tts_cfg.get("speed_factor", 1.0)),
-                            fragment_interval=tts_cfg.get("fragment_interval", 0.3),
-                            temperature=_param("temperature", tts_cfg.get("temperature", 1.0)),
-                            top_k=_param("top_k", tts_cfg.get("top_k", 15)),
-                            top_p=_param("top_p", tts_cfg.get("top_p", 1.0)),
-                            seed=_param("seed", tts_cfg.get("seed", -1)),
-                        )
-                    except Exception as e:
-                        fail(idx, f"{char} 生成失败：{str(e)[-300:]}")
-                        continue
-                    wg["generated"][str(idx)] = {
-                        "path": str(output_path),
-                        "duration": duration,
-                        "character": char,
+                    jobs.append({
+                        "id": idx,
+                        "char": char,
                         "emotion": emotion,
-                    }
-                    wg["progress"]["current"] += 1
+                        "model_path": config["characters"][char]["model"],
+                        "gpt_model_path": config["characters"][char].get("gpt_model"),
+                        "text": tts_text,
+                        "ref_audio_path": ref["path"],
+                        "output_path": str(output_path),
+                        "params": {
+                            "prompt_text": ref_prompt,
+                            "text_lang": lang,
+                            "prompt_lang": _detect_prompt_lang(ref_prompt, lang),
+                            "text_split_method": tts_cfg.get("text_split_method", "cut5"),
+                            "batch_size": tts_cfg.get("batch_size", 1),
+                            "speed_factor": _param("speed_factor", tts_cfg.get("speed_factor", 1.0)),
+                            "fragment_interval": tts_cfg.get("fragment_interval", 0.3),
+                            "temperature": _param("temperature", tts_cfg.get("temperature", 1.0)),
+                            "top_k": _param("top_k", tts_cfg.get("top_k", 15)),
+                            "top_p": _param("top_p", tts_cfg.get("top_p", 1.0)),
+                            "seed": _param("seed", tts_cfg.get("seed", -1)),
+                        },
+                    })
+
+                low_perf = bool(config.get("low_perf_mode", False))
+                if engine._in_process or low_perf:
+                    for job in jobs:
+                        if wg["cancel_requested"]:
+                            break
+                        try:
+                            engine.switch_character(job["model_path"], job["gpt_model_path"])
+                        except Exception as e:
+                            fail(job["id"], f"角色模型加载失败：{str(e)[-200:]}")
+                            continue
+                        try:
+                            duration = engine.synthesize_to_file(
+                                text=job["text"],
+                                ref_audio_path=job["ref_audio_path"],
+                                output_path=job["output_path"],
+                                **job["params"],
+                            )
+                        except Exception as e:
+                            fail(job["id"], f"{job['char']} 生成失败：{str(e)[-300:]}")
+                            continue
+                        wg["generated"][str(job["id"])] = {
+                            "path": job["output_path"],
+                            "duration": duration,
+                            "character": job["char"],
+                            "emotion": job["emotion"],
+                        }
+                        wg["progress"]["current"] += 1
+                elif jobs:
+                    cancel_file = Path(config["output_dir"]) / f".cancel_{uuid.uuid4().hex}.marker"
+                    wg["cancel_file"] = str(cancel_file)
+                    try:
+                        outcomes = engine.synthesize_batch(jobs, cancel_file=str(cancel_file))
+                    except Exception as e:
+                        for job in jobs:
+                            fail(job["id"], f"{job['char']} 生成失败：{str(e)[-300:]}")
+                    else:
+                        for job in jobs:
+                            if wg["cancel_requested"]:
+                                break
+                            outcome = outcomes.get(job["id"])
+                            if outcome is None:
+                                continue
+                            if "error" in outcome:
+                                fail(job["id"], f"{job['char']} 生成失败：{str(outcome['error'])[-300:]}")
+                                continue
+                            wg["generated"][str(job["id"])] = {
+                                "path": job["output_path"],
+                                "duration": float(outcome["duration"]),
+                                "character": job["char"],
+                                "emotion": job["emotion"],
+                            }
+                            wg["progress"]["current"] += 1
+                    finally:
+                        try:
+                            cancel_file.unlink()
+                        except Exception:
+                            pass
+                        wg["cancel_file"] = None
             except Exception as e:
                 traceback.print_exc()
                 state["error"] = str(e)
@@ -2121,6 +2178,12 @@ def create_app(config_path="config.yaml"):
         if not wg.get("generating"):
             return jsonify({"status": "ok", "already_stopped": True})
         wg["cancel_requested"] = True
+        cancel_path = wg.get("cancel_file")
+        if cancel_path:
+            try:
+                Path(str(cancel_path)).touch()
+            except Exception:
+                pass
         return jsonify({"status": "cancelling"})
 
     @app.route("/api/webgal/progress", methods=["GET"])
@@ -3189,6 +3252,8 @@ def create_app(config_path="config.yaml"):
                         project_root=project_root,
                     )
 
+                jobs = []
+                char_models = {}
                 for char, idx_list in char_groups.items():
                     if state["cancel_requested"]:
                         break
@@ -3201,13 +3266,7 @@ def create_app(config_path="config.yaml"):
                             fail(idx, f"角色「{char}」没有配音模型，仅保留字幕，请检查角色名是否写错")
                         continue
                     char_config = config["characters"][char]
-                    try:
-                        engine.switch_character(char_config["model"], char_config.get("gpt_model"))
-                    except Exception as e:
-                        for idx in idx_list:
-                            fail(idx, f"角色模型加载失败（仅保留字幕）：{str(e)[-200:]}")
-                        continue
-
+                    char_models[char] = (char_config["model"], char_config.get("gpt_model"))
                     for idx in idx_list:
                         if state["cancel_requested"]:
                             break
@@ -3237,36 +3296,96 @@ def create_app(config_path="config.yaml"):
                         tts_lang = state.get("lang", "zh")
                         if tts_lang not in ("zh", "ja"):
                             tts_lang = "zh"
+                        tts_text = line.get("translated_text") or line["text"]
+                        if tts_lang == "ja":
+                            corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
+                            if corrected:
+                                tts_text = corrected
+                        jobs.append({
+                            "id": idx,
+                            "char": char,
+                            "text": tts_text,
+                            "ref_audio_path": ref_audio,
+                            "output_path": str(output_path),
+                            "params": {
+                                "prompt_text": ref_prompt,
+                                "text_lang": tts_lang,
+                                "prompt_lang": _detect_prompt_lang(ref_prompt, tts_lang),
+                                "text_split_method": tts_cfg.get("text_split_method", "cut5"),
+                                "batch_size": tts_cfg.get("batch_size", 1),
+                                "speed_factor": _param("speed_factor", tts_cfg.get("speed_factor", 1.0)),
+                                "fragment_interval": tts_cfg.get("fragment_interval", 0.3),
+                                "temperature": _param("temperature", tts_cfg.get("temperature", 1.0)),
+                                "top_k": _param("top_k", tts_cfg.get("top_k", 15)),
+                                "top_p": _param("top_p", tts_cfg.get("top_p", 1.0)),
+                                "seed": _param("seed", tts_cfg.get("seed", -1)),
+                            },
+                        })
+
+                low_perf = bool(config.get("low_perf_mode", False))
+                if state["cancel_requested"]:
+                    state["cancelled"] = True
+                elif engine._in_process or low_perf:
+                    by_char = {}
+                    for job in jobs:
+                        by_char.setdefault(job["char"], []).append(job)
+                    for char, char_jobs in by_char.items():
+                        if state["cancel_requested"]:
+                            break
                         try:
-                            tts_text = line.get("translated_text") or line["text"]
-                            if tts_lang == "ja":
-                                corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
-                                if corrected:
-                                    tts_text = corrected
-                            duration = engine.synthesize_to_file(
-                                text=tts_text,
-                                ref_audio_path=ref_audio,
-                                prompt_text=ref_prompt,
-                                output_path=str(output_path),
-                                text_lang=tts_lang,
-                                prompt_lang=_detect_prompt_lang(ref_prompt, tts_lang),
-                                text_split_method=tts_cfg.get("text_split_method", "cut5"),
-                                batch_size=tts_cfg.get("batch_size", 1),
-                                speed_factor=_param("speed_factor", tts_cfg.get("speed_factor", 1.0)),
-                                fragment_interval=tts_cfg.get("fragment_interval", 0.3),
-                                temperature=_param("temperature", tts_cfg.get("temperature", 1.0)),
-                                top_k=_param("top_k", tts_cfg.get("top_k", 15)),
-                                top_p=_param("top_p", tts_cfg.get("top_p", 1.0)),
-                                seed=_param("seed", tts_cfg.get("seed", -1)),
-                            )
+                            model, gpt_model = char_models[char]
+                            engine.switch_character(model, gpt_model)
                         except Exception as e:
-                            fail(idx, f"{char} 生成失败（仅保留字幕）：{str(e)[-300:]}")
+                            for job in char_jobs:
+                                fail(job["id"], f"角色模型加载失败（仅保留字幕）：{str(e)[-200:]}")
                             continue
-                        state["generated"][idx] = {
-                            "path": str(output_path),
-                            "duration": duration,
-                        }
-                        state["progress"]["current"] += 1
+                        for job in char_jobs:
+                            if state["cancel_requested"]:
+                                break
+                            try:
+                                duration = engine.synthesize_to_file(
+                                    text=job["text"],
+                                    ref_audio_path=job["ref_audio_path"],
+                                    output_path=job["output_path"],
+                                    **job["params"],
+                                )
+                            except Exception as e:
+                                fail(job["id"], f"{job['char']} 生成失败（仅保留字幕）：{str(e)[-300:]}")
+                                continue
+                            state["generated"][job["id"]] = {
+                                "path": job["output_path"],
+                                "duration": duration,
+                            }
+                            state["progress"]["current"] += 1
+                elif jobs:
+                    cancel_file = Path(config["output_dir"]) / f".cancel_{uuid.uuid4().hex}.marker"
+                    state["cancel_file"] = str(cancel_file)
+                    try:
+                        outcomes = engine.synthesize_batch(jobs, cancel_file=str(cancel_file))
+                    except Exception as e:
+                        for job in jobs:
+                            fail(job["id"], f"{job['char']} 生成失败（仅保留字幕）：{str(e)[-300:]}")
+                    else:
+                        for job in jobs:
+                            if state["cancel_requested"]:
+                                break
+                            outcome = outcomes.get(job["id"])
+                            if outcome is None:
+                                continue
+                            if "error" in outcome:
+                                fail(job["id"], f"{job['char']} 生成失败（仅保留字幕）：{str(outcome['error'])[-300:]}")
+                                continue
+                            state["generated"][job["id"]] = {
+                                "path": job["output_path"],
+                                "duration": float(outcome["duration"]),
+                            }
+                            state["progress"]["current"] += 1
+                    finally:
+                        try:
+                            cancel_file.unlink()
+                        except Exception:
+                            pass
+                        state["cancel_file"] = None
 
                 if state["cancel_requested"]:
                     state["cancelled"] = True
@@ -3300,6 +3419,12 @@ def create_app(config_path="config.yaml"):
         if not state["generating"]:
             return jsonify({"status": "ok", "already_stopped": True})
         state["cancel_requested"] = True
+        cancel_path = state.get("cancel_file")
+        if cancel_path:
+            try:
+                Path(str(cancel_path)).touch()
+            except Exception:
+                pass
         return jsonify({"status": "cancelling"})
 
     @app.route("/api/segment/<int:index>", methods=["GET"])

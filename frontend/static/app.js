@@ -137,6 +137,8 @@ async function loadConfig() {
       }
     } catch (e) {}
   }
+  const lowPerfEl = document.getElementById("low-perf-mode");
+  if (lowPerfEl) lowPerfEl.checked = !!cfg.low_perf_mode;
   if (cfg.dpapi_ok === false) {
     const status = document.getElementById("ai-config-status");
     if (status) {
@@ -3681,6 +3683,27 @@ function initNarrationConfig() {
   });
 }
 
+function initLowPerfConfig() {
+  const btn = document.getElementById("btn-save-low-perf");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const status = document.getElementById("low-perf-status");
+    const lowPerf = document.getElementById("low-perf-mode").checked;
+    try {
+      await api("/api/config", { method: "POST", body: JSON.stringify({ low_perf_mode: lowPerf }) });
+      if (status) {
+        status.textContent = lowPerf ? "已开启低性能模式" : "已关闭低性能模式（默认快速模式）";
+        status.className = "status-text success";
+      }
+    } catch (e) {
+      if (status) {
+        status.textContent = "保存失败: " + e.message;
+        status.className = "status-text error";
+      }
+    }
+  });
+}
+
 function initAIConfig() {
   const saved = loadAIConfigFromStorage();
   if (saved) applyAIConfig(saved);
@@ -4608,6 +4631,7 @@ function initShareImportExport() {
   });
 }
 
+initLowPerfConfig();
 initAIConfig();
 initNarrationConfig();
 initPronunciationConfig();

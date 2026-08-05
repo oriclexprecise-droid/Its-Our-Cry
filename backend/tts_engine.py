@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -254,6 +255,75 @@ class TTSEngine:
                     tmp.unlink()
                 except Exception:
                     pass
+
+    def synthesize_batch(self, jobs, cancel_file=None) -> dict:
+        """批量合成：子进程只启动一次，模型按角色分组加载，返回 {job_id: {...}} 映射。"""
+        if not jobs:
+            return {}
+        if not self.worker_script or not Path(self.worker_script).exists():
+            self.worker_script = self._materialize_worker_script()
+            if not self.worker_script:
+                raise RuntimeError("找不到 TTS 推理脚本: " + str(self.worker_script))
+        for job in jobs:
+            output_path = Path(job["output_path"])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path = output_path.with_suffix(".result.json")
+            if result_path.exists():
+                result_path.unlink()
+
+        batch = {
+            "gptsovits_path": self.gptsovits_path,
+            "jobs": jobs,
+            "cancel_file": cancel_file or "",
+        }
+        tmp_dir = Path(tempfile.gettempdir()) / "ItsOurCryWorker"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        req_path = tmp_dir / ("batch_" + uuid.uuid4().hex + ".json")
+        req_path.write_text(json.dumps(batch, ensure_ascii=False), encoding="utf-8")
+        try:
+            cmd = [self._runtime_python(), str(self.worker_script), "--batch", str(req_path)]
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            stdout, _ = proc.communicate()
+            tail = (stdout or "")[-1500:]
+
+            outcomes = {}
+            for job in jobs:
+                result_path = Path(job["output_path"]).with_suffix(".result.json")
+                if not result_path.exists():
+                    continue
+                try:
+                    result = json.loads(result_path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if result.get("error"):
+                    outcomes[job["id"]] = {
+                        "error": str(result["error"]),
+                        "traceback": str(result.get("traceback", "")),
+                    }
+                else:
+                    outcomes[job["id"]] = {"duration": float(result["duration"])}
+            if proc.returncode != 0 and not outcomes:
+                raise RuntimeError("批量推理子进程异常退出（无结果文件）\n" + tail)
+            print("[TTSEngine] 批量推理完成: " + str(len(outcomes)) + "/" + str(len(jobs)) + " 条")
+            return outcomes
+        finally:
+            for job in jobs:
+                try:
+                    Path(job["output_path"]).with_suffix(".result.json").unlink()
+                except Exception:
+                    pass
+            try:
+                req_path.unlink()
+            except Exception:
+                pass
 
     def cleanup(self):
         """恢复原始工作目录（进程内模式）。"""
