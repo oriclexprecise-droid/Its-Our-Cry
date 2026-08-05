@@ -292,7 +292,7 @@ def extract_text_results(content, emotions=None):
                 if emo is None:
                     continue
                 row = {"index": idx, "emotion": emo}
-                tail = rest[len(emo):].lstrip("|｜").strip()
+                tail = rest[len(emo):].lstrip("|｜ \t ").strip()
                 if tail:
                     row["translation"] = _clean_quoted_text(tail)
                 results.append(row)
