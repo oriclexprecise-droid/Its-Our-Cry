@@ -31,6 +31,14 @@ OPTIONAL_PACKAGES = [
     ("onnxruntime", "onnxruntime"),
 ]
 
+PIP_INDEX_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
+PIP_INDEX_OFFICIAL = "https://pypi.org/simple"
+PIP_EXTRA_FLAGS = ["--timeout", "30", "--retries", "3", "--no-input", "--disable-pip-version-check"]
+
+
+def _pip_cmd(python_exe, packages, index_url):
+    return [python_exe, "-m", "pip", "install"] + list(packages) + ["--index-url", index_url] + list(PIP_EXTRA_FLAGS)
+
 
 
 GPT_SOVITS_DOWNLOADS = [
@@ -216,6 +224,8 @@ def _torch_index(gpus, cuda_version):
     ver = _parse_cuda_number(cuda_version)
     if ver is None:
         return None
+    if ver >= 12.8:
+        return "https://download.pytorch.org/whl/cu128"
     if ver >= 12.6:
         return "https://download.pytorch.org/whl/cu126"
     if ver >= 12.4:
@@ -244,12 +254,9 @@ def build_install_plan(packages, gpus, cuda_version, python_exe=None):
 
     commands = []
     if torch_pkgs:
-        cmd = [python_exe, "-m", "pip", "install"] + torch_pkgs
-        if index:
-            cmd += ["--index-url", index]
-        commands.append(cmd)
+        commands.append(_pip_cmd(python_exe, torch_pkgs, index or PIP_INDEX_MIRROR))
     if other_pkgs:
-        commands.append([python_exe, "-m", "pip", "install"] + other_pkgs)
+        commands.append(_pip_cmd(python_exe, other_pkgs, PIP_INDEX_MIRROR))
 
     if torch_pkgs:
         if gpus:
@@ -263,7 +270,7 @@ def build_install_plan(packages, gpus, cuda_version, python_exe=None):
             note = "未检测到 NVIDIA 显卡，将安装 CPU 版 PyTorch"
     else:
         mode = None
-        note = "PyTorch 已安装，其余依赖将通过 pip 安装"
+        note = "PyTorch 已安装，其余依赖优先国内镜像，失败自动切换官方源"
 
     return {
         "packages": missing,
