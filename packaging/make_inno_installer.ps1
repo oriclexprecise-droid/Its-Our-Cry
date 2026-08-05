@@ -11,7 +11,8 @@ Write-Host '== 组装 Inno 载荷 =='
 $payload = Join-Path $PSScriptRoot 'installer\inno_payload\app'
 if (Test-Path $payload) { Remove-Item $payload -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
-Get-ChildItem -LiteralPath $releaseApp -Force | Where-Object { $_.Name -notin @('launcher.log', 'work') } | ForEach-Object {
+$exclude = @('launcher.log', 'server.log', 'server.out.log', 'server.err.log', 'server_error.log', 'work', 'feedback', 'exports', 'output', 'outputs', 'logs', 'user_settings.json', 'user_models.json', 'model_aliases.json', 'ai_cache.json', 'ai_usage.json')
+Get-ChildItem -LiteralPath $releaseApp -Force | Where-Object { $_.Name -notin $exclude } | ForEach-Object {
   Copy-Item -LiteralPath $_.FullName -Destination $payload -Recurse -Force
 }
 # config.yaml 保留在载荷中，Inno 用 onlyifdoesntexist 安装，升级时保留用户配置

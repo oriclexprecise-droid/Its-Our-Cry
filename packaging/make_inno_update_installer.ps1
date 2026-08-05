@@ -11,7 +11,8 @@ Write-Host '== 组装更新载荷（排除权重目录） =='
 $payload = Join-Path $PSScriptRoot 'installer\inno_update_payload\app'
 if (Test-Path $payload) { Remove-Item $payload -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
-Get-ChildItem -LiteralPath $releaseApp -Force | Where-Object { $_.Name -notin @('GPT_weights_v2ProPlus', 'SoVITS_weights_v2ProPlus', 'launcher.log', 'work') } | ForEach-Object {
+$exclude = @('GPT_weights_v2ProPlus', 'SoVITS_weights_v2ProPlus', 'launcher.log', 'server.log', 'server.out.log', 'server.err.log', 'server_error.log', 'work', 'feedback', 'exports', 'output', 'outputs', 'logs', 'user_settings.json', 'user_models.json', 'model_aliases.json', 'ai_cache.json', 'ai_usage.json')
+Get-ChildItem -LiteralPath $releaseApp -Force | Where-Object { $_.Name -notin $exclude } | ForEach-Object {
   Copy-Item -LiteralPath $_.FullName -Destination $payload -Recurse -Force
 }
 $size = (Get-ChildItem $payload -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
