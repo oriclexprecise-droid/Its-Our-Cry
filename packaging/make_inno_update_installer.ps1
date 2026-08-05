@@ -2,6 +2,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $iscc = Join-Path $PSScriptRoot 'tools\innosetup6\ISCC.exe'
+$appVersion = (Select-String -Path (Join-Path $PSScriptRoot 'its_our_cry_update.iss') -Pattern '#define MyAppVersion "([^"]+)"').Matches[0].Groups[1].Value
 if (-not (Test-Path $iscc)) { throw '未找到 Inno Setup，请先安装到 packaging\tools\innosetup6' }
 $releaseApp = Join-Path $root "release\It's Our Cry"
 if (-not (Test-Path (Join-Path $releaseApp 'ItsOurCry.exe'))) { throw '请先运行 build_app.ps1' }
@@ -23,4 +24,4 @@ if ($LASTEXITCODE -ne 0) { throw 'Inno 更新包编译失败' }
 
 Remove-Item $payload -Recurse -Force
 Write-Host '== 增量更新包完成 =='
-Write-Host (Join-Path $root 'release\It-sOurCry-Update-Inno.exe')
+Write-Host (Join-Path $root ('release\It-sOurCry-Update-V' + $appVersion + '-Inno.exe'))
