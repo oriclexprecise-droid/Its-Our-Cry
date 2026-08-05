@@ -1978,7 +1978,7 @@ async function startGeneration(indices, srtOnly) {
     }
   });
   if (!srtOnly && bad.length) {
-    progressText.textContent = "以下角色不存在，无法生成：" + bad.slice(0, 5).join("、") + (bad.length > 5 ? " 等" + bad.length + " 条" : "");
+    progressText.textContent = "以下角色没有可用模型，无法生成语音（请先在「模型配置」确认角色已安装，或点「刷新」）：" + bad.slice(0, 5).join("、") + (bad.length > 5 ? " 等" + bad.length + " 条" : "");
     progressText.className = "status-text error";
     progressText.classList.remove("hidden");
     const srtBtn = document.getElementById("btn-srt-only");
@@ -2183,6 +2183,8 @@ async function scanDeploy() {
     localStorage.setItem("mygo_deploy_gs_path", path);
     renderDeployScan(data);
     updateDeployBanner();
+    await loadConfig();
+    await loadModels();
     status.textContent = "扫描完成";
     status.className = "status-text success";
   } catch (e) {
@@ -3178,7 +3180,7 @@ function renderWebGalLines() {
     const psyNote = d.is_psy
       ? (wg.psyVoice ? (wg.psyCharacter ? "心理活动 → 配给 " + esc(wg.psyCharacter) : "心理活动 · 沿用角色配音") : "心理活动 · 不配音")
       : "";
-    const extraNote = (!d.is_psy && state.chars.indexOf(d.character) === -1) ? "路人 · 不配音" : "";
+    const extraNote = (!d.is_psy && state.chars.indexOf(d.character) === -1) ? "未配置模型 · 不配音" : "";
     const note = psyNote || extraNote;
     const canVoice = (d.is_psy && wg.psyVoice) || (!d.is_psy && state.chars.indexOf(d.character) !== -1);
     const audioState = gen ? '<span class="wg-audio-ok">已生成</span>' : (failMsg ? '<span class="wg-audio-fail">' + esc(failMsg) + '</span>' : '');

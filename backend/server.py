@@ -706,7 +706,14 @@ def create_app(config_path="config.yaml"):
                     "ref_audio_dir": str(project_root / ref_rel),
                 }
 
-    rebuild_characters()
+    def refresh_model_scan():
+        nonlocal models, gs_path
+        gs_path = str(config.get("gptsovits_path") or "").strip()
+        config["gptsovits_path"] = gs_path
+        models = _build_models_dict(project_root, gs_path)
+        rebuild_characters()
+
+    refresh_model_scan()
 
     state = {
         "lines": [],
@@ -1146,6 +1153,7 @@ def create_app(config_path="config.yaml"):
 
     @app.route("/api/config", methods=["GET"])
     def get_config():
+        refresh_model_scan()
         has_key = bool(config["deepseek"].get("api_key", ""))
         return jsonify({
             "characters": list(config["characters"].keys()),
@@ -1362,6 +1370,7 @@ def create_app(config_path="config.yaml"):
 
     @app.route("/api/models", methods=["GET"])
     def list_models():
+        refresh_model_scan()
         items = []
         for key, m in models.items():
             items.append({
@@ -1376,6 +1385,7 @@ def create_app(config_path="config.yaml"):
 
     @app.route("/api/models/available", methods=["GET"])
     def available_models():
+        refresh_model_scan()
         ref_base = project_root / "reference_audio"
         ref_dirs = sorted(d.name for d in ref_base.iterdir() if d.is_dir()) if ref_base.is_dir() else []
         data = _scan_model_files(project_root, gs_path)
@@ -1384,6 +1394,7 @@ def create_app(config_path="config.yaml"):
 
     @app.route("/api/models/<path:key>/aliases", methods=["POST"])
     def add_model_alias(key):
+        refresh_model_scan()
         data = request.get_json() or {}
         alias = str(data.get("alias") or "").strip()
         if not alias or alias == "旁白":
@@ -1402,6 +1413,7 @@ def create_app(config_path="config.yaml"):
 
     @app.route("/api/models/<path:key>/aliases/<path:alias>", methods=["DELETE"])
     def delete_model_alias(key, alias):
+        refresh_model_scan()
         if key not in models:
             return jsonify({"error": "模型不存在"}), 404
         if alias not in models[key]["aliases"]:
@@ -2242,7 +2254,7 @@ def create_app(config_path="config.yaml"):
                         fail(idx, "心理活动未开启配音")
                         continue
                     if char not in config["characters"]:
-                        fail(idx, f"路人/未配置角色「{d['character']}」，不生成音频")
+                        fail(idx, f"角色「{d['character']}」没有可用模型，不生成音频（请确认模型配置已安装该角色）")
                         continue
                     emotion = d["emotion"]
                     if emotion not in config["emotions"]:
@@ -4190,6 +4202,7 @@ def create_app(config_path="config.yaml"):
                 return jsonify({"error": guard}), 400
             config["gptsovits_path"] = user_path
             _persist_user_settings(project_root, config)
+        refresh_model_scan()
         try:
             return jsonify(scan_environment(config, project_root, user_path or None))
         except Exception as e:
@@ -4206,6 +4219,7 @@ def create_app(config_path="config.yaml"):
                 return jsonify({"error": guard}), 400
             config["gptsovits_path"] = user_path
             _persist_user_settings(project_root, config)
+        refresh_model_scan()
         if state["deploy_install"]["running"]:
             return jsonify({"error": "安装正在进行中"}), 409
         try:
@@ -4397,6 +4411,7 @@ def create_app(config_path="config.yaml"):
                 state["deploy_model_copy"]["success"] = True
                 state["deploy_model_copy"]["progress"] = 100
                 log.append("角色模型补齐完成")
+                refresh_model_scan()
             except Exception as e:
                 log = state["deploy_model_copy"]["log"]
                 log.append("复制失败: " + str(e))
@@ -4444,11 +4459,7 @@ def create_app(config_path="config.yaml"):
         confirm_missing = bool(data.get("confirm_missing"))
         try:
             result = clean_items(project_root, config.get("gptsovits_path") or "", items, confirm_missing=confirm_missing)
-            if "model_weights" in items:
-                rebuilt = _build_models_dict(project_root, config.get("gptsovits_path") or "")
-                models.clear()
-                models.update(rebuilt)
-                rebuild_characters()
+            refresh_model_scan()
         except Exception as e:
             traceback.print_exc()
             return jsonify({"error": "清理失败: " + str(e)}), 500
