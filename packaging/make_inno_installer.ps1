@@ -11,7 +11,9 @@ Write-Host '== 组装 Inno 载荷 =='
 $payload = Join-Path $PSScriptRoot 'installer\inno_payload\app'
 if (Test-Path $payload) { Remove-Item $payload -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $payload | Out-Null
-Copy-Item (Join-Path $releaseApp '*') $payload -Recurse -Force
+Get-ChildItem -LiteralPath $releaseApp -Force | Where-Object { $_.Name -notin @('launcher.log', 'work') } | ForEach-Object {
+  Copy-Item -LiteralPath $_.FullName -Destination $payload -Recurse -Force
+}
 # config.yaml 保留在载荷中，Inno 用 onlyifdoesntexist 安装，升级时保留用户配置
 
 Write-Host '== ISCC 编译 Inno 安装包 =='
