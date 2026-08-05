@@ -3756,8 +3756,8 @@ if (logResetBtn) {
 refreshLogs();
 setInterval(refreshLogs, 4000);
 
-const DEEPSEEK_PRESET = { name: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-v4-flash" };
-const MODEL_QUICK_OPTIONS = ["deepseek-v4-flash", "deepseek-chat"];
+const DEEPSEEK_PRESET = { name: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-v4-pro" };
+const MODEL_QUICK_OPTIONS = ["deepseek-v4-pro"];
 const AI_CONFIG_KEY = "mygo_ai_config";
 
 function syncModelSelect() {

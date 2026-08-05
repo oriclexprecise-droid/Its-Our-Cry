@@ -243,7 +243,7 @@ def translate_lines(
     lines: list[dict],
     api_key: str,
     base_url: str = "https://api.deepseek.com",
-    model: str = "deepseek-v4-flash",
+    model: str = "deepseek-v4-pro",
     name_readings: list = None,
     cache=None,
     usage=None,
