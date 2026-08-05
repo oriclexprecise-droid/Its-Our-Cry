@@ -65,8 +65,9 @@ class TTSEngine:
             tmp_dir = Path(tempfile.gettempdir()) / "ItsOurCryWorker"
             tmp_dir.mkdir(parents=True, exist_ok=True)
             worker_path = tmp_dir / "tts_worker.py"
-            if not worker_path.exists():
-                worker_path.write_bytes(base64.b64decode(TTS_WORKER_B64))
+            worker_data = base64.b64decode(TTS_WORKER_B64)
+            if not worker_path.exists() or worker_path.read_bytes() != worker_data:
+                worker_path.write_bytes(worker_data)
             return str(worker_path)
         except Exception:
             return None
