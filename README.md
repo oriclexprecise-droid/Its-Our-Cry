@@ -42,6 +42,10 @@ E:\GPT-SoVITS-v2pro-20250604-nvidia50\GPT-SoVITS-v2pro-20250604-nvidia50\runtime
 - 语音合成：GPT-SoVITS v2ProPlus
 - AI 分析：DeepSeek（OpenAI 兼容协议，可自定义）
 
+## 社区共享约定
+
+使用本应用的用户，应无偿分享自己制作的预设成果，包括但不限于纠音词典、情绪参数模板、脚本情绪映射与参考音频。共享用于完善同人创作语音库，请勿倒卖共享素材，也不要将他人的成果占为己有后商用。
+
 ## 许可证
 
 [MIT](LICENSE) © 2026 ORiCale
