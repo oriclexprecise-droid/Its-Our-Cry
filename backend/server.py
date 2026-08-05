@@ -4329,4 +4329,12 @@ def create_app(config_path="config.yaml"):
             files = []
         return jsonify({"backgrounds": files})
 
+    @app.after_request
+    def _no_frontend_cache(resp):
+        if request.path == "/" or request.path.startswith("/static/"):
+            resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+        return resp
+
     return app

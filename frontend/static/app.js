@@ -853,12 +853,25 @@ async function exitToHome() {
   toast("已退出到主页", "success");
 }
 
+function refreshProjectTypeUI() {
+  document.querySelectorAll('.project-type-card').forEach(card => {
+    const radio = card.querySelector('input[name="new-project-type"]');
+    card.classList.toggle('selected', !!radio && radio.checked);
+  });
+  document.querySelectorAll('.project-ai-mode').forEach(m => {
+    const radio = m.querySelector('input[name^="new-project-ai-mode"]');
+    m.classList.toggle('selected', !!radio && radio.checked);
+  });
+}
+
 function selectProjectType(type) {
   document.querySelectorAll('input[name="new-project-type"]').forEach(r => { r.checked = (r.value === type); });
+  refreshProjectTypeUI();
 }
 
 function selectProjectAiMode(mode) {
-  document.querySelectorAll('input[name="new-project-ai-mode"]').forEach(r => { r.checked = (r.value === mode); });
+  document.querySelectorAll('input[name^="new-project-ai-mode"]').forEach(r => { r.checked = (r.value === mode); });
+  refreshProjectTypeUI();
 }
 
 function createNewProject() {
@@ -869,7 +882,8 @@ function createNewProject() {
   if (!modal || !input) return;
   input.value = "";
   document.querySelectorAll('input[name="new-project-type"]').forEach(r => { r.checked = (r.value === "srt"); });
-  document.querySelectorAll('input[name="new-project-ai-mode"]').forEach(r => { r.checked = (r.value === "api"); });
+  document.querySelectorAll('input[name^="new-project-ai-mode"]').forEach(r => { r.checked = (r.value === "api"); });
+  refreshProjectTypeUI();
   const freshSrtBox = document.getElementById("client-ai-box");
   if (freshSrtBox) freshSrtBox.classList.add("hidden");
   const freshWgBox = document.getElementById("wg-client-ai-box");
@@ -901,7 +915,7 @@ async function confirmNewProject() {
   try {
     const typeEl = document.querySelector('input[name="new-project-type"]:checked');
     const projectType = typeEl ? typeEl.value : "srt";
-    const aiModeEl = document.querySelector('input[name="new-project-ai-mode"]:checked');
+    const aiModeEl = document.querySelector('input[name^="new-project-ai-mode"]:checked');
     const aiMode = aiModeEl ? aiModeEl.value : "api";
     await api("/api/recent/create", { method: "POST", body: JSON.stringify({ name, project_type: projectType, ai_mode: aiMode }) });
     state.projectType = projectType;
