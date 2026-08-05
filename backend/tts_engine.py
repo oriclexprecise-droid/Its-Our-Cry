@@ -339,11 +339,18 @@ _engine: Optional[TTSEngine] = None
 
 
 def get_engine(gptsovits_path: str, project_root=None, worker_script=None) -> TTSEngine:
-    """获取全局 TTS 引擎实例。"""
+    """获取全局 TTS 引擎实例；GPT-SoVITS 路径变化时重建，避免继续使用旧目录。"""
     global _engine
+    gs = str(gptsovits_path or "").strip()
+    if _engine is not None and _engine.gptsovits_path != gs:
+        try:
+            _engine.cleanup()
+        except Exception:
+            pass
+        _engine = None
     if _engine is None:
         _engine = TTSEngine(
-            gptsovits_path,
+            gs,
             project_root=project_root,
             worker_script=worker_script,
         )
