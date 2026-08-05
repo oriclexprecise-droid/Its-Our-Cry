@@ -1546,7 +1546,14 @@ def create_app(config_path="config.yaml"):
         lines = parse_script(script_text)
         if not lines:
             return jsonify({"error": "no valid lines found"}), 400
-        prompt = build_client_prompt(lines, config["emotions"], lang=lang, mode="analyze")
+        prompt = build_client_prompt(
+            lines,
+            config["emotions"],
+            lang=lang,
+            mode="analyze",
+            characters=[str(l.get("character") or "").strip() for l in lines],
+            name_readings=config.get("pronunciation", []),
+        )
         return jsonify({"prompt": prompt})
 
     @app.route("/api/analyze/import", methods=["POST"])
@@ -1585,7 +1592,8 @@ def create_app(config_path="config.yaml"):
             line["emotion"] = emotion_map.get(line["index"]) or existing_emotions.get(line["index"]) or "思考"
             if lang == "ja":
                 corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
-                line["translated_text"] = corrected or translation_map.get(line["index"], "").strip() or line["text"]
+                raw_translation = translation_map.get(line["index"], "").strip()
+                line["translated_text"] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation or line["text"]
             else:
                 line.setdefault("translated_text", "")
         valid_chars = list(config["characters"].keys()) + ["旁白"]
@@ -1930,7 +1938,14 @@ def create_app(config_path="config.yaml"):
         if mode not in ("analyze", "translate"):
             mode = "analyze"
         lines = [{"index": d["index"], "character": d["character"], "text": d["text"]} for d in dialogues]
-        prompt = build_client_prompt(lines, config["emotions"], lang=lang, mode=mode)
+        prompt = build_client_prompt(
+            lines,
+            config["emotions"],
+            lang=lang,
+            mode=mode,
+            characters=[str(d.get("character") or "").strip() for d in dialogues],
+            name_readings=config.get("pronunciation", []),
+        )
         return jsonify({"prompt": prompt})
 
     @app.route("/api/webgal/analyze/import", methods=["POST"])
@@ -1971,7 +1986,9 @@ def create_app(config_path="config.yaml"):
             for d in dialogues:
                 idx = d["index"]
                 corrected = _exact_pronunciation(d["text"], config.get("pronunciation", []))
-                current_translations[str(idx)] = corrected or translation_map.get(idx, "").strip() or current_translations.get(str(idx), "") or d["text"]
+                raw_translation = translation_map.get(idx, "").strip()
+                fixed_translation = correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation
+                current_translations[str(idx)] = corrected or fixed_translation or current_translations.get(str(idx), "") or d["text"]
             wg["translations"] = current_translations
         else:
             wg["translations"] = {}

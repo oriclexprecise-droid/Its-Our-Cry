@@ -17,14 +17,45 @@ def build_script_lines(lines):
     )
 
 
-def build_client_prompt(lines, emotions, lang="zh", mode="analyze"):
+def _collect_characters(lines, characters=None):
+    chars = []
+    for c in characters or []:
+        s = str(c).strip()
+        if s and s not in chars:
+            chars.append(s)
+    if not chars:
+        for line in lines:
+            c = str(line.get("character") or "").strip()
+            if c and c not in chars:
+                chars.append(c)
+    if "旁白" not in chars:
+        chars.append("旁白")
+    return chars
+
+
+def _collect_name_readings(chars, lines, name_readings=None):
+    dialogue = "".join(str(l.get("text") or "") for l in lines)
+    readings = []
+    for r in name_readings or []:
+        zh = str(r.get("zh") or "").strip()
+        ja = str(r.get("ja") or "").strip()
+        if not zh or not ja:
+            continue
+        if any(zh == c or zh in c for c in chars) or zh in dialogue:
+            readings.append((zh, ja))
+    return readings
+
+
+def build_client_prompt(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None):
     """构造可粘贴到任意 AI 客户端的提示词，返回严格 JSON 数组。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
+    chars = _collect_characters(lines, characters)
+    readings = _collect_name_readings(chars, lines, name_readings)
     parts = [
         "你是 It's Our Cry 配音工作台的分析助手，专门分析 MyGO!!!!! 同人剧本台词。",
     ]
     if mode == "translate":
-        parts.append("任务：只把每句台词翻译成自然、口语化、符合角色语气的日文。")
+        parts.append("任务：只把每句台词翻译成自然、口语化、符合角色语气的日文，不要分析情绪，不要返回 emotion 字段。")
     else:
         parts.append("任务：为每句台词从可选情绪中选出最合适的一种。")
         parts.append("当语言为日语时，再把每句台词翻译成自然、口语化、符合角色语气的日文；中文模式不需要翻译。")
@@ -37,11 +68,17 @@ def build_client_prompt(lines, emotions, lang="zh", mode="analyze"):
         if desc_lines:
             parts.append("情绪说明：")
             parts.extend(desc_lines)
+    if chars:
+        parts.append("角色名单（这些是专有名词，不得意译、不得拆改，也不能按普通词翻译）：")
+        parts.append("、".join(chars))
     if mode == "translate" or lang == "ja":
+        if readings:
+            parts.append("角色名读音参考（译文里涉及角色名时优先使用这些日文写法）：")
+            parts.append("；".join(f"{zh} → {ja}" for zh, ja in readings))
         parts.extend([
             "翻译要求：",
             "1. 保留原句的完整含义、语气和标点风格",
-            "2. 不要翻译角色名，只翻译台词文本",
+            "2. 严格按上面的角色名单识别角色名，一律保留，不得意译、不得拆改",
             "3. 不要添加解释、注音或额外内容",
         ])
     parts.append("输出格式：只输出严格 JSON 数组，不要输出其他内容：")
