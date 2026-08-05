@@ -181,6 +181,38 @@ def _extract_json_object(content):
     return obj
 
 
+def _extract_result_list(content):
+    """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
+    text = (content or "").strip()
+    if not text:
+        raise ValueError("AI 返回内容为空")
+    text = text.replace("```json", "").replace("```", "").strip()
+    start = text.find("[")
+    if start != -1:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(text[start:])
+            if isinstance(obj, list):
+                return obj
+        except Exception:
+            pass
+    try:
+        obj = json.loads(text)
+    except Exception as e:
+        raise ValueError("AI 返回的不是列表格式: " + str(e))
+    if isinstance(obj, list):
+        return obj
+    if isinstance(obj, dict):
+        for key in ("result", "emotions", "data", "items", "lines"):
+            if isinstance(obj.get(key), list):
+                return obj[key]
+        for v in obj.values():
+            if isinstance(v, list):
+                return v
+        if "emotion" in obj:
+            return [obj]
+    raise ValueError("AI 返回的不是列表格式")
+
+
 def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None):
     """调用 DeepSeek API 为情绪列表推荐 SoVITS 合成参数。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
@@ -281,29 +313,23 @@ def analyze_emotions(
 
     results = None
     last_error = None
-    for _ in range(MAX_AI_ATTEMPTS):
+    for attempt in range(MAX_AI_ATTEMPTS):
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
+            kwargs = {
+                "model": model,
+                "messages": [
                     {"role": "system", "content": build_system_prompt(emotions) + lang_hint},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.3,
-                max_tokens=4096,
-            )
-
-            content = response.choices[0].message.content.strip()
-
-            # 尝试解析 JSON（可能被包裹在代码块中）
-            json_match = re.search(r"\[.*\]", content, re.DOTALL)
-            if json_match:
-                content = json_match.group(0)
-
-            parsed = json.loads(content)
-            if not isinstance(parsed, list):
-                raise ValueError("AI 返回的不是列表格式: " + str(parsed)[:200])
-            results = parsed
+                "temperature": 0.3,
+                "max_tokens": 4096,
+            }
+            # 第一次优先 JSON 模式，失败时第二次退回普通模式
+            if attempt == 0:
+                kwargs["response_format"] = {"type": "json_object"}
+            response = client.chat.completions.create(**kwargs)
+            content = (response.choices[0].message.content or "").strip()
+            results = _extract_result_list(content)
             break
         except Exception as e:
             last_error = e

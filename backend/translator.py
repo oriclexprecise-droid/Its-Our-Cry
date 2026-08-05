@@ -1,7 +1,6 @@
 """使用 DeepSeek API 将台词翻译成日语。"""
 
 import json
-import re
 from .ai_client import MAX_AI_ATTEMPTS, create_ai_client
 
 
@@ -18,6 +17,8 @@ SYSTEM_PROMPT = """你是一个专业的中文到日语翻译助手，专门翻�
 ]
 """
 
+BATCH_SIZE = 40
+
 
 def build_translate_prompt(lines: list[dict]) -> str:
     script_lines = []
@@ -26,14 +27,66 @@ def build_translate_prompt(lines: list[dict]) -> str:
     return "\n".join(script_lines)
 
 
+def _chunks(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
 def _extract_json_array(content):
-    start = content.find("[")
-    if start == -1:
-        raise ValueError("AI returned no JSON array")
-    obj, _ = json.JSONDecoder().raw_decode(content[start:])
-    if not isinstance(obj, list):
-        raise ValueError("AI did not return a JSON list")
-    return obj
+    """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
+    text = (content or "").strip()
+    if not text:
+        raise ValueError("AI returned empty content")
+    text = text.replace("```json", "").replace("```", "").strip()
+    start = text.find("[")
+    if start != -1:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(text[start:])
+            if isinstance(obj, list):
+                return obj
+        except Exception:
+            pass
+    try:
+        obj = json.loads(text)
+    except Exception as e:
+        raise ValueError("AI returned no JSON array: " + str(e))
+    if isinstance(obj, list):
+        return obj
+    if isinstance(obj, dict):
+        for key in ("result", "translations", "data", "items", "lines"):
+            if isinstance(obj.get(key), list):
+                return obj[key]
+        for v in obj.values():
+            if isinstance(v, list):
+                return v
+        if "translation" in obj:
+            return [obj]
+    raise ValueError("AI returned no JSON array")
+
+
+def _translate_batch(batch, client, model):
+    user_prompt = build_translate_prompt(batch)
+    last_error = None
+    for attempt in range(MAX_AI_ATTEMPTS):
+        kwargs = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.4,
+            "max_tokens": 4096,
+        }
+        # 第一次优先 JSON 模式，失败时第二次退回普通模式
+        if attempt == 0:
+            kwargs["response_format"] = {"type": "json_object"}
+        try:
+            response = client.chat.completions.create(**kwargs)
+            content = (response.choices[0].message.content or "").strip()
+            return _extract_json_array(content)
+        except Exception as e:
+            last_error = e
+    raise RuntimeError("日语翻译调用已连续失败 2 次，已停止调用 API: " + str(last_error or "unknown error"))
 
 
 def translate_lines(
@@ -47,32 +100,12 @@ def translate_lines(
         return []
 
     client = create_ai_client(api_key, base_url)
-    user_prompt = build_translate_prompt(lines)
-
-    results = None
-    last_error = None
-    for _ in range(MAX_AI_ATTEMPTS):
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.4,
-                max_tokens=4096,
-            )
-            content = (response.choices[0].message.content or "").strip()
-            content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.MULTILINE).strip()
-            results = _extract_json_array(content)
-            break
-        except Exception as e:
-            last_error = e
-    if results is None:
-        raise RuntimeError("日语翻译调用已连续失败 2 次，已停止调用 API: " + str(last_error or "unknown error"))
+    raw_items = []
+    for batch in _chunks(lines, BATCH_SIZE):
+        raw_items.extend(_translate_batch(batch, client, model))
 
     cleaned = []
-    for item in results:
+    for item in raw_items:
         if not isinstance(item, dict):
             continue
         try:
