@@ -49,8 +49,10 @@ def _translate_batch(batch, client, model, name_readings=None, usage=None, price
                 {"role": "user", "content": user_message},
             ],
             "temperature": 0.4,
-            "max_tokens": 8192,
+            "max_tokens": 32768,
         }
+        if model.startswith("deepseek-v4"):
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         try:
             response = client.chat.completions.create(**kwargs)
             finish_reason = str(getattr(response.choices[0], "finish_reason", "") or "").lower()
@@ -113,7 +115,17 @@ def _retry_single_translate(lines, client, model, name_readings, results, failed
             if failed_out is not None:
                 failed_out.append(line.get("index"))
 
-def _process_translate_batch(batch, client, model, name_readings, cache=None, usage=None, failed_out=None, prices=None, budget=None):
+def _handle_translate_chunk_retry(chunk, client, model, name_readings, out, failed_out, cache, usage, prices, budget, depth):
+    """批量结果缺行或解析失败时，先拆半重试，最后才逐句兜底。"""
+    if len(chunk) > SPLIT_MIN_LINES and depth < MAX_BATCH_SPLIT_DEPTH:
+        mid = len(chunk) // 2
+        for part in (chunk[:mid], chunk[mid:]):
+            out.extend(_process_translate_batch(part, client, model, name_readings, cache, usage, failed_out, prices, budget, _depth=depth + 1))
+    else:
+        out.extend(_process_translate_batch(chunk, client, model, name_readings, cache, usage, failed_out, prices, budget, _depth=depth, _final=True))
+
+
+def _process_translate_batch(batch, client, model, name_readings, cache=None, usage=None, failed_out=None, prices=None, budget=None, _depth=0, _final=False):
     """处理一个批次：缓存命中 / 整批调用；解析类失败才做单句重试，API/网络错误整批标记失败。"""
     norm_items = [
         {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
@@ -135,22 +147,30 @@ def _process_translate_batch(batch, client, model, name_readings, cache=None, us
         batch_results = None
         batch_error = e
     if batch_results is not None:
-        if cache is not None:
-            cache.store(key, batch_results)
         out.extend(batch_results)
         returned_idx = {r.get("index") for r in batch_results}
         missing = [line for line in batch if line.get("index") not in returned_idx]
         if missing:
-            _retry_single_translate(missing, client, model, name_readings, out, failed_out, cache, usage, prices, budget)
+            if _final or _depth >= MAX_BATCH_SPLIT_DEPTH:
+                _retry_single_translate(missing, client, model, name_readings, out, failed_out, cache, usage, prices, budget)
+            else:
+                _handle_translate_chunk_retry(missing, client, model, name_readings, out, failed_out, cache, usage, prices, budget, _depth)
+        elif cache is not None:
+            cache.store(key, batch_results)
     else:
         if _is_soft_parse_error(batch_error):
-            _retry_single_translate(batch, client, model, name_readings, out, failed_out, cache, usage, prices, budget)
+            if _final or _depth >= MAX_BATCH_SPLIT_DEPTH:
+                _retry_single_translate(batch, client, model, name_readings, out, failed_out, cache, usage, prices, budget)
+            else:
+                _handle_translate_chunk_retry(batch, client, model, name_readings, out, failed_out, cache, usage, prices, budget, _depth)
         elif failed_out is not None:
             failed_out.extend(l.get("index") for l in batch if l.get("index") is not None)
     return out
 
 
-ONE_SHOT_MAX_LINES = 250
+ONE_SHOT_MAX_LINES = 120
+MAX_BATCH_SPLIT_DEPTH = 2
+SPLIT_MIN_LINES = 4
 
 
 def _try_translate_one_shot(lines, client, model, name_readings, cache=None, usage=None, prices=None):
@@ -172,7 +192,7 @@ def _try_translate_one_shot(lines, client, model, name_readings, cache=None, usa
         if _is_soft_parse_error(e):
             return []
         raise
-    if cache is not None:
+    if cache is not None and len(out) >= len(lines):
         cache.store(key, out)
     return out
 
@@ -213,7 +233,7 @@ def translate_lines(
     lines: list[dict],
     api_key: str,
     base_url: str = "https://api.deepseek.com",
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     name_readings: list = None,
     cache=None,
     usage=None,

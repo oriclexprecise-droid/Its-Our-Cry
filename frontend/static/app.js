@@ -128,6 +128,7 @@ async function loadConfig() {
     document.getElementById("ai-name").value = cfg.deepseek.name || "DeepSeek";
     document.getElementById("ai-base-url").value = cfg.deepseek.base_url || "";
     document.getElementById("ai-model").value = cfg.deepseek.model || "";
+    syncModelSelect();
   }
   if (cfg.has_api_key) {
     try {
@@ -3755,8 +3756,16 @@ if (logResetBtn) {
 refreshLogs();
 setInterval(refreshLogs, 4000);
 
-const DEEPSEEK_PRESET = { name: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-chat" };
+const DEEPSEEK_PRESET = { name: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-v4-flash" };
+const MODEL_QUICK_OPTIONS = ["deepseek-v4-flash", "deepseek-chat"];
 const AI_CONFIG_KEY = "mygo_ai_config";
+
+function syncModelSelect() {
+  const sel = document.getElementById("ai-model-select");
+  if (!sel) return;
+  const cur = document.getElementById("ai-model").value.trim();
+  sel.value = MODEL_QUICK_OPTIONS.indexOf(cur) >= 0 ? cur : "__custom__";
+}
 
 function loadAIConfigFromStorage() {
   try {
@@ -3771,6 +3780,7 @@ function applyAIConfig(cfg) {
   document.getElementById("ai-name").value = cfg.name || "";
   document.getElementById("ai-base-url").value = cfg.base_url || "";
   document.getElementById("ai-model").value = cfg.model || "";
+  syncModelSelect();
 }
 
 function saveAIConfigToStorage() {
@@ -3976,6 +3986,14 @@ function initClientSegmentConfig() {
 function initAIConfig() {
   const saved = loadAIConfigFromStorage();
   if (saved) applyAIConfig(saved);
+  const modelSelect = document.getElementById("ai-model-select");
+  if (modelSelect) {
+    modelSelect.addEventListener("change", () => {
+      if (modelSelect.value !== "__custom__") {
+        document.getElementById("ai-model").value = modelSelect.value;
+      }
+    });
+  }
   document.getElementById("btn-deepseek-preset").addEventListener("click", () => {
     applyAIConfig(DEEPSEEK_PRESET);
     const status = document.getElementById("ai-config-status");

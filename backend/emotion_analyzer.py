@@ -153,7 +153,7 @@ def _extract_result_list(content):
     """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
     return extract_json_array(content)
 
-def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-chat", lines=None, cache=None, usage=None, prices=None):
+def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None, cache=None, usage=None, prices=None):
     """调用 DeepSeek API 为情绪列表推荐 SoVITS 合成参数（带缓存与用量统计）。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
     if not emotions:
@@ -183,6 +183,8 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
                 "temperature": 0.3,
                 "max_tokens": 2500,
             }
+            if model.startswith("deepseek-v4"):
+                kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
             # 第一次优先用 JSON 模式，第二次退回普通模式
             if attempt == 0:
                 kwargs["response_format"] = {"type": "json_object"}
@@ -280,8 +282,10 @@ def _analyze_batch(batch, client, model, lang, emotions, name_readings, usage=No
                     {"role": "user", "content": user_message},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 8192,
+                "max_tokens": 32768,
             }
+            if model.startswith("deepseek-v4"):
+                kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
             response = client.chat.completions.create(**kwargs)
             finish_reason = str(getattr(response.choices[0], "finish_reason", "") or "").lower()
             content = (response.choices[0].message.content or "").strip()
@@ -344,7 +348,17 @@ def _retry_single_lines(lines, client, model, lang, emotions, name_readings, res
                 failed_out.append(line.get("index"))
 
 
-def _process_analyze_batch(batch, client, model, lang, emotions, name_readings, cache=None, usage=None, failed_out=None, prices=None, budget=None):
+def _handle_analyze_chunk_retry(chunk, client, model, lang, emotions, name_readings, out, failed_out, cache, usage, prices, budget, depth):
+    """批量结果缺行或解析失败时，先拆半重试，最后才逐句兜底。"""
+    if len(chunk) > SPLIT_MIN_LINES and depth < MAX_BATCH_SPLIT_DEPTH:
+        mid = len(chunk) // 2
+        for part in (chunk[:mid], chunk[mid:]):
+            out.extend(_process_analyze_batch(part, client, model, lang, emotions, name_readings, cache, usage, failed_out, prices, budget, _depth=depth + 1))
+    else:
+        out.extend(_process_analyze_batch(chunk, client, model, lang, emotions, name_readings, cache, usage, failed_out, prices, budget, _depth=depth, _final=True))
+
+
+def _process_analyze_batch(batch, client, model, lang, emotions, name_readings, cache=None, usage=None, failed_out=None, prices=None, budget=None, _depth=0, _final=False):
     """处理一个批次：缓存命中 / 整批调用；解析类失败才做单句重试，API/网络错误整批标记失败。"""
     norm_items = [
         {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
@@ -366,22 +380,30 @@ def _process_analyze_batch(batch, client, model, lang, emotions, name_readings, 
         batch_results = None
         batch_error = e
     if batch_results is not None:
-        if cache is not None:
-            cache.store(key, batch_results)
         out.extend(batch_results)
         returned_idx = {r.get("index") for r in batch_results}
         missing = [line for line in batch if line.get("index") not in returned_idx]
         if missing:
-            _retry_single_lines(missing, client, model, lang, emotions, name_readings, out, failed_out, cache, usage, prices, budget)
+            if _final or _depth >= MAX_BATCH_SPLIT_DEPTH:
+                _retry_single_lines(missing, client, model, lang, emotions, name_readings, out, failed_out, cache, usage, prices, budget)
+            else:
+                _handle_analyze_chunk_retry(missing, client, model, lang, emotions, name_readings, out, failed_out, cache, usage, prices, budget, _depth)
+        elif cache is not None:
+            cache.store(key, batch_results)
     else:
         if _is_soft_parse_error(batch_error):
-            _retry_single_lines(batch, client, model, lang, emotions, name_readings, out, failed_out, cache, usage, prices, budget)
+            if _final or _depth >= MAX_BATCH_SPLIT_DEPTH:
+                _retry_single_lines(batch, client, model, lang, emotions, name_readings, out, failed_out, cache, usage, prices, budget)
+            else:
+                _handle_analyze_chunk_retry(batch, client, model, lang, emotions, name_readings, out, failed_out, cache, usage, prices, budget, _depth)
         elif failed_out is not None:
             failed_out.extend(l.get("index") for l in batch if l.get("index") is not None)
     return out
 
 
-ONE_SHOT_MAX_LINES = 500
+ONE_SHOT_MAX_LINES = 150
+MAX_BATCH_SPLIT_DEPTH = 2
+SPLIT_MIN_LINES = 4
 
 
 def _try_analyze_one_shot(lines, client, model, lang, emotions, name_readings, cache=None, usage=None, prices=None):
@@ -403,12 +425,12 @@ def _try_analyze_one_shot(lines, client, model, lang, emotions, name_readings, c
         if _is_soft_parse_error(e):
             return []
         raise
-    if cache is not None:
+    if cache is not None and len(out) >= len(lines):
         cache.store(key, out)
     return out
 
 
-def _run_analyze_batches(batch_lines, client, model, lang, emotions, name_readings, cache=None, usage=None, failed_out=None, prices=None, batch_size=100, budget=None):
+def _run_analyze_batches(batch_lines, client, model, lang, emotions, name_readings, cache=None, usage=None, failed_out=None, prices=None, batch_size=80, budget=None):
     """兜底路径：按批处理（并行），带缓存与失败句单独重试（单句重试有总预算）。"""
     if budget is None:
         budget = [MAX_SINGLE_RETRIES_PER_RUN]
@@ -444,7 +466,7 @@ def analyze_emotions(
     lines,
     api_key,
     base_url="https://api.deepseek.com",
-    model="deepseek-chat",
+    model="deepseek-v4-flash",
     lang="zh",
     emotions=None,
     name_readings=None,
@@ -452,7 +474,7 @@ def analyze_emotions(
     usage=None,
     failed_out=None,
     prices=None,
-    batch_size=100,
+    batch_size=80,
 ):
     """调用 DeepSeek API 分析台词情绪（分批 + 缓存 + 失败句单独重试）。
 
