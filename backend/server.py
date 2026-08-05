@@ -2215,9 +2215,10 @@ def create_app(config_path="config.yaml"):
             idx = e.get("index")
             if isinstance(idx, int) and not isinstance(idx, bool):
                 emotion_map[idx] = e.get("emotion") or "思考"
-        wg["emotions"] = {str(idx): emotion_map.get(idx, "思考") for idx in [d["index"] for d in dialogues]}
+        new_emotions = {str(idx): emotion_map.get(idx, "思考") for idx in [d["index"] for d in dialogues]}
+        new_translations = {}
         if lang == "ja":
-            existing = wg.get("translations") or {}
+            existing = dict(wg.get("translations") or {})
             if config.get("webgal_retranslate_on_analyze", True):
                 missing = lines
             else:
@@ -2249,11 +2250,11 @@ def create_app(config_path="config.yaml"):
                     corrected = _exact_pronunciation(d["text"] if d else "", config.get("pronunciation", []))
                     raw_translation = str(t.get("translation") or "")
                     existing[str(idx)] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation
-            wg["translations"] = existing
-        else:
-            wg["translations"] = {}
+            new_translations = existing
         if state.get("analysis_cancel_seq", -1) >= seq:
             return jsonify({"status": "cancelled"}), 200
+        wg["emotions"] = new_emotions
+        wg["translations"] = new_translations
         return jsonify({"status": "ok", "emotions": wg["emotions"], "translations": wg.get("translations", {}), "ai_usage": usage.stats(), "ai_failed_lines": failed, "ai_incremental": {"analyzed": len(lines), "reused_count": 0}})
 
     @app.route("/api/webgal/analyze/prompt", methods=["POST"])
@@ -2739,9 +2740,9 @@ def create_app(config_path="config.yaml"):
                 "code": "file_exists",
             }), 409
         export_dir.mkdir(parents=True)
+        created = []
         try:
             audio_map = {}
-            created = []
             for d in dialogues:
                 gen = (wg.get("generated") or {}).get(str(d["index"]))
                 if not gen or not Path(gen["path"]).exists():
@@ -2793,6 +2794,18 @@ def create_app(config_path="config.yaml"):
             })
         except Exception as e:
             traceback.print_exc()
+            for f in created:
+                try:
+                    p = Path(f)
+                    if p.exists() and p.is_file():
+                        p.unlink()
+                except Exception:
+                    pass
+            try:
+                if export_dir.exists():
+                    shutil.rmtree(str(export_dir), ignore_errors=True)
+            except Exception:
+                pass
             return jsonify({"error": "导出失败: " + str(e)}), 500
 
     @app.route("/api/line/<int:index>", methods=["PUT"])
@@ -4339,6 +4352,7 @@ def create_app(config_path="config.yaml"):
                 "code": "folder_exists",
             }), 409
         export_dir.mkdir(parents=True)
+        created_files = []
 
         try:
             finalize_output()
@@ -4382,7 +4396,6 @@ def create_app(config_path="config.yaml"):
                 char = state["lines"][idx]["character"]
                 char_indices.setdefault(char, []).append(idx)
 
-            created_files = []
             for char, idx_list in char_indices.items():
                 track = bytearray(total_samples * frame_bytes)
                 has_audio = False
@@ -4439,6 +4452,18 @@ def create_app(config_path="config.yaml"):
             return jsonify({"status": "ok", "folder": str(export_dir), "files": created_files})
         except Exception as e:
             traceback.print_exc()
+            for f in created_files:
+                try:
+                    p = Path(f)
+                    if p.exists() and p.is_file():
+                        p.unlink()
+                except Exception:
+                    pass
+            try:
+                if export_dir.exists():
+                    shutil.rmtree(str(export_dir), ignore_errors=True)
+            except Exception:
+                pass
             return jsonify({"error": "导出失败: " + str(e)}), 500
 
     @app.route("/api/open_folder", methods=["POST"])

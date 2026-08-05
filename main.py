@@ -15,6 +15,11 @@ from backend.server import create_app
 
 
 def main():
+    from single_instance import acquire_single_instance_mutex
+    if not acquire_single_instance_mutex():
+        print("程序已经在运行，请勿重复启动。")
+        return
+
     print("=" * 50)
     print("  MyGO TTS 配音工作台")
     print("=" * 50)

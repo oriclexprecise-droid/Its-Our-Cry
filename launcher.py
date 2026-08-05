@@ -35,6 +35,12 @@ def _is_our_server(port: int) -> bool:
         pass
     return False
 
+def _find_our_server_port():
+    for port in range(5123, 5224):
+        if _is_our_server(port):
+            return port
+    return None
+
 
 def _write_log(root, text):
     try:
@@ -189,6 +195,24 @@ def main():
     _write_log(root, "launcher start: " + str(root))
     os.chdir(str(root))
     sys.path.insert(0, str(root))
+    from single_instance import acquire_single_instance_mutex
+
+    if not acquire_single_instance_mutex():
+        _write_log(root, "another instance already running, skip")
+        existing = _find_our_server_port()
+        if existing is not None:
+            if os.environ.get("MYGO_NO_BROWSER") == "1":
+                print(f"server url: http://127.0.0.1:{existing}/")
+                return
+            _open_desktop_window(f"http://127.0.0.1:{existing}/")
+            return
+        message = "程序已经在运行，请勿重复启动。"
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, message, "It's Our Cry 配音工作台", 0x40 | 0x1000)
+        except Exception:
+            print(message)
+        return
 
     try:
         from backend.server import create_app
