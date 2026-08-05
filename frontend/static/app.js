@@ -149,6 +149,7 @@ async function loadConfig() {
 }
 
 function handleAnalyzeSuccess(data) {
+    const status = document.getElementById("analyze-status");
     if (data.status === "cancelled") {
       status.textContent = "已停止分析";
       status.className = "status-text";
