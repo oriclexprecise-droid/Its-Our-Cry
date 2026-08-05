@@ -29,7 +29,7 @@ from .ai_ops import AiCache, AiUsage
 from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt, convert_channels
 from .translator import translate_lines
-from .manual_ai import build_client_prompt, parse_client_result
+from .manual_ai import build_client_prompt_segments, parse_client_result
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
 from .feedback import read_events, record_event
 from .cleanup import clean_items, scan_cleanable
@@ -1648,7 +1648,7 @@ def create_app(config_path="config.yaml"):
         lines = parse_script(script_text)
         if not lines:
             return jsonify({"error": "no valid lines found"}), 400
-        prompt = build_client_prompt(
+        segments = build_client_prompt_segments(
             lines,
             config["emotions"],
             lang=lang,
@@ -1656,7 +1656,7 @@ def create_app(config_path="config.yaml"):
             characters=[str(l.get("character") or "").strip() for l in lines],
             name_readings=config.get("pronunciation", []),
         )
-        return jsonify({"prompt": prompt})
+        return jsonify({"segments": segments, "prompt": "\n\n".join(s["prompt"] for s in segments)})
 
     @app.route("/api/analyze/import", methods=["POST"])
     def analyze_import():
@@ -2086,7 +2086,7 @@ def create_app(config_path="config.yaml"):
         if mode not in ("analyze", "translate"):
             mode = "analyze"
         lines = [{"index": d["index"], "character": d["character"], "text": d["text"]} for d in dialogues]
-        prompt = build_client_prompt(
+        segments = build_client_prompt_segments(
             lines,
             config["emotions"],
             lang=lang,
@@ -2094,7 +2094,7 @@ def create_app(config_path="config.yaml"):
             characters=[str(d.get("character") or "").strip() for d in dialogues],
             name_readings=config.get("pronunciation", []),
         )
-        return jsonify({"prompt": prompt})
+        return jsonify({"segments": segments, "prompt": "\n\n".join(s["prompt"] for s in segments)})
 
     @app.route("/api/webgal/analyze/import", methods=["POST"])
     def webgal_analyze_import():

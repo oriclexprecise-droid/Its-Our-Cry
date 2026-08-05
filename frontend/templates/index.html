@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260805g">
+<link rel="stylesheet" href="/static/style.css?v=20260805i">
 <style>
 .creator-tip {
   position: fixed;
@@ -147,7 +147,12 @@
           <div class="client-ai-toolbar">
             <button type="button" id="btn-client-prompt" class="btn-secondary btn-small">生成提示词</button>
             <button type="button" id="btn-copy-client-prompt" class="btn-secondary btn-small">复制提示词</button>
-            <span class="client-ai-hint">把提示词发给你的 AI 客户端，再把返回的 JSON 粘贴回来</span>
+            <span class="client-ai-hint">长剧本会按段生成提示词，逐段发送给 AI 客户端，最后把汇总的 JSON 粘贴回来</span>
+          </div>
+          <div class="client-ai-segments hidden" id="client-ai-segments">
+            <button type="button" id="btn-client-seg-prev" class="btn-secondary btn-small">上一段</button>
+            <span id="client-seg-label">第 1 / 1 段</span>
+            <button type="button" id="btn-client-seg-next" class="btn-secondary btn-small">下一段</button>
           </div>
           <textarea id="client-prompt-output" class="client-prompt-output" readonly placeholder="提示词会在这里生成并自动复制..."></textarea>
           <textarea id="client-result-input" class="client-result-input" placeholder="粘贴 AI 返回的 JSON 结果..."></textarea>
@@ -230,7 +235,12 @@
             <button type="button" id="btn-wg-client-prompt" class="btn-secondary btn-small">生成分析提示词</button>
             <button type="button" id="btn-wg-client-translate" class="btn-secondary btn-small">生成翻译提示词</button>
             <button type="button" id="btn-copy-wg-client-prompt" class="btn-secondary btn-small">复制提示词</button>
-            <span class="client-ai-hint">把提示词发给你的 AI 客户端，再把返回的 JSON 粘贴回来</span>
+            <span class="client-ai-hint">长剧本会按段生成提示词，逐段发送给 AI 客户端，最后把汇总的 JSON 粘贴回来</span>
+          </div>
+          <div class="client-ai-segments hidden" id="wg-client-ai-segments">
+            <button type="button" id="btn-wg-client-seg-prev" class="btn-secondary btn-small">上一段</button>
+            <span id="wg-client-seg-label">第 1 / 1 段</span>
+            <button type="button" id="btn-wg-client-seg-next" class="btn-secondary btn-small">下一段</button>
           </div>
           <textarea id="wg-client-prompt-output" class="client-prompt-output" readonly placeholder="提示词会在这里生成并自动复制..."></textarea>
           <textarea id="wg-client-result-input" class="client-result-input" placeholder="粘贴 AI 返回的 JSON 结果..."></textarea>
@@ -473,6 +483,7 @@
           <h3 class="side-section-title">情绪参数模板（SoVITS）</h3>
           <p class="side-hint">按情绪保存 GPT-SoVITS 合成参数，生成时会自动应用到对应情绪的台词。留空表示使用 SoVITS 默认参数。</p>
           <label class="emo-param-toggle"><input type="checkbox" id="cb-enable-emotion-params"> 是否启用当前参数设置</label>
+          <label class="emo-param-toggle"><input type="checkbox" id="cb-auto-suggest-params"> 分析完成后自动生成参数建议</label>
           <div class="btn-row">
             <button type="button" id="btn-suggest-params" class="btn-secondary btn-small">AI 生成建议</button>
             <button type="button" id="btn-save-params" class="btn-secondary btn-small btn-flex">保存模板</button>
@@ -791,7 +802,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260805g"></script>
+<script src="/static/app.js?v=20260805i"></script>
 <script>
 (function () {
   var tips = [

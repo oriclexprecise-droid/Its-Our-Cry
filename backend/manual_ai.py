@@ -1,6 +1,7 @@
 """客户端生成模式的提示词构建与结果解析。"""
 
 import json
+import math
 import re
 
 from .emotion_analyzer import DEFAULT_EMOTION_DESC
@@ -46,8 +47,8 @@ def _collect_name_readings(chars, lines, name_readings=None):
     return readings
 
 
-def build_client_prompt(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None):
-    """构造可粘贴到任意 AI 客户端的提示词，返回严格 JSON 数组。"""
+def _prompt_parts(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None):
+    """构建提示词公共部分（不含台词列表），供整本与分段共用。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
     chars = _collect_characters(lines, characters)
     readings = _collect_name_readings(chars, lines, name_readings)
@@ -96,9 +97,41 @@ def build_client_prompt(lines, emotions, lang="zh", mode="analyze", characters=N
         "4. 如果一句话包含多种情绪，选择最主要的那一种",
         "5. 中文模式或翻译模式下不要返回多余字段",
     ])
+    return parts
+
+
+def build_client_prompt(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None):
+    """构造可粘贴到任意 AI 客户端的整本提示词，返回严格 JSON 数组。"""
+    parts = _prompt_parts(lines, emotions, lang=lang, mode=mode, characters=characters, name_readings=name_readings)
     parts.append("台词：")
     parts.append(build_script_lines(lines))
     return "\n".join(parts)
+
+
+def build_client_prompt_segments(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None, segment_size=60):
+    """把长剧本按行切段（在台词边界截断），每段一个提示词；最后一段让 AI 汇总完整 JSON。"""
+    lines = list(lines or [])
+    if not lines:
+        return []
+    total = max(1, math.ceil(len(lines) / max(1, int(segment_size))))
+    segments = []
+    for i in range(0, len(lines), max(1, int(segment_size))):
+        chunk = lines[i:i + max(1, int(segment_size))]
+        seq = i // max(1, int(segment_size)) + 1
+        parts = _prompt_parts(chunk, emotions, lang=lang, mode=mode, characters=characters, name_readings=name_readings)
+        parts.insert(0, "【第 " + str(seq) + " 段 / 共 " + str(total) + " 段】这是长剧本的分段提示词，请在同一对话里按顺序处理，index 保持原始编号不变。")
+        parts.append("台词：")
+        parts.append(build_script_lines(chunk))
+        if seq < total:
+            parts.extend(["", "本段处理完请先保留结果，不要输出最终 JSON，等我发送下一段。"])
+        else:
+            parts.extend([
+                "",
+                "【最后一段】请先处理本段，然后把前面所有段与本次结果合并成一份完整的 JSON 数组返回。",
+                "要求：包含全部台词，index 保持原始编号不变，按 index 升序排列，不得遗漏、不得重复，只输出这份 JSON。",
+            ])
+        segments.append({"seq": seq, "total": total, "prompt": "\n".join(parts)})
+    return segments
 
 
 def parse_client_result(result_text):

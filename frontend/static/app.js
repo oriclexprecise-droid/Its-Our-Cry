@@ -198,7 +198,7 @@ function handleAnalyzeSuccess(data) {
     if (cancelBtnReset) cancelBtnReset.classList.add("hidden");
     document.getElementById("progress-text").classList.add("hidden");
     refreshHistory();
-    if (!data.reused && !data.emotions_reused && emotionParamsEnabled && state.aiMode !== "manual") suggestEmotionParams();
+    if (!data.reused && !data.emotions_reused && emotionParamsEnabled && emotionParamsAutoSuggest && state.aiMode !== "manual") suggestEmotionParams();
     const issues = data.proofread || [];
     if (issues.length) showProofreadModal(issues);
 }
@@ -311,6 +311,39 @@ function initAiUsagePanel() {
   loadAiUsage();
 }
 
+let clientSegments = [];
+let clientSegmentIndex = 0;
+let wgClientSegments = [];
+let wgClientSegmentIndex = 0;
+
+function renderClientSegment(kind, autoCopy) {
+  const isWg = kind === "wg";
+  const segs = isWg ? wgClientSegments : clientSegments;
+  const out = document.getElementById(isWg ? "wg-client-prompt-output" : "client-prompt-output");
+  const label = document.getElementById(isWg ? "wg-client-seg-label" : "client-seg-label");
+  const segBox = document.getElementById(isWg ? "wg-client-ai-segments" : "client-ai-segments");
+  const prevBtn = document.getElementById(isWg ? "btn-wg-client-seg-prev" : "btn-client-seg-prev");
+  const nextBtn = document.getElementById(isWg ? "btn-wg-client-seg-next" : "btn-client-seg-next");
+  if (!out) return null;
+  if (!segs.length) {
+    out.value = "";
+    if (label) label.textContent = "";
+    if (segBox) segBox.classList.add("hidden");
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
+    return null;
+  }
+  const idx = Math.max(0, Math.min(isWg ? wgClientSegmentIndex : clientSegmentIndex, segs.length - 1));
+  const seg = segs[idx];
+  out.value = seg.prompt;
+  if (label) label.textContent = "第 " + seg.seq + " / " + seg.total + " 段";
+  if (segBox) segBox.classList.remove("hidden");
+  if (prevBtn) prevBtn.disabled = seg.seq <= 1;
+  if (nextBtn) nextBtn.disabled = seg.seq >= seg.total;
+  if (autoCopy) copyTextToClipboard(seg.prompt);
+  return seg;
+}
+
 async function openClientAi() {
   const status = document.getElementById("analyze-status");
   const box = document.getElementById("client-ai-box");
@@ -325,9 +358,13 @@ async function openClientAi() {
   if (out) out.value = "正在生成提示词...";
   try {
     const data = await api("/api/analyze/prompt", { method: "POST", body: JSON.stringify({ text, lang }) });
-    if (out) out.value = data.prompt;
-    await copyTextToClipboard(data.prompt);
-    if (status) { status.textContent = "提示词已生成并复制，请粘贴到你的 AI 客户端"; status.className = "status-text success"; }
+    clientSegments = (data.segments && data.segments.length) ? data.segments : (data.prompt ? [{ seq: 1, total: 1, prompt: data.prompt }] : []);
+    clientSegmentIndex = 0;
+    renderClientSegment("srt", true);
+    if (status) {
+      status.textContent = clientSegments.length > 1 ? "提示词已分 " + clientSegments.length + " 段生成并复制第 1 段，请逐段发送" : "提示词已生成并复制，请粘贴到你的 AI 客户端";
+      status.className = "status-text success";
+    }
     const resultInput = document.getElementById("client-result-input");
     if (resultInput) resultInput.focus();
   } catch (e) {
@@ -362,9 +399,10 @@ async function openWgClientAi(mode) {
   if (out) out.value = "正在生成提示词...";
   try {
     const data = await api("/api/webgal/analyze/prompt", { method: "POST", body: JSON.stringify({ lang: wgCurrentLang(), mode: mode || "analyze" }) });
-    if (out) out.value = data.prompt;
-    await copyTextToClipboard(data.prompt);
-    setWebGalStatus("提示词已生成并复制，请粘贴到你的 AI 客户端", "success");
+    wgClientSegments = (data.segments && data.segments.length) ? data.segments : (data.prompt ? [{ seq: 1, total: 1, prompt: data.prompt }] : []);
+    wgClientSegmentIndex = 0;
+    renderClientSegment("wg", true);
+    setWebGalStatus(wgClientSegments.length > 1 ? "提示词已分 " + wgClientSegments.length + " 段生成并复制第 1 段，请逐段发送" : "提示词已生成并复制，请粘贴到你的 AI 客户端", "success");
   } catch (e) {
     setWebGalStatus(e.message, "error");
   }
@@ -443,6 +481,14 @@ const btnWgClientTranslate = document.getElementById("btn-wg-client-translate");
 if (btnWgClientTranslate) btnWgClientTranslate.addEventListener("click", () => openWgClientAi("translate"));
 const btnWgClientApply = document.getElementById("btn-wg-client-apply");
 if (btnWgClientApply) btnWgClientApply.addEventListener("click", applyWgClientResult);
+const btnClientSegPrev = document.getElementById("btn-client-seg-prev");
+const btnClientSegNext = document.getElementById("btn-client-seg-next");
+if (btnClientSegPrev) btnClientSegPrev.addEventListener("click", () => { clientSegmentIndex = Math.max(0, clientSegmentIndex - 1); renderClientSegment("srt", true); });
+if (btnClientSegNext) btnClientSegNext.addEventListener("click", () => { clientSegmentIndex = Math.min(clientSegments.length - 1, clientSegmentIndex + 1); renderClientSegment("srt", true); });
+const btnWgClientSegPrev = document.getElementById("btn-wg-client-seg-prev");
+const btnWgClientSegNext = document.getElementById("btn-wg-client-seg-next");
+if (btnWgClientSegPrev) btnWgClientSegPrev.addEventListener("click", () => { wgClientSegmentIndex = Math.max(0, wgClientSegmentIndex - 1); renderClientSegment("wg", true); });
+if (btnWgClientSegNext) btnWgClientSegNext.addEventListener("click", () => { wgClientSegmentIndex = Math.min(wgClientSegments.length - 1, wgClientSegmentIndex + 1); renderClientSegment("wg", true); });
 const btnCopyClientPrompt = document.getElementById("btn-copy-client-prompt");
 if (btnCopyClientPrompt) btnCopyClientPrompt.addEventListener("click", async () => {
   const out = document.getElementById("client-prompt-output");
@@ -4486,6 +4532,7 @@ async function resetWebgalMap() {
 
 let emotionParams = {};
 let emotionParamsEnabled = true;
+let emotionParamsAutoSuggest = false;
 let emotionPresets = [];
 
 function initEmotionParams() {
@@ -4497,6 +4544,15 @@ function initEmotionParams() {
   if (resetBtn) resetBtn.addEventListener("click", resetEmotionParams);
   const toggleEl = document.getElementById("cb-enable-emotion-params");
   if (toggleEl) toggleEl.addEventListener("change", toggleEmotionParamsEnabled);
+  const autoEl = document.getElementById("cb-auto-suggest-params");
+  if (autoEl) {
+    emotionParamsAutoSuggest = localStorage.getItem("mygo_auto_suggest_params") === "1";
+    autoEl.checked = emotionParamsAutoSuggest;
+    autoEl.addEventListener("change", () => {
+      emotionParamsAutoSuggest = autoEl.checked;
+      localStorage.setItem("mygo_auto_suggest_params", emotionParamsAutoSuggest ? "1" : "0");
+    });
+  }
   const savePresetBtn = document.getElementById("btn-save-emotion-preset");
   if (savePresetBtn) savePresetBtn.addEventListener("click", saveEmotionPreset);
   const loadPresetBtn = document.getElementById("btn-load-emotion-preset");
