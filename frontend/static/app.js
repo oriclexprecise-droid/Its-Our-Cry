@@ -2998,6 +2998,7 @@ function restoreWebGalSnapshot(snap) {
     if (el) el.classList.remove("hidden");
   });
   renderWebGalLines();
+  renderWebGalCharWarning();
   updateWebGalProgress();
   const openBtn = document.getElementById("btn-webgal-open-export");
   if (openBtn) openBtn.classList.toggle("hidden", !state.webgal.lastExport);
@@ -3108,6 +3109,132 @@ async function syncWebGalState() {
   });
 }
 
+function webgalReservedName(name) {
+  const base = String(name || "").split(".", 1)[0].trim().toUpperCase();
+  return /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(base);
+}
+
+function webgalSuggestedName(name) {
+  const text = String(name || "").trim();
+  if (!text || /^[A-Za-z]:[\\/]/.test(text)) return "";
+  let fixed = text.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_");
+  fixed = fixed.replace(/[. ]+$/g, "");
+  if (!fixed || fixed === "." || fixed === ".." || fixed.length > 64 || webgalReservedName(fixed)) return "";
+  return fixed;
+}
+
+function webgalCharIssue(name) {
+  const text = String(name || "").trim();
+  const bad = [["/", "斜杠 /"], ["\\", "反斜杠 \\"], [":", "冒号 :"], ["*", "星号 *"], ["?", "问号 ?"], ['"', "双引号"], ["<", "尖括号 <"], [">", "尖括号 >"], ["|", "竖线 |"]];
+  let reason = "";
+  if (!text) reason = "角色名为空";
+  else if (text === "." || text === "..") reason = "角色名不能是 . 或 ..";
+  else {
+    for (const [ch, label] of bad) {
+      if (text.indexOf(ch) !== -1) { reason = "角色名包含" + label; break; }
+    }
+  }
+  if (!reason && /[\x00-\x1f]/.test(text)) reason = "角色名包含无法显示的字符";
+  if (!reason && (text.endsWith(".") || text.endsWith(" "))) reason = "角色名不能以 . 或空格结尾";
+  if (!reason && text.length > 64) reason = "角色名过长（最多 64 个字符）";
+  if (!reason && webgalReservedName(text)) reason = "角色名是 Windows 保留名";
+  return reason ? { safe: false, reason, suggested: webgalSuggestedName(text) } : { safe: true, reason: "", suggested: "" };
+}
+
+function webgalCharIssues() {
+  return (state.webgal.dialogues || []).map(d => {
+    const r = webgalCharIssue(d.character);
+    return r.safe ? null : { index: d.index, name: d.character, reason: r.reason, suggested: r.suggested };
+  }).filter(Boolean);
+}
+
+function renderWebGalCharWarning() {
+  const box = document.getElementById("webgal-char-warning");
+  if (!box) return;
+  const issues = webgalCharIssues();
+  if (!issues.length) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+  const rows = issues.map(it => {
+    const manual = !it.suggested;
+    return '<div class="wcw-row">'
+      + '<span>#' + (it.index + 1) + '</span>'
+      + '<span class="wcw-name">' + esc(it.name) + '</span>'
+      + '<span class="wcw-reason">' + esc(it.reason) + '</span>'
+      + '<input type="text" class="wcw-input" data-index="' + it.index + '" value="' + esc(it.suggested || it.name) + '" placeholder="' + (manual ? "请手动修改" : "修改后回车应用") + '">'
+      + (manual ? '<span class="wcw-manual">需手动修改</span>' : '')
+      + '<button type="button" class="btn-secondary btn-small wcw-apply" data-index="' + it.index + '">应用</button>'
+      + '</div>';
+  }).join("");
+  box.innerHTML = '<div class="wcw-title">以下角色名不能安全地用作文件夹/文件名，请修复后再生成或导出：</div>'
+    + '<div class="wcw-actions"><button type="button" id="btn-wcw-fix-all" class="btn-secondary btn-small">一键修复</button>'
+    + '<span class="wcw-hint">一键修复会把非法符号替换为 _；需手动修改的请逐条处理</span></div>'
+    + rows;
+  box.classList.remove("hidden");
+  const fixAll = box.querySelector("#btn-wcw-fix-all");
+  if (fixAll) fixAll.addEventListener("click", applyWebGalCharFixAll);
+  box.querySelectorAll(".wcw-apply").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.index, 10);
+      const input = box.querySelector('.wcw-input[data-index="' + idx + '"]');
+      if (input) applyWebGalCharFix(idx, input.value);
+    });
+  });
+  box.querySelectorAll(".wcw-input").forEach(input => {
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        const idx = parseInt(input.dataset.index, 10);
+        applyWebGalCharFix(idx, input.value);
+      }
+    });
+  });
+}
+
+async function applyWebGalCharFix(idx, rawName) {
+  const name = String(rawName || "").trim();
+  const d = (state.webgal.dialogues || []).find(x => x.index === idx);
+  if (!d) return;
+  const r = webgalCharIssue(name);
+  if (!r.safe) {
+    setWebGalStatus("第 " + (idx + 1) + " 行角色名仍不合法：" + r.reason, "error");
+    return;
+  }
+  if (name === d.character) { renderWebGalCharWarning(); return; }
+  try {
+    await api("/api/webgal/update", { method: "POST", body: JSON.stringify({ updates: [{ index: idx, character: name }] }) });
+    d.character = name;
+    renderWebGalLines();
+    renderWebGalCharWarning();
+    pushWebGalHistory();
+    setWebGalStatus("已修复第 " + (idx + 1) + " 行角色名：" + name, "success");
+  } catch (e) {
+    setWebGalStatus("角色名保存失败: " + e.message, "error");
+    renderWebGalCharWarning();
+  }
+}
+
+async function applyWebGalCharFixAll() {
+  const updates = [];
+  webgalCharIssues().forEach(it => {
+    if (!it.suggested) return;
+    const d = (state.webgal.dialogues || []).find(x => x.index === it.index);
+    if (d && d.character !== it.suggested) updates.push({ index: it.index, character: it.suggested });
+  });
+  if (!updates.length) { renderWebGalCharWarning(); return; }
+  try {
+    await api("/api/webgal/update", { method: "POST", body: JSON.stringify({ updates }) });
+    updates.forEach(u => {
+      const d = (state.webgal.dialogues || []).find(x => x.index === u.index);
+      if (d) d.character = u.character;
+    });
+    renderWebGalLines();
+    renderWebGalCharWarning();
+    pushWebGalHistory();
+    setWebGalStatus("已一键修复 " + updates.length + " 个角色名，剩余需手动修改的请逐条处理", "success");
+  } catch (e) {
+    setWebGalStatus("一键修复失败: " + e.message, "error");
+    renderWebGalCharWarning();
+  }
+}
+
 async function parseWebGal() {
   if (state.webgal.generating) { setWebGalStatus("生成中，请稍后再解析", "error"); return; }
   const text = (document.getElementById("webgal-input").value || "").trim();
@@ -3140,6 +3267,7 @@ async function parseWebGal() {
       if (el) el.classList.remove("hidden");
     });
     renderWebGalLines();
+    renderWebGalCharWarning();
     pushWebGalHistory();
     if (lang === "ja") {
       if (state.aiMode === "manual") {
@@ -3291,6 +3419,12 @@ async function stopWebGalAnalyze() {
 async function generateWebGal(indices) {
   if (!state.webgal.dialogues.length) { setWebGalStatus("请先解析脚本", "error"); return; }
   if (state.webgal.generating) return;
+  const wgCharIssues = webgalCharIssues();
+  if (wgCharIssues.length) {
+    renderWebGalCharWarning();
+    setWebGalStatus("请先修复 " + wgCharIssues.length + " 个非法角色名后再生成", "error");
+    return;
+  }
   if (wgCurrentLang() === "ja") {
     const missing = state.webgal.dialogues.some(d => !state.webgal.translations[d.index]);
     if (missing) {
@@ -3423,6 +3557,13 @@ async function exportWebGal() {
   const statusEl = document.getElementById("webgal-export-status");
   if (!statusEl) return;
   if (!folderName) { statusEl.textContent = "请输入导出文件夹名称"; statusEl.className = "status-text error"; return; }
+  const wgCharIssues = webgalCharIssues();
+  if (wgCharIssues.length) {
+    renderWebGalCharWarning();
+    statusEl.textContent = "请先修复 " + wgCharIssues.length + " 个非法角色名后再导出";
+    statusEl.className = "status-text error";
+    return;
+  }
   statusEl.textContent = "正在导出...";
   statusEl.className = "status-text";
   const btn = document.getElementById("btn-webgal-export");
@@ -3476,6 +3617,7 @@ async function restoreWebGalProject(scriptText, lang) {
       if (el) el.classList.remove("hidden");
     });
     renderWebGalLines();
+    renderWebGalCharWarning();
     setWebGalStatus("已恢复项目：" + data.count + " 条对话", "success");
   } catch (e) {
     setWebGalStatus("恢复项目失败: " + e.message, "error");

@@ -48,6 +48,73 @@ def short_name_for(character, short_names=None):
     return table.get(character) or character
 
 
+def dir_component_error(name):
+    """返回角色名作为目录/文件名的安全校验错误；安全时返回 None。"""
+    text = str(name or "").strip()
+    if not text:
+        return "角色名为空"
+    if text in (".", ".."):
+        return "角色名不能是 . 或 .."
+    for ch, label in (
+        ("/", "斜杠 /"),
+        ("\\", "反斜杠 \\"),
+        (":", "冒号 :"),
+        ("*", "星号 *"),
+        ("?", "问号 ?"),
+        ('"', "双引号"),
+        ("<", "尖括号 <"),
+        (">", "尖括号 >"),
+        ("|", "竖线 |"),
+    ):
+        if ch in text:
+            return f"角色名包含{label}"
+    if re.search(r"[\x00-\x1f]", text):
+        return "角色名包含无法显示的字符"
+    if text.endswith(".") or text.endswith(" "):
+        return "角色名不能以 . 或空格结尾"
+    if len(text) > 64:
+        return "角色名过长（最多 64 个字符）"
+    base = text.split(".", 1)[0].strip()
+    if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$", base, re.IGNORECASE):
+        return f"角色名「{text}」是 Windows 保留名"
+    return None
+
+
+def safe_dir_component(name):
+    """生成可安全用作目录/文件名的角色名；无法自动修复时返回空字符串。"""
+    text = str(name or "").strip()
+    if not text:
+        return ""
+    if re.match(r"^[A-Za-z]:[\\/]", text):
+        return ""
+    text = re.sub(r"[\\/:*?\"<>|\x00-\x1f]+", "_", text)
+    text = text.rstrip(" .")
+    if not text or text in (".", ".."):
+        return ""
+    if len(text) > 64:
+        return ""
+    base = text.split(".", 1)[0].strip()
+    if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$", base, re.IGNORECASE):
+        return ""
+    return text
+
+
+def dialogue_name_issues(dialogues):
+    """返回角色名不能安全用作目录时的逐行问题列表。"""
+    issues = []
+    for d in dialogues or []:
+        name = str(d.get("character") or "").strip()
+        reason = dir_component_error(name)
+        if reason:
+            issues.append({
+                "index": d.get("index"),
+                "name": name,
+                "reason": reason,
+                "suggested": safe_dir_component(name),
+            })
+    return issues
+
+
 def _normalize_emotion_map(emotion_map):
     table = {}
     for k, v in (emotion_map or {}).items():

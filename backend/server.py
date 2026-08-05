@@ -33,7 +33,7 @@ from .manual_ai import build_client_prompt_segments, parse_client_result
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download, PIP_INDEX_MIRROR, PIP_INDEX_OFFICIAL
 from .feedback import read_events, record_event
 from .cleanup import clean_items, scan_cleanable
-from .webgal import DEFAULT_EMOTION_MAP, dialogue_summary, parse_script as parse_webgal_script, render_script, short_name_for
+from .webgal import DEFAULT_EMOTION_MAP, dialogue_name_issues, dialogue_summary, dir_component_error, parse_script as parse_webgal_script, render_script, safe_dir_component, short_name_for
 
 
 DEFAULT_INTERVAL = 0.5
@@ -2029,6 +2029,7 @@ def create_app(config_path="config.yaml"):
             "count": len(dialogues),
             "lang": lang,
             "dialogues": [dialogue_summary(d) for d in dialogues],
+            "char_issues": dialogue_name_issues(dialogues),
         })
 
     @app.route("/api/webgal/sync", methods=["POST"])
@@ -2052,6 +2053,34 @@ def create_app(config_path="config.yaml"):
         state["webgal"] = wg
         state["script"] = str(wg.get("source") or state.get("script", ""))
         return jsonify({"status": "ok"})
+
+    @app.route("/api/webgal/update", methods=["POST"])
+    def webgal_update():
+        wg = state.get("webgal") or {}
+        dialogues = wg.get("dialogues") or []
+        data = request.get_json(silent=True) or {}
+        updates = data.get("updates") or []
+        if not isinstance(updates, list):
+            return jsonify({"error": "更新格式不正确"}), 400
+        by_index = {d["index"]: d for d in dialogues}
+        applied = []
+        for u in updates:
+            try:
+                idx = int(u.get("index"))
+            except (TypeError, ValueError):
+                return jsonify({"error": "台词序号不正确"}), 400
+            char = str(u.get("character") or "").strip()
+            if not char:
+                return jsonify({"error": f"第 {idx + 1} 行角色名不能为空"}), 400
+            err = dir_component_error(char)
+            if err:
+                return jsonify({"error": f"第 {idx + 1} 行角色名「{char}」{err}，请修正后再保存", "code": "unsafe_character_name"}), 400
+            d = by_index.get(idx)
+            if d is None:
+                return jsonify({"error": f"第 {idx + 1} 行不存在"}), 400
+            d["character"] = char
+            applied.append({"index": idx, "character": char})
+        return jsonify({"status": "ok", "applied": applied})
 
     @app.route("/api/webgal/translate", methods=["POST"])
     def webgal_translate():
@@ -2293,6 +2322,30 @@ def create_app(config_path="config.yaml"):
         requested = [i for i in requested if isinstance(i, int) and any(d["index"] == i for d in dialogues)]
         if not requested:
             return jsonify({"error": "没有可生成的台词"}), 400
+
+        if psy_voice and psy_character:
+            psy_err = dir_component_error(psy_character)
+            if psy_err:
+                return jsonify({"error": "心理活动配音角色名" + psy_err + "，请修正后再生成", "code": "unsafe_character_name"}), 400
+        char_issues = []
+        for idx in requested:
+            d = next(x for x in dialogues if x["index"] == idx)
+            char_name = psy_character if (d.get("is_psy") and psy_voice and psy_character) else (d.get("character") or "")
+            err = dir_component_error(char_name)
+            if err:
+                char_issues.append({
+                    "index": idx,
+                    "name": char_name,
+                    "reason": err,
+                    "suggested": safe_dir_component(char_name),
+                })
+        if char_issues:
+            detail = "、".join(f"#{it['index'] + 1}「{it['name']}」" for it in char_issues)
+            return jsonify({
+                "error": "以下角色名不能作为文件名，请先修复后再生成：" + detail,
+                "code": "unsafe_character_name",
+                "issues": char_issues,
+            }), 400
 
         for d in dialogues:
             d["emotion"] = str(emotions.get(str(d["index"])) or d.get("emotion") or "思考")
@@ -2591,6 +2644,31 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "请先解析脚本"}), 400
         if wg.get("generating"):
             return jsonify({"error": "生成中，请稍后再导出"}), 409
+        psy_voice = bool(wg.get("psyVoice"))
+        psy_character = str(wg.get("psyCharacter") or "").strip()
+        char_issues = []
+        seen = set()
+        for d in dialogues:
+            char_name = psy_character if (d.get("is_psy") and psy_voice and psy_character) else (d.get("character") or "")
+            if char_name in seen:
+                continue
+            seen.add(char_name)
+            err = dir_component_error(char_name)
+            if err:
+                char_issues.append({
+                    "index": d["index"],
+                    "name": char_name,
+                    "reason": err,
+                    "suggested": safe_dir_component(char_name),
+                })
+        if char_issues:
+            detail = "、".join(f"#{it['index'] + 1}「{it['name']}」" for it in char_issues)
+            return jsonify({
+                "error": "以下角色名不能作为导出目录名，请先修复后再导出：" + detail,
+                "code": "unsafe_character_name",
+                "issues": char_issues,
+            }), 400
+
         data = request.get_json(silent=True) or {}
         folder_name, folder_err = _export_folder_name(data.get("folder_name"))
         if folder_err:
