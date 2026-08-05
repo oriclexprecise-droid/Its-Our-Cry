@@ -2315,6 +2315,7 @@ def create_app(config_path="config.yaml"):
                 "voiced": len(audio_map),
                 "unvoiced": len(unvoiced),
                 "audio_copy_dir": str(Path(output_dir)) if output_dir else "",
+                "script": output_script,
             })
         except Exception as e:
             traceback.print_exc()

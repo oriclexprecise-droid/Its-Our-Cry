@@ -354,6 +354,35 @@ const btnWgClientTranslate = document.getElementById("btn-wg-client-translate");
 if (btnWgClientTranslate) btnWgClientTranslate.addEventListener("click", () => openWgClientAi("translate"));
 const btnWgClientApply = document.getElementById("btn-wg-client-apply");
 if (btnWgClientApply) btnWgClientApply.addEventListener("click", applyWgClientResult);
+const btnCopyClientPrompt = document.getElementById("btn-copy-client-prompt");
+if (btnCopyClientPrompt) btnCopyClientPrompt.addEventListener("click", async () => {
+  const out = document.getElementById("client-prompt-output");
+  const status = document.getElementById("analyze-status");
+  if (!out || !out.value) {
+    if (status) { status.textContent = "还没有可复制的提示词"; status.className = "status-text error"; }
+    return;
+  }
+  await copyTextToClipboard(out.value);
+  if (status) { status.textContent = "提示词已复制"; status.className = "status-text success"; }
+});
+const btnCopyWgClientPrompt = document.getElementById("btn-copy-wg-client-prompt");
+if (btnCopyWgClientPrompt) btnCopyWgClientPrompt.addEventListener("click", async () => {
+  const out = document.getElementById("wg-client-prompt-output");
+  if (!out || !out.value) { setWebGalStatus("还没有可复制的提示词", "error"); return; }
+  await copyTextToClipboard(out.value);
+  setWebGalStatus("提示词已复制", "success");
+});
+const btnCopyWebGalScript = document.getElementById("btn-copy-webgal-script");
+if (btnCopyWebGalScript) btnCopyWebGalScript.addEventListener("click", async () => {
+  const out = document.getElementById("webgal-script-output");
+  const statusEl = document.getElementById("webgal-export-status");
+  if (!out || !out.value) {
+    if (statusEl) { statusEl.textContent = "还没有可复制的脚本"; statusEl.className = "status-text error"; }
+    return;
+  }
+  await copyTextToClipboard(out.value);
+  if (statusEl) { statusEl.textContent = "脚本已复制"; statusEl.className = "status-text success"; }
+});
 
 const btnUndoEl = document.getElementById("btn-undo");
 const btnRedoEl = document.getElementById("btn-redo");
@@ -3256,6 +3285,12 @@ async function exportWebGal() {
     statusEl.textContent = msg;
     statusEl.className = "status-text success";
     toast("WebGaL 导出完成", "success");
+    const scriptBlock = document.getElementById("webgal-script-block");
+    const scriptOut = document.getElementById("webgal-script-output");
+    if (scriptBlock && scriptOut) {
+      scriptOut.value = data.script || "";
+      scriptBlock.classList.remove("hidden");
+    }
     refreshRecentList();
   } catch (e) {
     statusEl.textContent = "导出失败: " + e.message;

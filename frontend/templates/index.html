@@ -119,6 +119,7 @@
         <div id="client-ai-box" class="client-ai-box hidden">
           <div class="client-ai-toolbar">
             <button type="button" id="btn-client-prompt" class="btn-secondary btn-small">生成提示词</button>
+            <button type="button" id="btn-copy-client-prompt" class="btn-secondary btn-small">复制提示词</button>
             <span class="client-ai-hint">把提示词发给你的 AI 客户端，再把返回的 JSON 粘贴回来</span>
           </div>
           <textarea id="client-prompt-output" class="client-prompt-output" readonly placeholder="提示词会在这里生成并自动复制..."></textarea>
@@ -201,6 +202,7 @@
           <div class="client-ai-toolbar">
             <button type="button" id="btn-wg-client-prompt" class="btn-secondary btn-small">生成分析提示词</button>
             <button type="button" id="btn-wg-client-translate" class="btn-secondary btn-small">生成翻译提示词</button>
+            <button type="button" id="btn-copy-wg-client-prompt" class="btn-secondary btn-small">复制提示词</button>
             <span class="client-ai-hint">把提示词发给你的 AI 客户端，再把返回的 JSON 粘贴回来</span>
           </div>
           <textarea id="wg-client-prompt-output" class="client-prompt-output" readonly placeholder="提示词会在这里生成并自动复制..."></textarea>
@@ -254,6 +256,13 @@
         </div>
         <button id="btn-webgal-open-export" class="btn-secondary hidden">打开导出文件夹</button>
         <span id="webgal-export-status" class="status-text"></span>
+        <div id="webgal-script-block" class="export-script-block hidden">
+          <div class="client-ai-toolbar">
+            <span class="client-ai-hint">生成的 script.txt</span>
+            <button type="button" id="btn-copy-webgal-script" class="btn-secondary btn-small">复制脚本</button>
+          </div>
+          <textarea id="webgal-script-output" class="client-prompt-output" readonly placeholder="导出后生成的脚本会显示在这里"></textarea>
+        </div>
       </div>
     </section>
   </main>
