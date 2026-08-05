@@ -3380,6 +3380,64 @@ function initWebGal() {
   populateWebGalPsyCharacters();
   resetWebGalProject();
 }
+function renderAgreementItems(items) {
+  const box = document.getElementById("agreement-text");
+  if (!box) return;
+  box.innerHTML = "";
+  (items || []).forEach(item => {
+    const wrap = document.createElement("div");
+    wrap.className = "agreement-item";
+    const h4 = document.createElement("h4");
+    h4.textContent = item.title || "";
+    const p = document.createElement("p");
+    p.textContent = item.body || "";
+    wrap.appendChild(h4);
+    wrap.appendChild(p);
+    box.appendChild(wrap);
+  });
+}
+
+async function initAgreement() {
+  const modal = document.getElementById("agreement-modal");
+  if (!modal) return;
+  let data;
+  try {
+    data = await api("/api/agreement", { timeout: 8000 });
+  } catch (e) {
+    renderAgreementItems([{ title: "无法加载协议", body: "本地服务未正常响应，请确认程序已启动后重试。" }]);
+    modal.classList.remove("hidden");
+    throw e;
+  }
+  if (data && data.accepted) return;
+  renderAgreementItems((data && data.text) || []);
+  modal.classList.remove("hidden");
+  const accepted = await new Promise(resolve => {
+    const acceptBtn = document.getElementById("btn-agreement-accept");
+    const declineBtn = document.getElementById("btn-agreement-decline");
+    const onAccept = async () => {
+      acceptBtn.disabled = true;
+      declineBtn.disabled = true;
+      try {
+        await api("/api/agreement/accept", { method: "POST", timeout: 10000 });
+        modal.classList.add("hidden");
+        resolve(true);
+      } catch (e) {
+        acceptBtn.disabled = false;
+        declineBtn.disabled = false;
+        await showAlertModal("保存协议状态失败：" + (e.message || String(e)));
+      }
+    };
+    acceptBtn.addEventListener("click", onAccept);
+    declineBtn.addEventListener("click", () => resolve(false));
+  });
+  if (!accepted) {
+    renderAgreementItems([{ title: "感谢你的查看", body: "已选择不同意协议，请关闭本窗口退出程序。" }]);
+    const actions = modal.querySelector(".modal-actions");
+    if (actions) actions.style.display = "none";
+    try { window.close(); } catch (e) {}
+  }
+}
+
 function initSplash() {
 
   const overlay = document.getElementById("splash-overlay");
@@ -3401,6 +3459,9 @@ function initSplash() {
   if (promise) promise.catch(close);
 }
 initSplash();
+initAgreement().catch(err => {
+  console.error("初始化被用户协议流程中断", err);
+});
 initDeployFlow();
 initCleanSpace();
 loadConfig();

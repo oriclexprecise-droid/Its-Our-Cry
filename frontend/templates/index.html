@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260805d">
+<link rel="stylesheet" href="/static/style.css?v=20260805e">
 <style>
 .creator-tip {
   position: fixed;
@@ -647,6 +647,17 @@
 </div>
 <a id="bili-float" class="bili-float" href="https://space.bilibili.com/3493294730381924" target="_blank" rel="noopener">Bilibili</a>
 <a id="qq-float" class="qq-float" href="https://qm.qq.com/q/8DXSwA7ZoQ" target="_blank" rel="noopener" title="It &#39;s Our Cry!!!!! 同人二创群">QQ 群</a>
+<div id="agreement-modal" class="modal-overlay agreement-overlay hidden">
+  <div class="modal-box agreement-box">
+    <h3>用户协议</h3>
+    <p class="agreement-version">首次使用前请仔细阅读以下内容</p>
+    <div id="agreement-text" class="agreement-scroll"></div>
+    <div class="modal-actions">
+      <button id="btn-agreement-decline" class="btn-secondary">不同意并退出</button>
+      <button id="btn-agreement-accept" class="btn-primary">同意并开始使用</button>
+    </div>
+  </div>
+</div>
 <div id="refresh-modal" class="modal-overlay hidden">
   <div class="modal-box">
     <h3>确认刷新</h3>
@@ -753,7 +764,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260805d"></script>
+<script src="/static/app.js?v=20260805e"></script>
 <script>
 (function () {
   var tips = [

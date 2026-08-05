@@ -254,6 +254,19 @@ DEFAULT_EMOTIONS = [
     "生气", "告别", "哭泣", "感动", "决心",
     "悲伤", "认真", "害羞", "微笑", "惊讶", "思考",
 ]
+AGREEMENT_VERSION = "1"
+AGREEMENT_TEXT = [
+    {"title": "服务说明", "body": "It's Our Cry!!!!! 是一款面向 MyGO!!!!!/Ave Mujica 同人二创的配音工作台，提供剧本解析、情绪分析、日语翻译、字幕生成与 GPT-SoVITS 配音等功能。"},
+    {"title": "用户责任", "body": "请对输入内容与生成结果负责：不得用于商业盈利、诽谤、冒充真人、冒充官方或声优，不得发布违法或侵权内容。因使用本工具产生的一切后果由使用者自行承担。"},
+    {"title": "AI 与生成结果", "body": "AI 分析、翻译与配音参数建议存在误差，请以人工核对为准；按设定调用第三方 API 所产生的费用由用户自行承担。"},
+    {"title": "素材与版权", "body": "内置模型、参考音频与背景图仅限在本工具内进行创作使用，不得单独提取、传播、转售或商用。相关角色与作品版权归原版权方所有，本工具与官方无任何关联。"},
+    {"title": "共享义务", "body": "用户自定义预设（情绪参数、纠音词典、脚本情绪映射、参考音频库、角色配置等）应无偿分享，不得售卖；保留作者标注，贡献者将进入感谢名单。"},
+    {"title": "数据与隐私", "body": "API Key 仅在本机加密保存；剧本与音频不会上传开发者服务器；仅在本机记录匿名反馈日志，用于改进工具。"},
+    {"title": "免责声明", "body": "本工具按现状提供，不保证任何生成效果，不承担因使用本工具造成的直接或间接损失。"},
+    {"title": "协议更新", "body": "本协议随版本更新，更新后需要重新确认。"},
+    {"title": "社区与反馈", "body": "欢迎加入同人二创群交流，遇到问题可向开发者反馈，我们会持续优化。"},
+]
+
 
 DEFAULT_MODEL_ALIASES = {
     "MyGO_千早爱音_v2pp": "千早爱音",
@@ -1080,6 +1093,27 @@ def create_app(config_path="config.yaml"):
     @app.route("/")
     def index():
         return render_template("index.html")
+
+    @app.route("/api/agreement", methods=["GET"])
+    def get_agreement():
+        accepted = str(user_settings.get("agreement_version", "")) == AGREEMENT_VERSION
+        return jsonify({"version": AGREEMENT_VERSION, "text": AGREEMENT_TEXT, "accepted": accepted})
+
+    @app.route("/api/agreement/accept", methods=["POST"])
+    def accept_agreement():
+        try:
+            current = {}
+            if user_settings_path.exists():
+                try:
+                    current = json.loads(user_settings_path.read_text(encoding="utf-8"))
+                except Exception:
+                    current = {}
+            current["agreement_version"] = AGREEMENT_VERSION
+            user_settings_path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+            user_settings["agreement_version"] = AGREEMENT_VERSION
+            return jsonify({"status": "ok"})
+        except Exception as e:
+            return jsonify({"error": "保存协议状态失败: " + str(e)}), 500
 
     @app.route("/api/config", methods=["GET"])
     def get_config():

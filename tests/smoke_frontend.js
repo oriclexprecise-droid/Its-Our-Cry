@@ -17,6 +17,11 @@ function check(name, ok, detail) {
   page.on('pageerror', e => check('page has no JS error', false, e.message));
   try {
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#agreement-modal', { timeout: 8000 }).catch(() => {});
+    if (await page.locator('#agreement-modal:not(.hidden)').count()) {
+      await page.click('#btn-agreement-accept');
+      await page.waitForSelector('#agreement-modal.hidden', { timeout: 8000 });
+    }
     await page.waitForSelector('#btn-new-project', { timeout: 15000 });
 
     // SRT workbench + client generation
