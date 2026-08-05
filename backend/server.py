@@ -30,7 +30,7 @@ from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt, convert_channels
 from .translator import translate_lines
 from .manual_ai import build_client_prompt_segments, parse_client_result
-from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
+from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download, PIP_INDEX_MIRROR, PIP_INDEX_OFFICIAL
 from .feedback import read_events, record_event
 from .cleanup import clean_items, scan_cleanable
 from .webgal import DEFAULT_EMOTION_MAP, dialogue_summary, parse_script as parse_webgal_script, render_script, short_name_for
@@ -248,6 +248,45 @@ def _deploy_target_error(target_path, project_root):
     except Exception:
         pass
     return None
+
+
+def _alternate_pip_command(cmd):
+    try:
+        idx = cmd.index("--index-url")
+        current = cmd[idx + 1]
+    except (ValueError, IndexError):
+        return None
+    fallback = PIP_INDEX_OFFICIAL if current == PIP_INDEX_MIRROR else PIP_INDEX_MIRROR
+    alt = list(cmd)
+    alt[idx + 1] = fallback
+    return alt
+
+
+def _run_pip_install(cmd, cmd_index, total_cmds, state):
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        return False
+    for line in proc.stdout:
+        line = line.rstrip()
+        log = state["deploy_install"]["log"]
+        log.append(line)
+        if len(log) > 300:
+            del log[:len(log) - 300]
+        m = re.search(r"(\d+)%", line)
+        if m:
+            line_pct = min(100, int(m.group(1)))
+            base = (cmd_index - 1) * 100 / total_cmds
+            state["deploy_install"]["progress"] = min(99, round(base + line_pct / total_cmds))
+    return proc.wait() == 0
 
 
 
@@ -4194,31 +4233,16 @@ def create_app(config_path="config.yaml"):
                         state["deploy_install"]["command_index"] = cmd_index
                         state["deploy_install"]["current_packages"] = pkgs
                         state["deploy_install"]["progress"] = round((cmd_index - 1) * 100 / total_cmds)
-                        proc = subprocess.Popen(
-                            cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            text=True,
-                            encoding="utf-8",
-                            errors="replace",
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                        )
-                        for line in proc.stdout:
-                            line = line.rstrip()
-                            log = state["deploy_install"]["log"]
-                            log.append(line)
-                            if len(log) > 300:
-                                del log[:len(log) - 300]
-                            m = re.search(r"(\d+)%", line)
-                            if m:
-                                line_pct = min(100, int(m.group(1)))
-                                base = (cmd_index - 1) * 100 / total_cmds
-                                state["deploy_install"]["progress"] = min(99, round(base + line_pct / total_cmds))
-                        proc.wait()
-                        if proc.returncode != 0:
-                            state["deploy_install"]["success"] = False
-                            state["deploy_install"]["progress"] = round((cmd_index - 1) * 100 / total_cmds)
-                            return
+                        ok = _run_pip_install(cmd, cmd_index, total_cmds, state)
+                        if not ok:
+                            alt = _alternate_pip_command(cmd)
+                            if alt is not None:
+                                state["deploy_install"]["log"].append("当前依赖源下载失败，自动切换备用源重试")
+                                ok = _run_pip_install(alt, cmd_index, total_cmds, state)
+                            if not ok:
+                                state["deploy_install"]["success"] = False
+                                state["deploy_install"]["progress"] = round((cmd_index - 1) * 100 / total_cmds)
+                                return
                         state["deploy_install"]["progress"] = round(cmd_index * 100 / total_cmds)
                     state["deploy_install"]["success"] = True
                     state["deploy_install"]["progress"] = 100
