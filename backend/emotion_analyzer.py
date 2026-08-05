@@ -100,7 +100,7 @@ def build_param_prompt(emotions, lines=None):
         "你是一个 GPT-SoVITS 语音合成参数调优助手，熟悉文字冒险/二创配音场景。",
         "请为以下每种情绪推荐一组语音合成参数，让语气更贴合情绪。",
         "无论是否有剧本文本、文本多长多短，都必须在能力范围内给出建议：文本为空时按该情绪典型语气给出合理参数；文本过长时按已有片段概括判断，不得拒绝、跳过或返回空结果。",
-        "只输出 JSON 对象，键是情绪名，值是该情绪的参数字典，不要输出其他内容。",
+        "只输出一个 JSON 对象，键必须严格等于下方情绪列表中的情绪名，值是该情绪的参数字典；不得新增、遗漏、合并或改用同义词。不要输出其他内容。",
         "可调参数及范围：",
         "- temperature：0.1-1.5，越大表现力越强但越不稳定",
         "- top_k：1-50，越小发音越稳定",
@@ -113,15 +113,17 @@ def build_param_prompt(emotions, lines=None):
         "- 生气/惊讶：语速略快（1.05-1.15），温度稍高（0.9-1.1）",
         "- 微笑/决心/认真：正常偏稳，温度 0.7-0.9，top_k 10-20",
         "- 告别/感动/思考：中速、稳定，温度 0.7-0.9",
+        "- 情绪列表中未列出具体原则的情绪，按该情绪的字面语义合理推断语气强度，不得偷懒返回默认值或通用值",
         "严格要求：",
         "- 每个情绪都必须给出全部 5 个参数，值必须在范围内",
+        "- 每个情绪都必须与默认值组合有实质差异：至少 temperature、speed_factor 中有一项明显偏离默认值",
         "- 不同情绪至少要在 temperature 或 speed_factor 上体现出明显差异",
         "- 禁止所有情绪返回同一组参数，禁止原样返回默认值组合",
         "示例：",
         '{"哭泣": {"temperature": 0.6, "top_k": 8, "top_p": 0.8, "speed_factor": 0.9, "seed": -1}}',
     ]
     if lines:
-        parts.append("以下为剧本片段（情绪已标注），请结合台词语气调整参数：")
+        parts.append("以下为剧本片段（情绪已标注），请逐条阅读并判断每种情绪在本剧本中的实际语气强度，再据此调整参数；片段中未出现的情绪按典型语气给出合理参数：")
         for line in lines[:60]:
             parts.append("- {character}（{emotion}）：{text}".format(
                 character=line.get("character", ""),
@@ -130,6 +132,35 @@ def build_param_prompt(emotions, lines=None):
             ))
     parts.append("情绪列表：" + "、".join(emotions))
     return "\n".join(parts)
+
+
+def _params_are_degenerate(data, emotions):
+    """AI 偷懒检测：缺失情绪、全部相同或全部等于默认值。"""
+    names = [str(e).strip() for e in emotions if str(e).strip()]
+    missing = [n for n in names if n not in data or not isinstance(data.get(n), dict)]
+    if missing:
+        return "缺少情绪：" + "、".join(missing)
+    combos = set()
+    all_default = True
+    for n in names:
+        p = data[n]
+        temperature = _param_float(p.get("temperature"), 0.1, 1.5, 1.0)
+        top_k = _param_int(p.get("top_k"), 1, 50, 15)
+        top_p = _param_float(p.get("top_p"), 0.1, 1.0, 1.0)
+        speed_factor = _param_float(p.get("speed_factor"), 0.5, 1.5, 1.0)
+        combos.add((round(temperature, 3), round(speed_factor, 3)))
+        if (
+            abs(temperature - GENERIC_DEFAULTS["temperature"]) > 0.001
+            or top_k != GENERIC_DEFAULTS["top_k"]
+            or abs(top_p - GENERIC_DEFAULTS["top_p"]) > 0.001
+            or abs(speed_factor - GENERIC_DEFAULTS["speed_factor"]) > 0.001
+        ):
+            all_default = False
+    if all_default:
+        return "所有情绪都等于默认参数组合"
+    if len(combos) < 2:
+        return "所有情绪的 temperature/speed_factor 完全相同"
+    return None
 
 
 def _extract_json_object(content):
@@ -166,18 +197,19 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
                     {"role": "user", "content": "请为这些情绪给出参数建议。"},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 1500,
+                "max_tokens": 2500,
             }
-            # 第一次优先用 JSON 模式，第二次退回普通模式并放大输出上限
+            # 第一次优先用 JSON 模式，第二次退回普通模式
             if attempt == 0:
                 kwargs["response_format"] = {"type": "json_object"}
-            else:
-                kwargs["max_tokens"] = 2500
             response = client.chat.completions.create(**kwargs)
             content = (response.choices[0].message.content or "").strip()
             if not content:
                 print("[suggest_params] API 返回内容为空 finish_reason=" + str(response.choices[0].finish_reason))
             data = _extract_json_object(content)
+            issue = _params_are_degenerate(data, emotions)
+            if issue:
+                raise ValueError("AI 返回参数不合格（" + issue + "）")
             cleaned = {}
             for name, p in data.items():
                 if not isinstance(p, dict):
