@@ -853,6 +853,14 @@ async function exitToHome() {
   toast("已退出到主页", "success");
 }
 
+function selectProjectType(type) {
+  document.querySelectorAll('input[name="new-project-type"]').forEach(r => { r.checked = (r.value === type); });
+}
+
+function selectProjectAiMode(mode) {
+  document.querySelectorAll('input[name="new-project-ai-mode"]').forEach(r => { r.checked = (r.value === mode); });
+}
+
 function createNewProject() {
   if (state.generating) { toast("生成中，请稍后再新建项目", "error"); return; }
   const modal = document.getElementById("new-project-modal");

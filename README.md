@@ -52,7 +52,7 @@ E:\GPT-SoVITS-v2pro-20250604-nvidia50\GPT-SoVITS-v2pro-20250604-nvidia50\runtime
 
 ## 致谢
 
-感谢一直赖宿室、qwertyuiop 等群友提供的帮助。期待更多人的加入，你的付出无论大小都会被记得。
+感谢一直赖宿室、qwertyuiop 等群友提供的帮助；感谢 [花咲川楽奈](https://space.bilibili.com/40008084/) 提供了 gsv 模型。期待更多人的加入，你的付出无论大小都会被记得。
 
 - B 站：https://space.bilibili.com/3493294730381924
 - QQ 群：https://qm.qq.com/q/8DXSwA7ZoQ
