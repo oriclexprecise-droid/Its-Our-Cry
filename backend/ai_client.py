@@ -3,6 +3,7 @@
 from openai import OpenAI
 
 MAX_AI_ATTEMPTS = 2
+MAX_SINGLE_RETRIES_PER_RUN = 10
 
 
 def create_ai_client(api_key, base_url="https://api.deepseek.com", timeout=60.0):
