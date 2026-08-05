@@ -1,9 +1,11 @@
 """使用 DeepSeek API 分析每句台词的纯本地逻辑。"""
 
+import ast
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from .ai_client import MAX_AI_ATTEMPTS, create_ai_client
-from .ai_ops import estimate_tokens, estimate_tokens_from_usage, make_cache_key
+from .ai_ops import estimate_tokens, estimate_tokens_from_usage, extract_json_array, make_cache_key
 
 DEFAULT_EMOTIONS = [
     "生气", "告别", "哭泣", "感动", "决心",
@@ -138,42 +140,18 @@ def _extract_json_object(content):
         raise ValueError("AI 返回内容中没有 JSON 对象")
     try:
         obj, _ = json.JSONDecoder().raw_decode(text[start:])
-    except Exception as e:
-        raise ValueError("JSON 解析失败：" + str(e))
+    except Exception:
+        try:
+            obj = ast.literal_eval(text[start:])
+        except Exception as e:
+            raise ValueError("JSON 解析失败：" + str(e))
     if not isinstance(obj, dict):
         raise ValueError("AI 返回的不是 JSON 对象")
     return obj
 
 def _extract_result_list(content):
     """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
-    text = (content or "").strip()
-    if not text:
-        raise ValueError("AI 返回内容为空")
-    text = text.replace("```json", "").replace("```", "").strip()
-    start = text.find("[")
-    if start != -1:
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(text[start:])
-            if isinstance(obj, list):
-                return obj
-        except Exception:
-            pass
-    try:
-        obj = json.loads(text)
-    except Exception as e:
-        raise ValueError("AI 返回的不是列表格式: " + str(e))
-    if isinstance(obj, list):
-        return obj
-    if isinstance(obj, dict):
-        for key in ("result", "emotions", "data", "items", "lines"):
-            if isinstance(obj.get(key), list):
-                return obj[key]
-        for v in obj.values():
-            if isinstance(v, list):
-                return v
-        if "emotion" in obj:
-            return [obj]
-    raise ValueError("AI 返回的不是列表格式")
+    return extract_json_array(content)
 
 def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None, cache=None, usage=None, prices=None):
     """调用 DeepSeek API 为情绪列表推荐 SoVITS 合成参数（带缓存与用量统计）。"""
@@ -291,11 +269,8 @@ def _analyze_batch(batch, client, model, lang, emotions, name_readings, usage=No
                     {"role": "user", "content": user_message},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 4096,
+                "max_tokens": 8192,
             }
-            # 第一次优先 JSON 模式，失败时第二次退回普通模式
-            if attempt == 0:
-                kwargs["response_format"] = {"type": "json_object"}
             response = client.chat.completions.create(**kwargs)
             content = (response.choices[0].message.content or "").strip()
             if usage:
@@ -345,6 +320,93 @@ def _retry_single_lines(lines, client, model, lang, emotions, name_readings, res
                 failed_out.append(line.get("index"))
 
 
+def _process_analyze_batch(batch, client, model, lang, emotions, name_readings, cache=None, usage=None, failed_out=None, prices=None):
+    """处理一个批次：缓存命中 / 整批调用 / 失败句单独重试，返回本批原始结果。"""
+    norm_items = [
+        {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
+        for line in batch
+    ]
+    key = make_cache_key("analyze", model, lang, emotions, name_readings, norm_items)
+    if cache is not None:
+        cached = cache.lookup(key)
+        if cached is not None:
+            if usage:
+                usage.record("analyze", model, cache_hit=True, prices=prices)
+            return list(cached)
+    out = []
+    batch_results = None
+    try:
+        batch_results = _analyze_batch(batch, client, model, lang, emotions, name_readings, usage=usage, prices=prices)
+    except Exception:
+        batch_results = None
+    if batch_results is not None:
+        if cache is not None:
+            cache.store(key, batch_results)
+        out.extend(batch_results)
+        returned_idx = {r.get("index") for r in batch_results}
+        missing = [line for line in batch if line.get("index") not in returned_idx]
+        if missing:
+            _retry_single_lines(missing, client, model, lang, emotions, name_readings, out, failed_out, cache, usage, prices)
+    else:
+        _retry_single_lines(batch, client, model, lang, emotions, name_readings, out, failed_out, cache, usage, prices)
+    return out
+
+
+ONE_SHOT_MAX_LINES = 500
+
+
+def _try_analyze_one_shot(lines, client, model, lang, emotions, name_readings, cache=None, usage=None, prices=None):
+    """先按客户端习惯整本一次调用；失败只返回已解析部分，不做逐句兜底。"""
+    norm_items = [
+        {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
+        for line in lines
+    ]
+    key = make_cache_key("analyze", model, lang, emotions, name_readings, norm_items)
+    if cache is not None:
+        cached = cache.lookup(key)
+        if cached is not None:
+            if usage:
+                usage.record("analyze", model, cache_hit=True, prices=prices)
+            return list(cached)
+    try:
+        out = _analyze_batch(lines, client, model, lang, emotions, name_readings, usage=usage, prices=prices)
+    except Exception:
+        return []
+    if cache is not None:
+        cache.store(key, out)
+    return out
+
+
+def _run_analyze_batches(batch_lines, client, model, lang, emotions, name_readings, cache=None, usage=None, failed_out=None, prices=None, batch_size=100):
+    """兜底路径：按批处理（并行），带缓存与失败句单独重试。"""
+    batches = list(_chunks(batch_lines, batch_size))
+    outputs = []
+    if len(batches) > 1:
+        workers = min(3, len(batches))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(
+                    _process_analyze_batch,
+                    b, client, model, lang, emotions, name_readings,
+                    cache, usage, failed_out, prices,
+                )
+                for b in batches
+            ]
+            outputs = [f.result() for f in futures]
+    else:
+        for b in batches:
+            outputs.append(
+                _process_analyze_batch(
+                    b, client, model, lang, emotions, name_readings,
+                    cache, usage, failed_out, prices,
+                )
+            )
+    out = []
+    for o in outputs:
+        out.extend(o)
+    return out
+
+
 def analyze_emotions(
     lines,
     api_key,
@@ -357,7 +419,7 @@ def analyze_emotions(
     usage=None,
     failed_out=None,
     prices=None,
-    batch_size=20,
+    batch_size=100,
 ):
     """调用 DeepSeek API 分析台词情绪（分批 + 缓存 + 失败句单独重试）。
 
@@ -371,34 +433,14 @@ def analyze_emotions(
 
     client = create_ai_client(api_key, base_url)
     results = []
-    for batch in _chunks(lines, batch_size):
-        norm_items = [
-            {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
-            for line in batch
-        ]
-        key = make_cache_key("analyze", model, lang, emotions, name_readings, norm_items)
-        if cache is not None:
-            cached = cache.lookup(key)
-            if cached is not None:
-                results.extend(cached)
-                if usage:
-                    usage.record("analyze", model, cache_hit=True, prices=prices)
-                continue
-        batch_results = None
-        try:
-            batch_results = _analyze_batch(batch, client, model, lang, emotions, name_readings, usage=usage, prices=prices)
-        except Exception:
-            batch_results = None
-        if batch_results is not None:
-            if cache is not None:
-                cache.store(key, batch_results)
-            results.extend(batch_results)
-            returned_idx = {r.get("index") for r in batch_results}
-            missing = [line for line in batch if line.get("index") not in returned_idx]
-            if missing:
-                _retry_single_lines(missing, client, model, lang, emotions, name_readings, results, failed_out, cache, usage, prices)
-        else:
-            _retry_single_lines(batch, client, model, lang, emotions, name_readings, results, failed_out, cache, usage, prices)
+    if len(lines) <= ONE_SHOT_MAX_LINES:
+        results.extend(_try_analyze_one_shot(lines, client, model, lang, emotions, name_readings, cache, usage, prices))
+        covered = {r.get("index") for r in results}
+        missing = [line for line in lines if line.get("index") not in covered]
+        if missing:
+            results.extend(_run_analyze_batches(missing, client, model, lang, emotions, name_readings, cache, usage, failed_out, prices, batch_size))
+    else:
+        results.extend(_run_analyze_batches(lines, client, model, lang, emotions, name_readings, cache, usage, failed_out, prices, batch_size))
 
     fallback = "思考" if "思考" in emotions else emotions[0]
     seen = {}

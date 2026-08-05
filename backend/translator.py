@@ -1,10 +1,11 @@
 """使用 DeepSeek API 将台词翻译成日语。"""
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from .ai_client import MAX_AI_ATTEMPTS, create_ai_client
-from .ai_ops import estimate_tokens, estimate_tokens_from_usage, make_cache_key
+from .ai_ops import estimate_tokens, estimate_tokens_from_usage, extract_json_array, make_cache_key
 
-BATCH_SIZE = 40
+BATCH_SIZE = 80
 
 def _chunks(items, size):
     for i in range(0, len(items), size):
@@ -12,34 +13,7 @@ def _chunks(items, size):
 
 def _extract_json_array(content):
     """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
-    text = (content or "").strip()
-    if not text:
-        raise ValueError("AI returned empty content")
-    text = text.replace("```json", "").replace("```", "").strip()
-    start = text.find("[")
-    if start != -1:
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(text[start:])
-            if isinstance(obj, list):
-                return obj
-        except Exception:
-            pass
-    try:
-        obj = json.loads(text)
-    except Exception as e:
-        raise ValueError("AI returned no JSON array: " + str(e))
-    if isinstance(obj, list):
-        return obj
-    if isinstance(obj, dict):
-        for key in ("result", "translations", "data", "items", "lines"):
-            if isinstance(obj.get(key), list):
-                return obj[key]
-        for v in obj.values():
-            if isinstance(v, list):
-                return v
-        if "translation" in obj:
-            return [obj]
-    raise ValueError("AI returned no JSON array")
+    return extract_json_array(content)
 
 def _translate_batch(batch, client, model, name_readings=None, usage=None, prices=None, attempts=None):
     # 与客户端模式共用同一套提示词，保证角色名单、纠音参考与翻译要求一致
@@ -63,11 +37,8 @@ def _translate_batch(batch, client, model, name_readings=None, usage=None, price
                 {"role": "user", "content": user_message},
             ],
             "temperature": 0.4,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
         }
-        # 第一次优先 JSON 模式，失败时第二次退回普通模式
-        if attempt == 0:
-            kwargs["response_format"] = {"type": "json_object"}
         try:
             response = client.chat.completions.create(**kwargs)
             content = (response.choices[0].message.content or "").strip()
@@ -117,6 +88,93 @@ def _retry_single_translate(lines, client, model, name_readings, results, failed
             if failed_out is not None:
                 failed_out.append(line.get("index"))
 
+def _process_translate_batch(batch, client, model, name_readings, cache=None, usage=None, failed_out=None, prices=None):
+    """处理一个批次：缓存命中 / 整批调用 / 失败句单独重试，返回本批原始结果。"""
+    norm_items = [
+        {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
+        for line in batch
+    ]
+    key = make_cache_key("translate", model, "ja", [], name_readings, norm_items)
+    if cache is not None:
+        cached = cache.lookup(key)
+        if cached is not None:
+            if usage:
+                usage.record("translate", model, cache_hit=True, prices=prices)
+            return list(cached)
+    out = []
+    batch_results = None
+    try:
+        batch_results = _translate_batch(batch, client, model, name_readings, usage=usage, prices=prices)
+    except Exception:
+        batch_results = None
+    if batch_results is not None:
+        if cache is not None:
+            cache.store(key, batch_results)
+        out.extend(batch_results)
+        returned_idx = {r.get("index") for r in batch_results}
+        missing = [line for line in batch if line.get("index") not in returned_idx]
+        if missing:
+            _retry_single_translate(missing, client, model, name_readings, out, failed_out, cache, usage, prices)
+    else:
+        _retry_single_translate(batch, client, model, name_readings, out, failed_out, cache, usage, prices)
+    return out
+
+
+ONE_SHOT_MAX_LINES = 250
+
+
+def _try_translate_one_shot(lines, client, model, name_readings, cache=None, usage=None, prices=None):
+    """先整本一次翻译，失败只返回已解析部分，不做逐句兜底。"""
+    norm_items = [
+        {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
+        for line in lines
+    ]
+    key = make_cache_key("translate", model, "ja", [], name_readings, norm_items)
+    if cache is not None:
+        cached = cache.lookup(key)
+        if cached is not None:
+            if usage:
+                usage.record("translate", model, cache_hit=True, prices=prices)
+            return list(cached)
+    try:
+        out = _translate_batch(lines, client, model, name_readings, usage=usage, prices=prices)
+    except Exception:
+        return []
+    if cache is not None:
+        cache.store(key, out)
+    return out
+
+
+def _run_translate_batches(batch_lines, client, model, name_readings, cache=None, usage=None, failed_out=None, prices=None, batch_size=80):
+    """兜底路径：按批处理（并行），带缓存与失败句单独重试。"""
+    batches = list(_chunks(batch_lines, batch_size))
+    outputs = []
+    if len(batches) > 1:
+        workers = min(3, len(batches))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(
+                    _process_translate_batch,
+                    b, client, model, name_readings,
+                    cache, usage, failed_out, prices,
+                )
+                for b in batches
+            ]
+            outputs = [f.result() for f in futures]
+    else:
+        for b in batches:
+            outputs.append(
+                _process_translate_batch(
+                    b, client, model, name_readings,
+                    cache, usage, failed_out, prices,
+                )
+            )
+    out = []
+    for o in outputs:
+        out.extend(o)
+    return out
+
+
 def translate_lines(
     lines: list[dict],
     api_key: str,
@@ -127,7 +185,7 @@ def translate_lines(
     usage=None,
     failed_out=None,
     prices=None,
-    batch_size: int = 40,
+    batch_size: int = 80,
 ) -> list[dict]:
     """Translate script lines to Japanese via DeepSeek API (分批 + 缓存 + 失败句单独重试)."""
     if not lines:
@@ -135,34 +193,14 @@ def translate_lines(
 
     client = create_ai_client(api_key, base_url)
     raw_items = []
-    for batch in _chunks(lines, batch_size):
-        norm_items = [
-            {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
-            for line in batch
-        ]
-        key = make_cache_key("translate", model, "ja", [], name_readings, norm_items)
-        if cache is not None:
-            cached = cache.lookup(key)
-            if cached is not None:
-                raw_items.extend(cached)
-                if usage:
-                    usage.record("translate", model, cache_hit=True, prices=prices)
-                continue
-        batch_results = None
-        try:
-            batch_results = _translate_batch(batch, client, model, name_readings, usage=usage, prices=prices)
-        except Exception:
-            batch_results = None
-        if batch_results is not None:
-            if cache is not None:
-                cache.store(key, batch_results)
-            raw_items.extend(batch_results)
-            returned_idx = {r.get("index") for r in batch_results}
-            missing = [line for line in batch if line.get("index") not in returned_idx]
-            if missing:
-                _retry_single_translate(missing, client, model, name_readings, raw_items, failed_out, cache, usage, prices)
-        else:
-            _retry_single_translate(batch, client, model, name_readings, raw_items, failed_out, cache, usage, prices)
+    if len(lines) <= ONE_SHOT_MAX_LINES:
+        raw_items.extend(_try_translate_one_shot(lines, client, model, name_readings, cache, usage, prices))
+        covered = {r.get("index") for r in raw_items}
+        missing = [line for line in lines if line.get("index") not in covered]
+        if missing:
+            raw_items.extend(_run_translate_batches(missing, client, model, name_readings, cache, usage, failed_out, prices, batch_size))
+    else:
+        raw_items.extend(_run_translate_batches(lines, client, model, name_readings, cache, usage, failed_out, prices, batch_size))
 
     cleaned = []
     for item in raw_items:

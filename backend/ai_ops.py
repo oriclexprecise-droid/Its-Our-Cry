@@ -1,9 +1,12 @@
 """AI 运行上下文：本地缓存、用量统计、失败句收集。"""
 
+import ast
 import hashlib
 import json
 import math
 import os
+import re
+import threading
 import time
 
 PROMPT_SCHEMA_VERSION = "v1-20260805"
@@ -135,33 +138,83 @@ class AiCache:
 
     def __init__(self, path):
         self.path = path
+        self._lock = threading.RLock()
         self.data = _read_json(path, {"entries": {}})
         if not isinstance(self.data.get("entries"), dict):
             self.data = {"entries": {}}
 
     def lookup(self, key):
-        entry = self.data["entries"].get(key)
-        if isinstance(entry, dict) and "result" in entry:
-            return entry["result"]
-        return None
+        with self._lock:
+            entry = self.data["entries"].get(key)
+            if isinstance(entry, dict) and "result" in entry:
+                return entry["result"]
+            return None
 
     def store(self, key, result):
-        self.data["entries"][key] = {"result": result, "created_at": time.time()}
-        if len(self.data["entries"]) > CACHE_ENTRY_LIMIT:
-            items = sorted(self.data["entries"].items(), key=lambda kv: kv[1].get("created_at", 0))
-            for k, _ in items[: max(1, int(CACHE_ENTRY_LIMIT * 0.1))]:
-                self.data["entries"].pop(k, None)
-        self.save()
+        with self._lock:
+            self.data["entries"][key] = {"result": result, "created_at": time.time()}
+            if len(self.data["entries"]) > CACHE_ENTRY_LIMIT:
+                items = sorted(self.data["entries"].items(), key=lambda kv: kv[1].get("created_at", 0))
+                for k, _ in items[: max(1, int(CACHE_ENTRY_LIMIT * 0.1))]:
+                    self.data["entries"].pop(k, None)
+            self.save()
 
     def clear(self):
-        self.data = {"entries": {}}
-        self.save()
+        with self._lock:
+            self.data = {"entries": {}}
+            self.save()
 
     def size(self):
         return len(self.data.get("entries", {}))
 
     def save(self):
         _write_json(self.path, self.data)
+
+
+def _try_parse_json(text):
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text)
+        return obj
+    except Exception:
+        pass
+    try:
+        return ast.literal_eval(text)
+    except Exception:
+        return None
+
+
+def extract_json_array(content):
+    """健壮提取 AI 返回的 JSON 数组，容忍代码块、包裹对象、全角引号与截断。"""
+    text = (content or "").strip()
+    if not text:
+        raise ValueError("AI returned empty content")
+    text = re.sub(r"^```[A-Za-z0-9_]*\s*", "", text)
+    text = re.sub(r"\s*```$", "", text).strip()
+    text = text.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+    start = text.find("[")
+    if start != -1:
+        tail = text[start:]
+        obj = _try_parse_json(tail)
+        if isinstance(obj, list):
+            return obj
+        # 截断恢复：从末尾逐项补全右括号，尽量保留已完整返回的条目
+        for pos in range(len(tail) - 1, 0, -1):
+            if tail[pos] in "}]":
+                for candidate in (tail[:pos + 1], tail[:pos + 1] + "]"):
+                    obj = _try_parse_json(candidate)
+                    if isinstance(obj, list):
+                        return obj
+    obj = _try_parse_json(text)
+    if isinstance(obj, dict):
+        for key in ("result", "emotions", "translations", "data", "items", "lines", "output"):
+            if isinstance(obj.get(key), list):
+                return obj[key]
+        for v in obj.values():
+            if isinstance(v, list):
+                return v
+        if "emotion" in obj or "translation" in obj:
+            return [obj]
+    raise ValueError("AI returned no JSON array")
 
 
 def make_cache_key(kind, model, lang, emotions, name_readings, items):
