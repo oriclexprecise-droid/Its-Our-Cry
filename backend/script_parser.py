@@ -6,6 +6,30 @@ from typing import Optional
 
 # 匹配 "角色名：台词" 的行
 LINE_PATTERN = re.compile(r"^(.+?)[：:]\s*(.+)$")
+WRONG_SEPARATORS = [
+    ("；", "；"),
+    (";", ";"),
+    ("，", "，"),
+    (",", ","),
+    ("、", "、"),
+    ("|", "|"),
+    ("　", "　"),
+]
+
+
+def describe_skip_reason(raw):
+    """给出无法解析行的原因，帮助用户快速定位格式错误。"""
+    text = str(raw or "").strip()
+    if not text:
+        return "空行"
+    if text.startswith(("：", ":")):
+        return "「：」前缺少角色名"
+    if re.search(r"[：:]\s*$", text):
+        return "「：」后缺少台词"
+    for sep, _name in WRONG_SEPARATORS:
+        if sep in text:
+            return f"角色与台词之间使用了「{sep}」，应为「：」"
+    return "未匹配到“角色：台词”格式（示例：千早爱音：大家好）"
 
 
 def parse_script(text: str) -> list[dict]:

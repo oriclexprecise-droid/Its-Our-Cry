@@ -170,8 +170,8 @@ function handleAnalyzeSuccess(data) {
     renderLines();
     const skipped = data.skipped || [];
     if (skipped.length) {
-      const nums = skipped.slice(0, 6).map(s => "第" + s.line_no + "行").join("、");
-      status.textContent = "已分析 " + data.lines.length + " 条台词；" + skipped.length + " 行格式不对已跳过（" + nums + (skipped.length > 6 ? " 等" : "") + "）";
+      const detail = skipped.slice(0, 3).map(s => "第" + s.line_no + "行：" + (s.reason || "格式不对")).join("；");
+      status.textContent = "已分析 " + data.lines.length + " 条台词；" + skipped.length + " 行格式不对：" + detail + (skipped.length > 3 ? " 等" + skipped.length + " 行" : "");
       status.className = "status-text error";
     } else if (data.translated_only) {
       status.textContent = "情绪已是最新，已补齐日语翻译";

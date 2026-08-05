@@ -23,7 +23,7 @@ from typing import Optional
 import yaml
 from flask import Flask, after_this_request, jsonify, render_template, request, send_file
 
-from .script_parser import find_character_issues, parse_script
+from .script_parser import describe_skip_reason, find_character_issues, parse_script
 from .emotion_analyzer import analyze_emotions, suggest_params
 from .ai_ops import AiCache, AiUsage
 from .tts_engine import get_engine
@@ -1673,7 +1673,7 @@ def create_app(config_path="config.yaml"):
         parsed_line_nos = {line["line_no"] for line in lines}
         for skipped_no, raw in enumerate(raw_lines, start=1):
             if raw.strip() and skipped_no not in parsed_line_nos:
-                skipped.append({"line_no": skipped_no, "text": raw.strip()[:100]})
+                skipped.append({"line_no": skipped_no, "text": raw.strip()[:100], "reason": describe_skip_reason(raw)})
 
         if not reused:
             push_history("日语翻译" if translated_only else "重新分析剧本")
@@ -1773,7 +1773,7 @@ def create_app(config_path="config.yaml"):
         parsed_line_nos = {line["line_no"] for line in lines}
         for skipped_no, raw in enumerate(raw_lines, start=1):
             if raw.strip() and skipped_no not in parsed_line_nos:
-                skipped.append({"line_no": skipped_no, "text": raw.strip()[:100]})
+                skipped.append({"line_no": skipped_no, "text": raw.strip()[:100], "reason": describe_skip_reason(raw)})
         push_history("粘贴 AI 分析结果")
         state["generated"] = {}
         state["time_info"] = []
