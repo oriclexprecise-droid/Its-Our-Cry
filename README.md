@@ -22,6 +22,7 @@ It's Our Cry!!!!! 是一款面向 MyGO!!!!! / Ave Mujica 同人二创的本地�
 本仓库只包含程序源码、配置模板、前端页面与打包脚本，**不包含**角色模型权重与参考音频（约 4GB），这些素材由安装包/网盘分发，避免仓库体积过大。
 
 - 安装包：`release/It-sOurCry-Setup-Inno.exe`
+- 增量更新包：`release/It-sOurCry-Update-Inno.exe`（老用户升级用，覆盖安装，不用重下权重）
 - 需要 GPT-SoVITS 运行时：由应用内“部署”板块引导下载安装
 - AI 分析需要 DeepSeek 或其他 OpenAI 兼容 API Key：在“设置 → API 设置”中填写
 
