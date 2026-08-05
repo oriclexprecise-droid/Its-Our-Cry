@@ -3096,7 +3096,6 @@ async function syncWebGalState() {
       dialogues: wg.dialogues || [],
       emotions: wg.emotions || {},
       translations: wg.translations || {},
-      generated: wg.generated || {},
       failures: wg.failures || {},
       psyVoice: !!wg.psyVoice,
       psyCharacter: wg.psyCharacter || "",

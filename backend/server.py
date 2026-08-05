@@ -1943,7 +1943,17 @@ def create_app(config_path="config.yaml"):
         keys = ("source", "lang", "entries", "dialogues", "emotions", "translations", "generated", "failures", "psyVoice", "psyCharacter", "lastExport")
         for key in keys:
             if key in data:
-                wg[key] = data[key]
+                if key == "generated" and isinstance(data[key], dict):
+                    old_generated = wg.get("generated") or {}
+                    merged = {}
+                    for gk, gv in data[key].items():
+                        if isinstance(gv, dict) and not gv.get("path") and str(gk) in old_generated:
+                            merged[gk] = {**gv, "path": old_generated[str(gk)].get("path")}
+                        else:
+                            merged[gk] = gv
+                    wg[key] = merged
+                else:
+                    wg[key] = data[key]
         state["webgal"] = wg
         state["script"] = str(wg.get("source") or state.get("script", ""))
         return jsonify({"status": "ok"})
@@ -2376,7 +2386,7 @@ def create_app(config_path="config.yaml"):
             "progress": wg.get("progress", {"current": 0, "total": 0}),
             "failures": wg.get("failures", {}),
             "generated": {
-                k: {"duration": v.get("duration")}
+                k: dict(v)
                 for k, v in (wg.get("generated") or {}).items()
             },
         })
@@ -2387,9 +2397,9 @@ def create_app(config_path="config.yaml"):
         gen = (wg.get("generated") or {}).get(str(index))
         if not gen:
             return jsonify({"error": "该台词还没有音频"}), 404
-        path = gen["path"]
-        if not Path(path).exists():
-            found = _find_segment_file(index, "segments")
+        path = gen.get("path") or ""
+        if not path or not Path(path).exists():
+            found = _find_segment_file(index, "webgal")
             if found:
                 path = found
                 gen["path"] = found
@@ -3667,7 +3677,7 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "该台词还没有音频"}), 404
         path = gen["path"]
         if not Path(path).exists():
-            found = _find_segment_file(index, "webgal")
+            found = _find_segment_file(index, "segments")
             if found:
                 path = found
                 gen["path"] = found
