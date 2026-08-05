@@ -85,7 +85,7 @@ emotions:
 deepseek:
   api_key: ""
   base_url: "https://api.deepseek.com"
-  model: "deepseek-v4-flash"
+  model: "deepseek-chat"
 
 tts:
   text_lang: "zh"

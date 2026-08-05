@@ -1164,7 +1164,7 @@ def create_app(config_path="config.yaml"):
             "deepseek": {
                 "name": config["deepseek"].get("name", "DeepSeek"),
                 "base_url": config["deepseek"].get("base_url", "https://api.deepseek.com"),
-                "model": config["deepseek"].get("model", "deepseek-v4-flash"),
+                "model": config["deepseek"].get("model", "deepseek-chat"),
             },
         })
 
@@ -1269,7 +1269,7 @@ def create_app(config_path="config.yaml"):
         data = request.get_json(silent=True) or {}
         api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
         base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
-        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-chat")
         if not api_key:
             return jsonify({"error": "请先配置 DeepSeek API Key"}), 400
         used = [str(e).strip() for e in config.get("emotions") or [] if str(e).strip()]
@@ -1482,7 +1482,7 @@ def create_app(config_path="config.yaml"):
         api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
         lang = data.get("lang", "zh")
         base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
-        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-chat")
 
         if not script_text.strip():
             return jsonify({"error": "script is empty"}), 400
@@ -1751,7 +1751,7 @@ def create_app(config_path="config.yaml"):
         script_text = data.get("text", "")
         api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
         base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
-        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-chat")
 
         if not api_key:
             return jsonify({"error": "please configure DeepSeek API Key"}), 400
@@ -1964,7 +1964,7 @@ def create_app(config_path="config.yaml"):
         if not api_key:
             return jsonify({"error": "please configure DeepSeek API Key"}), 400
         base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
-        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-chat")
         lines = [
             {"index": d["index"], "character": d["character"], "text": d["text"]}
             for d in dialogues
@@ -2016,7 +2016,7 @@ def create_app(config_path="config.yaml"):
         seq = state.get("analysis_seq", 0) + 1
         state["analysis_seq"] = seq
         base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
-        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+        model = data.get("model") or config["deepseek"].get("model", "deepseek-chat")
         lines = [
             {"index": d["index"], "character": d["character"], "text": d["text"]}
             for d in dialogues
@@ -2550,7 +2550,7 @@ def create_app(config_path="config.yaml"):
                         state["analysis_seq"] = seq
                         api_key = data.get("api_key", "") or config["deepseek"]["api_key"]
                         base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
-                        model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
+                        model = data.get("model") or config["deepseek"].get("model", "deepseek-chat")
                         single = {**line, "index": 0}
                         ai_cache_obj = AiCache(str(ai_cache_path))
                         ai_usage_obj = AiUsage(str(ai_usage_path))

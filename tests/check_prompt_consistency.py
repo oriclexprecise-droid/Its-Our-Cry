@@ -79,7 +79,7 @@ def run():
         lines=LINES,
         api_key="test",
         base_url="http://localhost",
-        model="deepseek-v4-flash",
+        model="deepseek-chat",
         lang="zh",
         emotions=EMOTIONS,
         name_readings=READINGS,
@@ -95,7 +95,7 @@ def run():
         lines=LINES,
         api_key="test",
         base_url="http://localhost",
-        model="deepseek-v4-flash",
+        model="deepseek-chat",
         lang="ja",
         emotions=EMOTIONS,
         name_readings=READINGS,
@@ -112,7 +112,7 @@ def run():
         lines=LINES,
         api_key="test",
         base_url="http://localhost",
-        model="deepseek-v4-flash",
+        model="deepseek-chat",
         name_readings=READINGS,
     )
     prompt = system_prompt_of(captured)

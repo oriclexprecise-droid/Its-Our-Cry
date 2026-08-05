@@ -153,7 +153,7 @@ def _extract_result_list(content):
     """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
     return extract_json_array(content)
 
-def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None, cache=None, usage=None, prices=None):
+def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-chat", lines=None, cache=None, usage=None, prices=None):
     """调用 DeepSeek API 为情绪列表推荐 SoVITS 合成参数（带缓存与用量统计）。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
     if not emotions:
@@ -444,7 +444,7 @@ def analyze_emotions(
     lines,
     api_key,
     base_url="https://api.deepseek.com",
-    model="deepseek-v4-flash",
+    model="deepseek-chat",
     lang="zh",
     emotions=None,
     name_readings=None,
