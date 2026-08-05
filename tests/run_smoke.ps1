@@ -14,6 +14,8 @@ if ($hadRecent) { Copy-Item $recent $recentBak -Force }
 
 & $RuntimePython -m py_compile (Join-Path $root 'backend\server.py')
 if ($LASTEXITCODE -ne 0) { throw 'py_compile failed' }
+& $RuntimePython (Join-Path $PSScriptRoot 'check_prompt_consistency.py')
+if ($LASTEXITCODE -ne 0) { throw 'prompt consistency check failed' }
 & $Node --check (Join-Path $PSScriptRoot 'smoke_frontend.js')
 if ($LASTEXITCODE -ne 0) { throw 'node --check failed' }
 

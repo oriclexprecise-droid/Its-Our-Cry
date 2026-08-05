@@ -13,6 +13,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\run_smoke.ps1
 1. New project: SRT / WebGaL card selection, AI mode selection auto-syncs card type.
 2. SRT workbench: client-generation prompt appears.
 3. WebGaL: client-generation prompt appears after parsing the script.
+4. API 情绪分析与日语翻译必须与客户端共用同一套提示词构造器。
 
 ## Notes
 

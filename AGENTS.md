@@ -7,6 +7,7 @@
 - 每完成一轮功能修改，立即 `git add -A` 并 `git commit`，提交信息写清楚改了什么。
 - 用户说“回退”时，优先使用 git 提交历史回退，不要用破坏性命令丢弃没有明确要求丢弃的内容。
 - 任何删除、覆盖、重命名前，先确认路径在项目内，并确保当前状态已有 git 提交或备份。
+- 改动 AI 提示词后，先运行 `tests\check_prompt_consistency.py`（用 GPT-SoVITS runtime python），确认 API 与客户端提示词一致后再提交。
 - 不要把 `output/`、`outputs/`、`work/`、`__pycache__/`、日志文件提交进 git（已在 .gitignore 中）。
 
 ## 运行方式
