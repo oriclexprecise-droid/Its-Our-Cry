@@ -717,6 +717,7 @@ def create_app(config_path="config.yaml"):
     work_dir.mkdir(parents=True, exist_ok=True)
     recent_path = work_dir / "recent_results.json"
     recent_lock = threading.RLock()
+    analysis_lock = threading.RLock()
     raw_auto = user_settings.get("recent_auto_save", True)
     if isinstance(raw_auto, bool):
         recent_auto_save = raw_auto
@@ -796,6 +797,7 @@ def create_app(config_path="config.yaml"):
         "lang": "zh",
         "analysis_seq": 0,
         "analysis_cancel_seq": -1,
+        "analysis_busy_count": 0,
         "generated": {},
         "merged_path": None,
         "srt_path": None,
@@ -869,6 +871,14 @@ def create_app(config_path="config.yaml"):
         state["progress"] = {"current": 0, "total": 0}
         state["srt_only"] = False
 
+    def analysis_start():
+        with analysis_lock:
+            state["analysis_busy_count"] = int(state.get("analysis_busy_count", 0)) + 1
+
+    def analysis_end():
+        with analysis_lock:
+            state["analysis_busy_count"] = max(0, int(state.get("analysis_busy_count", 0)) - 1)
+
     def workbench_state():
         return {
             "lines": copy.deepcopy(state.get("lines", [])),
@@ -881,6 +891,7 @@ def create_app(config_path="config.yaml"):
             "lang": state.get("lang", "zh"),
             "ai_mode": state.get("ai_mode", "api"),
             "project_type": state.get("project_type", "srt"),
+            "analysis_busy": int(state.get("analysis_busy_count", 0)) > 0,
             "config": record_config_snapshot(),
             "webgal": copy.deepcopy(state.get("webgal") or {}),
         }
@@ -1624,6 +1635,7 @@ def create_app(config_path="config.yaml"):
         failed = []
 
         if need_emotion:
+            analysis_start()
             try:
                 temp_lines = []
                 for line in need_emotion:
@@ -1648,6 +1660,8 @@ def create_app(config_path="config.yaml"):
                     project_root=project_root,
                 )
                 return jsonify({"error": "emotion analysis failed: " + str(e)}), 500
+            finally:
+                analysis_end()
 
             if state.get("analysis_cancel_seq", -1) >= seq:
                 return jsonify({"status": "cancelled"}), 200
@@ -1663,6 +1677,7 @@ def create_app(config_path="config.yaml"):
                 line["emotion"] = emotion_map.get(line["index"], fallback_emotion)
 
         if need_translation:
+            analysis_start()
             try:
                 temp_lines = []
                 for line in need_translation:
@@ -1681,6 +1696,8 @@ def create_app(config_path="config.yaml"):
             except Exception as e:
                 traceback.print_exc()
                 return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+            finally:
+                analysis_end()
             if state.get("analysis_cancel_seq", -1) >= seq:
                 return jsonify({"status": "cancelled"}), 200
             translation_map = {}
@@ -1896,6 +1913,7 @@ def create_app(config_path="config.yaml"):
         failed = []
         translations = []
         if missing:
+            analysis_start()
             try:
                 temp_lines = []
                 for line in missing:
@@ -1914,6 +1932,8 @@ def create_app(config_path="config.yaml"):
             except Exception as e:
                 traceback.print_exc()
                 return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+            finally:
+                analysis_end()
 
         if state.get("analysis_cancel_seq", -1) >= seq:
             return jsonify({"status": "cancelled"}), 200
@@ -2109,6 +2129,9 @@ def create_app(config_path="config.yaml"):
         cache = AiCache(str(ai_cache_path))
         usage = AiUsage(str(ai_usage_path))
         failed = []
+        seq = state.get("analysis_seq", 0) + 1
+        state["analysis_seq"] = seq
+        analysis_start()
         try:
             translations = translate_lines(
                 lines=lines,
@@ -2124,6 +2147,10 @@ def create_app(config_path="config.yaml"):
         except Exception as e:
             traceback.print_exc()
             return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+        finally:
+            analysis_end()
+        if state.get("analysis_cancel_seq", -1) >= seq:
+            return jsonify({"status": "cancelled"}), 200
         wg["translations"] = {}
         for t in translations:
             if t.get("index") is None:
@@ -2161,6 +2188,7 @@ def create_app(config_path="config.yaml"):
         cache = AiCache(str(ai_cache_path))
         usage = AiUsage(str(ai_usage_path))
         failed = []
+        analysis_start()
         try:
             emotions = analyze_emotions(
                 lines=lines,
@@ -2178,6 +2206,8 @@ def create_app(config_path="config.yaml"):
         except Exception as e:
             traceback.print_exc()
             return jsonify({"error": "emotion analysis failed: " + str(e)}), 500
+        finally:
+            analysis_end()
         if state.get("analysis_cancel_seq", -1) >= seq:
             return jsonify({"status": "cancelled"}), 200
         emotion_map = {}
@@ -2193,6 +2223,7 @@ def create_app(config_path="config.yaml"):
             else:
                 missing = [l for l in lines if not (existing.get(str(l["index"])) or "").strip()]
             if missing:
+                analysis_start()
                 try:
                     translations = translate_lines(
                         lines=missing,
@@ -2208,6 +2239,8 @@ def create_app(config_path="config.yaml"):
                 except Exception as e:
                     traceback.print_exc()
                     return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+                finally:
+                    analysis_end()
                 for t in translations:
                     if t.get("index") is None:
                         continue
@@ -2486,6 +2519,7 @@ def create_app(config_path="config.yaml"):
                                 break
                             outcome = outcomes.get(job["id"])
                             if outcome is None:
+                                fail(job["id"], f"{job['char']} 批量推理未返回结果文件（子进程异常退出）")
                                 continue
                             if "error" in outcome:
                                 fail(job["id"], f"{job['char']} 生成失败：{str(outcome['error'])[-300:]}")
@@ -2823,6 +2857,7 @@ def create_app(config_path="config.yaml"):
                 old_emotion = line.get("emotion")
                 line["text"] = new_text
                 if data.get("reanalyze", True):
+                    analysis_start()
                     try:
                         seq = state.get("analysis_seq", 0) + 1
                         state["analysis_seq"] = seq
@@ -2848,6 +2883,7 @@ def create_app(config_path="config.yaml"):
                         if state.get("analysis_cancel_seq", -1) >= seq:
                             invalidate_segment()
                             line["emotion"] = old_emotion
+                            line["translated_text"] = ""
                             reanalyze_cancelled = True
                             record_event(
                                 {
@@ -2901,7 +2937,10 @@ def create_app(config_path="config.yaml"):
                             },
                             project_root=project_root,
                         )
+                    finally:
+                        analysis_end()
                 else:
+                    line["translated_text"] = ""
                     invalidate_segment()
                     record_event(
                         {
@@ -3851,6 +3890,7 @@ def create_app(config_path="config.yaml"):
                                 break
                             outcome = outcomes.get(job["id"])
                             if outcome is None:
+                                fail(job["id"], f"{job['char']} 批量推理未返回结果文件（子进程异常退出）")
                                 continue
                             if "error" in outcome:
                                 fail(job["id"], f"{job['char']} 生成失败（仅保留字幕）：{str(outcome['error'])[-300:]}")
@@ -3971,6 +4011,8 @@ def create_app(config_path="config.yaml"):
     def undo_action():
         if state.get("generating"):
             return jsonify({"error": "generation in progress"}), 409
+        if (state.get("webgal") or {}).get("generating"):
+            return jsonify({"error": "WebGaL 生成中，请取消后再撤销"}), 409
         undo = state.get("history_undo", [])
         if not undo:
             return jsonify({"error": "没有可撤销的操作"}), 400
@@ -3987,6 +4029,8 @@ def create_app(config_path="config.yaml"):
     def redo_action():
         if state.get("generating"):
             return jsonify({"error": "generation in progress"}), 409
+        if (state.get("webgal") or {}).get("generating"):
+            return jsonify({"error": "WebGaL 生成中，请取消后再重做"}), 409
         redo = state.get("history_redo", [])
         if not redo:
             return jsonify({"error": "没有可重做的操作"}), 400

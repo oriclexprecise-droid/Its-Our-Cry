@@ -526,6 +526,8 @@ def analyze_emotions(
             continue
         emotion = item.get("emotion")
         if emotion not in emotions:
+            if failed_out is not None and idx not in failed_out:
+                failed_out.append(idx)
             emotion = fallback
         seen[idx] = {"index": idx, "emotion": emotion}
     cleaned = sorted(seen.values(), key=lambda x: x["index"])

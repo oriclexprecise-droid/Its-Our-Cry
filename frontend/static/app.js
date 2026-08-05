@@ -38,6 +38,18 @@ async function api(url, opts = {}) {
   }
 }
 
+async function settleAiBackend() {
+  try { await api("/api/analyze/cancel", { method: "POST", timeout: 8000 }); } catch (e) {}
+  for (let i = 0; i < 120; i++) {
+    try {
+      const st = await api("/api/state", { timeout: 8000 });
+      if (!st.analysis_busy) return true;
+    } catch (e) {}
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return false;
+}
+
 function showConfirmModal(message, options) {
   options = options || {};
   return new Promise(resolve => {
@@ -449,12 +461,15 @@ async function runAnalyze() {
   stopBtn.classList.remove("hidden");
   syncScriptDraft();
   try {
-    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim(), force: document.getElementById("force-reanalyze").checked }), signal: controller.signal });
+    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim(), force: document.getElementById("force-reanalyze").checked }), timeout: 600000, signal: controller.signal });
     handleAnalyzeSuccess(data);
   } catch (e) {
-    if (e.name === "AbortError") {
-      status.textContent = "已停止分析";
+    if (e.name === "AbortError" || e.code === "TIMEOUT") {
+      const timedOut = e.code === "TIMEOUT";
+      status.textContent = timedOut ? "分析超时，正在停止后端分析..." : "已停止分析，正在同步后端...";
       status.className = "status-text";
+      await settleAiBackend();
+      status.textContent = timedOut ? "分析超时，请稍后重新分析" : "已停止分析";
       return;
     }
     status.textContent = e.message;
@@ -630,7 +645,7 @@ function renderLines() {
   const container = document.getElementById("lines-container");
   document.getElementById("line-count").textContent = "共 " + state.lines.length + " 条台词";
   container.innerHTML = state.lines.map((line, i) => {
-    const opts = state.emotions.map(e => '<option value="' + e + '"' + (e === line.emotion ? " selected" : "") + '>' + e + '</option>').join("");
+    const opts = state.emotions.map(e => '<option value="' + esc(e) + '"' + (e === line.emotion ? " selected" : "") + '>' + esc(e) + '</option>').join("");
     const checked = state.selected.has(i) ? " checked" : "";
     const idxCell = state.selectMode
       ? '<label class="idx-check"><input type="checkbox" class="line-check" data-index="' + i + '"' + checked + '>#' + (i + 1) + '</label>'
@@ -766,7 +781,7 @@ function renderLines() {
           api_key: document.getElementById("api-key").value.trim(),
           base_url: document.getElementById("ai-base-url").value.trim(),
           model: document.getElementById("ai-model").value.trim()
-        }), signal: controller.signal });
+        }), timeout: 600000, signal: controller.signal });
         if (res.reanalyze_cancelled) {
           state.lines[idx] = res.line;
           renderLines();
@@ -807,15 +822,21 @@ function renderLines() {
           status.className = "status-text success";
         }
       } catch (err) {
-        if (err.name === "AbortError") {
+        if (err.name === "AbortError" || err.code === "TIMEOUT") {
+          const timedOut = err.code === "TIMEOUT";
+          status.textContent = timedOut ? "分析超时，正在停止后端并保存文本..." : "已停止分析，正在同步后端并保存文本...";
+          status.className = "status-text";
+          await settleAiBackend();
           try {
-            await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ text: newText, emotion: prevEmotion, reanalyze: false }) });
-          } catch (e2) {}
-          state.lines[idx].text = newText;
-          state.lines[idx].emotion = prevEmotion;
+            const saved = await api("/api/line/" + idx, { method: "PUT", body: JSON.stringify({ text: newText, emotion: prevEmotion, reanalyze: false }), timeout: 600000 });
+            state.lines[idx] = saved.line;
+          } catch (e2) {
+            state.lines[idx].text = newText;
+            state.lines[idx].emotion = prevEmotion;
+          }
           renderLines();
           refreshHistory();
-          status.textContent = "已停止分析，文本已保留，情绪未重新分析";
+          status.textContent = timedOut ? "分析超时，文本已保留，情绪未重新分析" : "已停止分析，文本已保留，情绪未重新分析";
           status.className = "status-text";
         } else {
           edit.textContent = esc(prevText);
@@ -1787,6 +1808,7 @@ async function runHistory(dir) {
   if (state.generating) { toast("生成中，请取消后再撤销/重做", "error"); return; }
   if (analysisController) { toast("分析中，请取消后再撤销/重做", "error"); return; }
   if (state.projectType === "webgal") {
+    if (state.webgal.generating) { toast("生成中，请取消后再撤销/重做", "error"); return; }
     if (state.webgal.analyzing || webgalParseController || webgalTranslateController) {
       toast("分析/翻译中，请稍后再撤销/重做", "error");
       return;
@@ -3043,6 +3065,7 @@ async function translateWebGal(silent) {
     const data = await api("/api/webgal/translate", {
       method: "POST",
       body: JSON.stringify({ lang: "ja" }),
+      timeout: 600000,
       signal: controller.signal
     });
     state.webgal.translations = data.translations || {};
@@ -3053,8 +3076,11 @@ async function translateWebGal(silent) {
     loadAiUsage();
     return { ok: true };
   } catch (e) {
-    if (e.name === "AbortError") {
-      if (!silent) setWebGalStatus("已取消日语翻译", "");
+    if (e.name === "AbortError" || e.code === "TIMEOUT") {
+      const timedOut = e.code === "TIMEOUT";
+      if (!silent) setWebGalStatus(timedOut ? "翻译超时，正在停止后端..." : "已取消日语翻译，正在同步后端...", "");
+      await settleAiBackend();
+      if (!silent) setWebGalStatus(timedOut ? "翻译超时，请稍后重试" : "已取消日语翻译", "");
     } else {
       setWebGalStatus(e.message || "日语翻译失败", "error");
     }
@@ -3380,6 +3406,7 @@ async function analyzeWebGal() {
     const data = await api("/api/webgal/analyze", {
       method: "POST",
       body: JSON.stringify({ lang: wgCurrentLang() }),
+      timeout: 600000,
       signal: controller.signal
     });
     if (data.status === "cancelled") {
@@ -3394,8 +3421,11 @@ async function analyzeWebGal() {
     setWebGalStatus("情绪分析完成，已填充 " + Object.keys(state.webgal.emotions).length + " 条" + aiUsageSummary(data) + (failedWgAn.length ? "，失败 " + failedWgAn.length + " 句" : ""), "success");
     loadAiUsage();
   } catch (e) {
-    if (e.name === "AbortError") {
-      setWebGalStatus("已停止分析", "");
+    if (e.name === "AbortError" || e.code === "TIMEOUT") {
+      const timedOut = e.code === "TIMEOUT";
+      setWebGalStatus(timedOut ? "分析超时，正在停止后端..." : "已停止分析，正在同步后端...", "");
+      await settleAiBackend();
+      setWebGalStatus(timedOut ? "分析超时，请稍后重试" : "已停止分析", "");
     } else {
       setWebGalStatus("情绪分析失败: " + e.message, "error");
     }
@@ -3414,6 +3444,8 @@ async function stopWebGalAnalyze() {
   if (webgalAnalyzeController) webgalAnalyzeController.abort();
   try { await api("/api/analyze/cancel", { method: "POST" }); } catch (e) {}
   setWebGalStatus("正在停止...", "");
+  await settleAiBackend();
+  setWebGalStatus("已停止", "");
 }
 
 async function generateWebGal(indices) {
