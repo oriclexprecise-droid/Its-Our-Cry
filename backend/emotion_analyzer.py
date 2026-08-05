@@ -132,6 +132,24 @@ def build_param_prompt(emotions, lines=None):
     return "\n".join(parts)
 
 
+def _extract_json_object(content):
+    """从 AI 返回文本中提取第一个 JSON 对象，容忍代码块和前后多余文字。"""
+    text = (content or "").strip()
+    if not text:
+        raise ValueError("AI 返回内容为空，没有可解析的 JSON")
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    start = text.find("{")
+    if start == -1:
+        raise ValueError("AI 返回内容中没有 JSON 对象")
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text[start:])
+    except Exception as e:
+        raise ValueError("JSON 解析失败：" + str(e))
+    if not isinstance(obj, dict):
+        raise ValueError("AI 返回的不是 JSON 对象")
+    return obj
+
+
 def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None):
     """调用 DeepSeek API 为情绪列表推荐 SoVITS 合成参数。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
@@ -139,22 +157,27 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
         return {}
     client = create_ai_client(api_key, base_url)
     last_error = None
-    for _ in range(MAX_AI_ATTEMPTS):
+    for attempt in range(MAX_AI_ATTEMPTS):
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": build_param_prompt(emotions, lines)},
+            kwargs = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": build_param_prompt(emotions, lines if attempt == 0 else None)},
                     {"role": "user", "content": "请为这些情绪给出参数建议。"},
                 ],
-                temperature=0.3,
-                max_tokens=1500,
-            )
+                "temperature": 0.3,
+                "max_tokens": 1500,
+            }
+            # 第一次优先用 JSON 模式，第二次退回普通模式并放大输出上限
+            if attempt == 0:
+                kwargs["response_format"] = {"type": "json_object"}
+            else:
+                kwargs["max_tokens"] = 2500
+            response = client.chat.completions.create(**kwargs)
             content = (response.choices[0].message.content or "").strip()
-            content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.MULTILINE)
-            data = json.loads(content)
-            if not isinstance(data, dict):
-                raise ValueError("AI 返回的不是 JSON 对象")
+            if not content:
+                print("[suggest_params] API 返回内容为空 finish_reason=" + str(response.choices[0].finish_reason))
+            data = _extract_json_object(content)
             cleaned = {}
             for name, p in data.items():
                 if not isinstance(p, dict):
