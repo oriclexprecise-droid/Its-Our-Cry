@@ -4369,7 +4369,7 @@ async function toggleEmotionParamsEnabled() {
   const statusEl = document.getElementById("emotion-params-status");
   try {
     await api("/api/emotion_params", { method: "POST", body: JSON.stringify({ enabled }) });
-    if (statusEl) { statusEl.textContent = enabled ? "已启用 AI 情绪参数" : "已停用 AI 情绪参数（生成时使用 SoVITS 默认参数）"; statusEl.className = "status-text success"; }
+    if (statusEl) { statusEl.textContent = enabled ? "已启用当前参数设置" : "已停用当前参数设置（生成时使用 SoVITS 默认参数）"; statusEl.className = "status-text success"; }
   } catch (e) {
     if (toggleEl) toggleEl.checked = !enabled;
     emotionParamsEnabled = !enabled;
