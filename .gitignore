@@ -24,3 +24,5 @@ packaging/tools/*.exe
 GPT_weights_v2ProPlus/
 SoVITS_weights_v2ProPlus/
 reference_audio/**/*.mp3
+ai_cache.json
+ai_usage.json

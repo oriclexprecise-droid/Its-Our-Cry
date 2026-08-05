@@ -25,6 +25,7 @@ from flask import Flask, after_this_request, jsonify, render_template, request, 
 
 from .script_parser import find_character_issues, parse_script
 from .emotion_analyzer import analyze_emotions, suggest_params
+from .ai_ops import AiCache, AiUsage
 from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt, convert_channels
 from .translator import translate_lines
@@ -585,6 +586,13 @@ def create_app(config_path="config.yaml"):
             config["deepseek"][field] = user_settings[key]
     if user_settings.get("gptsovits_path"):
         config["gptsovits_path"] = user_settings["gptsovits_path"]
+
+    ai_cache_path = project_root / "ai_cache.json"
+    ai_usage_path = project_root / "ai_usage.json"
+    ai_prices = {
+        "input_price_per_1m": float((config.get("deepseek") or {}).get("input_price_per_1m", 2.0) or 2.0),
+        "output_price_per_1m": float((config.get("deepseek") or {}).get("output_price_per_1m", 8.0) or 8.0),
+    }
     if user_settings.get("narration"):
         config["narration"] = {**config.get("narration", {}), **user_settings["narration"]}
     if "emotions" in user_settings and isinstance(user_settings["emotions"], list):
@@ -1115,6 +1123,20 @@ def create_app(config_path="config.yaml"):
         except Exception as e:
             return jsonify({"error": "保存协议状态失败: " + str(e)}), 500
 
+    @app.route("/api/ai_usage", methods=["GET"])
+    def get_ai_usage():
+        return jsonify(AiUsage(str(ai_usage_path)).stats())
+
+    @app.route("/api/ai_usage/reset", methods=["POST"])
+    def reset_ai_usage():
+        AiUsage(str(ai_usage_path)).reset_session()
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/ai_cache/clear", methods=["POST"])
+    def clear_ai_cache():
+        AiCache(str(ai_cache_path)).clear()
+        return jsonify({"status": "ok", "cleared": True})
+
     @app.route("/api/config", methods=["GET"])
     def get_config():
         has_key = bool(config["deepseek"].get("api_key", ""))
@@ -1243,6 +1265,8 @@ def create_app(config_path="config.yaml"):
         lines = data.get("lines")
         if not isinstance(lines, list) or not lines:
             lines = state.get("lines") or []
+        cache = AiCache(str(ai_cache_path))
+        usage = AiUsage(str(ai_usage_path))
         try:
             suggestions = suggest_params(
                 emotions=used,
@@ -1250,11 +1274,14 @@ def create_app(config_path="config.yaml"):
                 base_url=base_url,
                 model=model,
                 lines=lines,
+                cache=cache,
+                usage=usage,
+                prices=ai_prices,
             )
         except Exception as e:
             traceback.print_exc()
             return jsonify({"error": "参数建议失败: " + str(e)}), 500
-        return jsonify({"params": suggestions, "emotions": used})
+        return jsonify({"params": suggestions, "emotions": used, "ai_usage": usage.stats(), "ai_failed_lines": []})
 
     @app.route("/api/emotion_params/presets", methods=["GET"])
     def get_emotion_presets():
@@ -1455,7 +1482,7 @@ def create_app(config_path="config.yaml"):
         for line in lines:
             line.setdefault("interval", DEFAULT_INTERVAL)
 
-        # 智能补齐：剧本未变且情绪/翻译已齐全时，不再重复调用 AI
+        # 智能补齐：相同行直接复用旧结果，只对新增/改动行做增量分析
         existing = state.get("lines") or []
         same_script = state.get("script") == script_text and len(existing) == len(lines)
         if same_script:
@@ -1463,28 +1490,45 @@ def create_app(config_path="config.yaml"):
                 if new_line.get("text") != old_line.get("text") or new_line.get("character") != old_line.get("character"):
                     same_script = False
                     break
-        emotions_ready = same_script and all((line.get("emotion") or "") for line in existing)
-        translations_ready = lang != "ja" or all((line.get("translated_text") or "") for line in existing)
-        reused = bool(emotions_ready and translations_ready)
-        translated_only = bool(same_script and emotions_ready and not translations_ready)
-        emotions_reused = bool(emotions_ready)
+        old_by_index = {old.get("index"): old for old in existing}
+        for line in lines:
+            old = old_by_index.get(line.get("index"))
+            if old and old.get("character") == line.get("character") and old.get("text") == line.get("text"):
+                if old.get("emotion"):
+                    line["emotion"] = old["emotion"]
+                if old.get("translated_text"):
+                    line["translated_text"] = old["translated_text"]
+                if old.get("interval") is not None:
+                    line["interval"] = old["interval"]
+        need_emotion = [line for line in lines if not (line.get("emotion") or "")]
+        need_translation = [line for line in lines if lang == "ja" and not (line.get("translated_text") or "").strip()]
+        reused = bool(same_script and not need_emotion and not need_translation)
+        translated_only = bool(same_script and not need_emotion and need_translation)
+        emotions_reused = bool(not need_emotion)
 
         seq = state.get("analysis_seq", 0) + 1
         state["analysis_seq"] = seq
+        cache = AiCache(str(ai_cache_path))
+        usage = AiUsage(str(ai_usage_path))
+        failed = []
 
-        if reused or translated_only:
-            lines = copy.deepcopy(existing)
-            emotions = list(state.get("emotions") or [])
-        else:
+        if need_emotion:
             try:
+                temp_lines = []
+                for line in need_emotion:
+                    temp_lines.append({**line, "index": len(temp_lines)})
                 emotions = analyze_emotions(
-                    lines=lines,
+                    lines=temp_lines,
                     api_key=api_key,
                     base_url=base_url,
                     model=model,
                     lang=lang,
                     emotions=config["emotions"],
                     name_readings=config.get("pronunciation", []),
+                    cache=cache,
+                    usage=usage,
+                    failed_out=failed,
+                    prices=ai_prices,
                 )
             except Exception as e:
                 traceback.print_exc()
@@ -1501,49 +1545,59 @@ def create_app(config_path="config.yaml"):
             for e in emotions:
                 idx = e.get("index")
                 if isinstance(idx, int) and not isinstance(idx, bool):
-                    emotion_map[idx] = e.get("emotion") or "思考"
-            for line in lines:
-                line["emotion"] = emotion_map.get(line["index"], "思考")
+                    if 0 <= idx < len(need_emotion):
+                        emotion_map[need_emotion[idx]["index"]] = e.get("emotion") or "思考"
+            fallback_emotion = "思考" if "思考" in config["emotions"] else config["emotions"][0]
+            for line in need_emotion:
+                line["emotion"] = emotion_map.get(line["index"], fallback_emotion)
 
-        if lang == "ja" and not translations_ready:
-            missing = [line for line in lines if not (line.get("translated_text") or "").strip()]
-            if missing:
-                try:
-                    translations = translate_lines(
-                        lines=missing,
-                        api_key=api_key,
-                        base_url=base_url,
-                        model=model,
-                        name_readings=config.get("pronunciation", []),
-                    )
-                except Exception as e:
-                    traceback.print_exc()
-                    return jsonify({"error": "日语翻译失败: " + str(e)}), 500
-                if state.get("analysis_cancel_seq", -1) >= seq:
-                    return jsonify({"status": "cancelled"}), 200
-                translation_map = {}
-                for t in translations:
-                    idx = t.get("index")
-                    if idx is not None:
-                        translation_map[idx] = t.get("translation", "")
-                for line in missing:
-                    corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
-                    raw_translation = translation_map.get(line["index"], "").strip()
-                    line["translated_text"] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation or line["text"]
+        if need_translation:
+            try:
+                temp_lines = []
+                for line in need_translation:
+                    temp_lines.append({**line, "index": len(temp_lines)})
+                translations = translate_lines(
+                    lines=temp_lines,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    name_readings=config.get("pronunciation", []),
+                    cache=cache,
+                    usage=usage,
+                    failed_out=failed,
+                    prices=ai_prices,
+                )
+            except Exception as e:
+                traceback.print_exc()
+                return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+            if state.get("analysis_cancel_seq", -1) >= seq:
+                return jsonify({"status": "cancelled"}), 200
+            translation_map = {}
+            for t in translations:
+                idx = t.get("index")
+                if isinstance(idx, int) and 0 <= idx < len(need_translation):
+                    translation_map[need_translation[idx]["index"]] = t.get("translation", "")
+            for line in need_translation:
+                corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
+                raw_translation = translation_map.get(line["index"], "").strip()
+                line["translated_text"] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation or line["text"]
 
         if state.get("analysis_cancel_seq", -1) >= seq:
             return jsonify({"status": "cancelled"}), 200
 
+        emotions = [{"index": line["index"], "emotion": line.get("emotion") or "思考"} for line in lines]
         valid_chars = list(config["characters"].keys()) + ["旁白"]
         proofread = find_character_issues(lines, valid_chars)
         if translated_only:
             event_message = "情绪已是最新，已补齐日语翻译"
         elif reused:
             event_message = "情绪分析完成（已是最新）"
+        elif need_emotion and len(need_emotion) < len(lines):
+            event_message = f"情绪分析完成：新增/修改 {len(need_emotion)} 条，复用 {len(lines) - len(need_emotion)} 条"
         else:
             event_message = f"情绪分析完成：共 {len(lines)} 条台词"
         record_event(
-            {"type": "analyze", "message": event_message, "payload": {"count": len(lines), "reused": reused, "translated_only": translated_only}},
+            {"type": "analyze", "message": event_message, "payload": {"count": len(lines), "reused": reused, "translated_only": translated_only, "incremental": len(need_emotion)}},
             project_root=project_root,
         )
 
@@ -1569,7 +1623,20 @@ def create_app(config_path="config.yaml"):
         state["emotions"] = emotions
         state["lang"] = lang
 
-        return jsonify({"lines": lines, "proofread": proofread, "skipped": skipped, "reused": reused, "emotions_reused": emotions_reused})
+        return jsonify({
+            "lines": lines,
+            "proofread": proofread,
+            "skipped": skipped,
+            "reused": reused,
+            "emotions_reused": emotions_reused,
+            "ai_usage": usage.stats(),
+            "ai_failed_lines": failed,
+            "ai_incremental": {
+                "analyzed": len(need_emotion),
+                "reused_count": len(lines) - len(need_emotion),
+                "translated": len(need_translation),
+            },
+        })
 
     @app.route("/api/analyze/prompt", methods=["POST"])
     def analyze_prompt():
@@ -1690,35 +1757,51 @@ def create_app(config_path="config.yaml"):
                         line["emotion"] = old["emotion"]
                     if old.get("interval") is not None:
                         line["interval"] = old["interval"]
+                    if old.get("character") == line.get("character") and old.get("text") == line.get("text") and old.get("translated_text"):
+                        line["translated_text"] = old["translated_text"]
             same = state.get("script") == script_text and len(existing) == len(lines)
             if same:
                 for new_line, old_line in zip(lines, existing):
                     if new_line.get("text") != old_line.get("text") or new_line.get("character") != old_line.get("character"):
                         same = False
                         break
-            if same and all((old.get("translated_text") or "") for old in existing):
+            missing = [line for line in lines if not (line.get("translated_text") or "").strip()]
+            if same and not missing:
                 state["script"] = script_text
                 state["lines"] = existing
                 state["lang"] = "ja"
-                return jsonify({"lines": existing, "count": len(existing), "reused": True})
+                return jsonify({"lines": existing, "count": len(existing), "reused": True, "ai_usage": AiUsage(str(ai_usage_path)).stats(), "ai_failed_lines": [], "ai_incremental": {"translated": 0, "reused_count": len(existing)}})
         else:
             lines = copy.deepcopy(existing)
             if not lines:
                 return jsonify({"error": "请先粘贴剧本或先分析情绪"}), 400
+            missing = [line for line in lines if not (line.get("translated_text") or "").strip()]
 
         seq = state.get("analysis_seq", 0) + 1
         state["analysis_seq"] = seq
-        try:
-            translations = translate_lines(
-                lines=lines,
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
-                name_readings=config.get("pronunciation", []),
-            )
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({"error": "日语翻译失败: " + str(e)}), 500
+        cache = AiCache(str(ai_cache_path))
+        usage = AiUsage(str(ai_usage_path))
+        failed = []
+        translations = []
+        if missing:
+            try:
+                temp_lines = []
+                for line in missing:
+                    temp_lines.append({**line, "index": len(temp_lines)})
+                translations = translate_lines(
+                    lines=temp_lines,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    name_readings=config.get("pronunciation", []),
+                    cache=cache,
+                    usage=usage,
+                    failed_out=failed,
+                    prices=ai_prices,
+                )
+            except Exception as e:
+                traceback.print_exc()
+                return jsonify({"error": "日语翻译失败: " + str(e)}), 500
 
         if state.get("analysis_cancel_seq", -1) >= seq:
             return jsonify({"status": "cancelled"}), 200
@@ -1726,9 +1809,9 @@ def create_app(config_path="config.yaml"):
         translation_map = {}
         for t in translations:
             idx = t.get("index")
-            if idx is not None:
-                translation_map[idx] = t.get("translation", "")
-        for line in lines:
+            if isinstance(idx, int) and 0 <= idx < len(missing):
+                translation_map[missing[idx]["index"]] = t.get("translation", "")
+        for line in missing:
             corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
             raw_translation = translation_map.get(line["index"], "").strip()
             line["translated_text"] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation or line["text"]
@@ -1746,10 +1829,17 @@ def create_app(config_path="config.yaml"):
         state["srt_only"] = False
         state["current_record_id"] = None
         record_event(
-            {"type": "translate", "message": f"日语翻译完成：共 {len(lines)} 条台词", "payload": {"count": len(lines)}},
+            {"type": "translate", "message": f"日语翻译完成：共 {len(lines)} 条台词", "payload": {"count": len(lines), "incremental": len(missing)}},
             project_root=project_root,
         )
-        return jsonify({"lines": lines, "count": len(lines), "reused": False})
+        return jsonify({
+            "lines": lines,
+            "count": len(lines),
+            "reused": False,
+            "ai_usage": usage.stats(),
+            "ai_failed_lines": failed,
+            "ai_incremental": {"translated": len(missing), "reused_count": len(lines) - len(missing)},
+        })
 
     @app.route("/api/analyze/cancel", methods=["POST"])
     def cancel_analysis():
@@ -1855,7 +1945,7 @@ def create_app(config_path="config.yaml"):
         state["lang"] = lang
         if lang != "ja":
             wg["translations"] = {}
-            return jsonify({"status": "ok", "translations": {}})
+            return jsonify({"status": "ok", "translations": {}, "ai_usage": AiUsage(str(ai_usage_path)).stats(), "ai_failed_lines": []})
         api_key = config["deepseek"]["api_key"]
         if not api_key:
             return jsonify({"error": "please configure DeepSeek API Key"}), 400
@@ -1865,6 +1955,9 @@ def create_app(config_path="config.yaml"):
             {"index": d["index"], "character": d["character"], "text": d["text"]}
             for d in dialogues
         ]
+        cache = AiCache(str(ai_cache_path))
+        usage = AiUsage(str(ai_usage_path))
+        failed = []
         try:
             translations = translate_lines(
                 lines=lines,
@@ -1872,6 +1965,10 @@ def create_app(config_path="config.yaml"):
                 base_url=base_url,
                 model=model,
                 name_readings=config.get("pronunciation", []),
+                cache=cache,
+                usage=usage,
+                failed_out=failed,
+                prices=ai_prices,
             )
         except Exception as e:
             traceback.print_exc()
@@ -1885,7 +1982,7 @@ def create_app(config_path="config.yaml"):
             corrected = _exact_pronunciation(d["text"] if d else "", config.get("pronunciation", []))
             raw_translation = str(t.get("translation") or "")
             wg["translations"][str(idx)] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation
-        return jsonify({"status": "ok", "translations": wg["translations"]})
+        return jsonify({"status": "ok", "translations": wg["translations"], "ai_usage": usage.stats(), "ai_failed_lines": failed, "ai_incremental": {"translated": len(lines), "reused_count": 0}})
 
     @app.route("/api/webgal/analyze", methods=["POST"])
     def webgal_analyze():
@@ -1910,6 +2007,9 @@ def create_app(config_path="config.yaml"):
             {"index": d["index"], "character": d["character"], "text": d["text"]}
             for d in dialogues
         ]
+        cache = AiCache(str(ai_cache_path))
+        usage = AiUsage(str(ai_usage_path))
+        failed = []
         try:
             emotions = analyze_emotions(
                 lines=lines,
@@ -1919,6 +2019,10 @@ def create_app(config_path="config.yaml"):
                 lang=lang,
                 emotions=config["emotions"],
                 name_readings=config.get("pronunciation", []),
+                cache=cache,
+                usage=usage,
+                failed_out=failed,
+                prices=ai_prices,
             )
         except Exception as e:
             traceback.print_exc()
@@ -1945,6 +2049,10 @@ def create_app(config_path="config.yaml"):
                         base_url=base_url,
                         model=model,
                         name_readings=config.get("pronunciation", []),
+                        cache=cache,
+                        usage=usage,
+                        failed_out=failed,
+                        prices=ai_prices,
                     )
                 except Exception as e:
                     traceback.print_exc()
@@ -1962,7 +2070,7 @@ def create_app(config_path="config.yaml"):
             wg["translations"] = {}
         if state.get("analysis_cancel_seq", -1) >= seq:
             return jsonify({"status": "cancelled"}), 200
-        return jsonify({"status": "ok", "emotions": wg["emotions"], "translations": wg.get("translations", {})})
+        return jsonify({"status": "ok", "emotions": wg["emotions"], "translations": wg.get("translations", {}), "ai_usage": usage.stats(), "ai_failed_lines": failed, "ai_incremental": {"analyzed": len(lines), "reused_count": 0}})
 
     @app.route("/api/webgal/analyze/prompt", methods=["POST"])
     def webgal_analyze_prompt():
@@ -2370,6 +2478,9 @@ def create_app(config_path="config.yaml"):
         reanalyze_error = None
         reanalyze_cancelled = False
         history_pushed = False
+        ai_cache_obj = None
+        ai_usage_obj = None
+        ai_failed = []
 
         def record_history(label):
             nonlocal history_pushed
@@ -2426,6 +2537,8 @@ def create_app(config_path="config.yaml"):
                         base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
                         model = data.get("model") or config["deepseek"].get("model", "deepseek-v4-flash")
                         single = {**line, "index": 0}
+                        ai_cache_obj = AiCache(str(ai_cache_path))
+                        ai_usage_obj = AiUsage(str(ai_usage_path))
                         emotions = analyze_emotions(
                             lines=[single],
                             api_key=api_key,
@@ -2434,6 +2547,10 @@ def create_app(config_path="config.yaml"):
                             lang=state.get("lang", "zh"),
                             emotions=config["emotions"],
                             name_readings=config.get("pronunciation", []),
+                            cache=ai_cache_obj,
+                            usage=ai_usage_obj,
+                            failed_out=ai_failed,
+                            prices=ai_prices,
                         )
                         if state.get("analysis_cancel_seq", -1) >= seq:
                             invalidate_segment()
@@ -2461,6 +2578,10 @@ def create_app(config_path="config.yaml"):
                                     base_url=base_url,
                                     model=model,
                                     name_readings=config.get("pronunciation", []),
+                                    cache=ai_cache_obj,
+                                    usage=ai_usage_obj,
+                                    failed_out=ai_failed,
+                                    prices=ai_prices,
                                 )
                                 translated = next((t.get("translation", "") for t in translations if t.get("index") == 0), "").strip()
                                 corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
@@ -2527,6 +2648,9 @@ def create_app(config_path="config.yaml"):
                 record_history("修改间隔")
                 line["interval"] = interval
         resp = {"status": "ok", "line": line, "had_generated": had_generated}
+        if ai_usage_obj:
+            resp["ai_usage"] = ai_usage_obj.stats()
+            resp["ai_failed_lines"] = ai_failed
         if reanalyze_error:
             resp["reanalyze_error"] = reanalyze_error
         if reanalyze_cancelled:

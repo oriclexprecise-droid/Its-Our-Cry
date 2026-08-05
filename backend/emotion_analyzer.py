@@ -3,6 +3,7 @@
 import json
 import re
 from .ai_client import MAX_AI_ATTEMPTS, create_ai_client
+from .ai_ops import estimate_tokens, estimate_tokens_from_usage, make_cache_key
 
 DEFAULT_EMOTIONS = [
     "生气", "告别", "哭泣", "感动", "决心",
@@ -174,20 +175,32 @@ def _extract_result_list(content):
             return [obj]
     raise ValueError("AI 返回的不是列表格式")
 
-def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None):
-    """调用 DeepSeek API 为情绪列表推荐 SoVITS 合成参数。"""
+def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None, cache=None, usage=None, prices=None):
+    """调用 DeepSeek API 为情绪列表推荐 SoVITS 合成参数（带缓存与用量统计）。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
     if not emotions:
         return {}
+    line_items = [
+        {"index": l.get("index"), "character": l.get("character"), "emotion": l.get("emotion"), "text": l.get("text")}
+        for l in (lines or [])[:60]
+    ]
+    key = make_cache_key("params", model, "zh", emotions, [], line_items)
+    if cache is not None:
+        cached = cache.lookup(key)
+        if cached is not None:
+            if usage:
+                usage.record("params", model, cache_hit=True, prices=prices)
+            return cached
     client = create_ai_client(api_key, base_url)
     last_error = None
+    user_message = "请为这些情绪给出参数建议。"
     for attempt in range(MAX_AI_ATTEMPTS):
         try:
             kwargs = {
                 "model": model,
                 "messages": [
                     {"role": "system", "content": build_param_prompt(emotions, lines if attempt == 0 else None)},
-                    {"role": "user", "content": "请为这些情绪给出参数建议。"},
+                    {"role": "user", "content": user_message},
                 ],
                 "temperature": 0.3,
                 "max_tokens": 2500,
@@ -197,6 +210,21 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
                 kwargs["response_format"] = {"type": "json_object"}
             response = client.chat.completions.create(**kwargs)
             content = (response.choices[0].message.content or "").strip()
+            if usage:
+                system_len = len(kwargs["messages"][0]["content"])
+                in_tokens, out_tokens = estimate_tokens_from_usage(
+                    getattr(response, "usage", None),
+                    system_len + len(user_message),
+                    len(content),
+                )
+                usage.record(
+                    "params", model,
+                    input_chars=system_len + len(user_message),
+                    output_chars=len(content),
+                    input_tokens=in_tokens,
+                    output_tokens=out_tokens,
+                    prices=prices,
+                )
             if not content:
                 print("[suggest_params] API 返回内容为空 finish_reason=" + str(response.choices[0].finish_reason))
             data = _extract_json_object(content)
@@ -214,6 +242,8 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
                     "speed_factor": _param_float(p.get("speed_factor"), 0.5, 1.5, 1.0),
                     "seed": _param_int(p.get("seed"), -1, 2147483647, -1),
                 })
+            if cache is not None:
+                cache.store(key, cleaned)
             return cleaned
         except Exception as e:
             last_error = e
@@ -233,47 +263,32 @@ def _param_int(value, lo, hi, default):
         return default
     return max(lo, min(hi, v))
 
-def analyze_emotions(
-    lines,
-    api_key,
-    base_url="https://api.deepseek.com",
-    model="deepseek-v4-flash",
-    lang="zh",
-    emotions=None,
-    name_readings=None,
-):
-    """调用 DeepSeek API 分析台词情绪。
+def _chunks(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
 
-    emotions 为当前可用的情绪列表；为空时使用系统默认情绪。
-    """
-    if not emotions:
-        emotions = list(DEFAULT_EMOTIONS)
-    emotions = [str(e).strip() for e in emotions if str(e).strip()]
-    if not emotions:
-        emotions = list(DEFAULT_EMOTIONS)
 
-    client = create_ai_client(api_key, base_url)
-
-    # 与客户端模式共用同一套提示词，保证角色名单、纠音参考与翻译要求一致
+def _analyze_batch(batch, client, model, lang, emotions, name_readings, usage=None, prices=None, attempts=None):
+    """分析一个批次；attempts 默认沿用 2 次策略，单句重试时传 1。"""
     from .manual_ai import build_client_prompt
 
+    attempts = MAX_AI_ATTEMPTS if attempts is None else max(1, int(attempts))
     system_prompt = build_client_prompt(
-        lines,
+        batch,
         emotions,
         lang=lang,
         mode="analyze",
         name_readings=name_readings,
     )
-
-    results = None
+    user_message = "请直接输出 JSON 数组，不要输出其他内容。"
     last_error = None
-    for attempt in range(MAX_AI_ATTEMPTS):
+    for attempt in range(attempts):
         try:
             kwargs = {
                 "model": model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "请直接输出 JSON 数组，不要输出其他内容。"},
+                    {"role": "user", "content": user_message},
                 ],
                 "temperature": 0.3,
                 "max_tokens": 4096,
@@ -283,15 +298,110 @@ def analyze_emotions(
                 kwargs["response_format"] = {"type": "json_object"}
             response = client.chat.completions.create(**kwargs)
             content = (response.choices[0].message.content or "").strip()
-            results = _extract_result_list(content)
-            break
+            if usage:
+                in_tokens, out_tokens = estimate_tokens_from_usage(
+                    getattr(response, "usage", None),
+                    len(system_prompt) + len(user_message),
+                    len(content),
+                )
+                usage.record(
+                    "analyze", model,
+                    input_chars=len(system_prompt) + len(user_message),
+                    output_chars=len(content),
+                    input_tokens=in_tokens,
+                    output_tokens=out_tokens,
+                    prices=prices,
+                )
+            return _extract_result_list(content)
         except Exception as e:
             last_error = e
-    if results is None:
-        raise RuntimeError("情绪分析调用已连续失败 2 次，已停止调用 API: " + str(last_error))
+    raise RuntimeError("情绪分析调用已连续失败 " + str(attempts) + " 次，已停止调用 API: " + str(last_error))
+
+
+def _retry_single_lines(lines, client, model, lang, emotions, name_readings, results, failed_out, cache, usage, prices):
+    """整批失败或批内缺失时，对失败句单独重试一次并收集仍失败的 index。"""
+    for line in lines:
+        if line.get("index") is None:
+            continue
+        single = [line]
+        norm = [
+            {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
+        ]
+        key = make_cache_key("analyze", model, lang, emotions, name_readings, norm)
+        if cache is not None:
+            cached = cache.lookup(key)
+            if cached is not None:
+                results.extend(cached)
+                if usage:
+                    usage.record("analyze", model, cache_hit=True, prices=prices)
+                continue
+        try:
+            one = _analyze_batch(single, client, model, lang, emotions, name_readings, usage=usage, prices=prices, attempts=1)
+            if cache is not None:
+                cache.store(key, one)
+            results.extend(one)
+        except Exception:
+            if failed_out is not None:
+                failed_out.append(line.get("index"))
+
+
+def analyze_emotions(
+    lines,
+    api_key,
+    base_url="https://api.deepseek.com",
+    model="deepseek-v4-flash",
+    lang="zh",
+    emotions=None,
+    name_readings=None,
+    cache=None,
+    usage=None,
+    failed_out=None,
+    prices=None,
+    batch_size=20,
+):
+    """调用 DeepSeek API 分析台词情绪（分批 + 缓存 + 失败句单独重试）。
+
+    cache/usage/failed_out 由调用方传入；failed_out 会收集最终仍失败的 index。
+    """
+    if not emotions:
+        emotions = list(DEFAULT_EMOTIONS)
+    emotions = [str(e).strip() for e in emotions if str(e).strip()]
+    if not emotions:
+        emotions = list(DEFAULT_EMOTIONS)
+
+    client = create_ai_client(api_key, base_url)
+    results = []
+    for batch in _chunks(lines, batch_size):
+        norm_items = [
+            {"index": line.get("index"), "character": line.get("character"), "text": line.get("text")}
+            for line in batch
+        ]
+        key = make_cache_key("analyze", model, lang, emotions, name_readings, norm_items)
+        if cache is not None:
+            cached = cache.lookup(key)
+            if cached is not None:
+                results.extend(cached)
+                if usage:
+                    usage.record("analyze", model, cache_hit=True, prices=prices)
+                continue
+        batch_results = None
+        try:
+            batch_results = _analyze_batch(batch, client, model, lang, emotions, name_readings, usage=usage, prices=prices)
+        except Exception:
+            batch_results = None
+        if batch_results is not None:
+            if cache is not None:
+                cache.store(key, batch_results)
+            results.extend(batch_results)
+            returned_idx = {r.get("index") for r in batch_results}
+            missing = [line for line in batch if line.get("index") not in returned_idx]
+            if missing:
+                _retry_single_lines(missing, client, model, lang, emotions, name_readings, results, failed_out, cache, usage, prices)
+        else:
+            _retry_single_lines(batch, client, model, lang, emotions, name_readings, results, failed_out, cache, usage, prices)
 
     fallback = "思考" if "思考" in emotions else emotions[0]
-    cleaned = []
+    seen = {}
     for item in results:
         if not isinstance(item, dict):
             continue
@@ -302,8 +412,6 @@ def analyze_emotions(
         emotion = item.get("emotion")
         if emotion not in emotions:
             emotion = fallback
-        cleaned.append({"index": idx, "emotion": emotion})
-
-    # 保证顺序并按 index 排序，重复 index 时保留最后一条
-    cleaned.sort(key=lambda x: x["index"])
+        seen[idx] = {"index": idx, "emotion": emotion}
+    cleaned = sorted(seen.values(), key=lambda x: x["index"])
     return cleaned
