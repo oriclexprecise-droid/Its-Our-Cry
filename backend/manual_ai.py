@@ -73,7 +73,7 @@ def build_client_prompt(lines, emotions, lang="zh", mode="analyze", characters=N
         parts.append("、".join(chars))
     if mode == "translate" or lang == "ja":
         if readings:
-            parts.append("角色名读音参考（译文里涉及角色名时优先使用这些日文写法）：")
+            parts.append("特殊词读音参考（译文里出现这些词时，必须替换成右侧日文写法，不得保留原词或改用其他音译）：")
             parts.append("；".join(f"{zh} → {ja}" for zh, ja in readings))
         parts.extend([
             "翻译要求：",

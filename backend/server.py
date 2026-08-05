@@ -1492,9 +1492,8 @@ def create_app(config_path="config.yaml"):
                         translation_map[idx] = t.get("translation", "")
                 for line in missing:
                     corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
-                    line["translated_text"] = corrected or (
-                        translation_map.get(line["index"], "").strip() or line["text"]
-                    )
+                    raw_translation = translation_map.get(line["index"], "").strip()
+                    line["translated_text"] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation or line["text"]
 
         if state.get("analysis_cancel_seq", -1) >= seq:
             return jsonify({"status": "cancelled"}), 200
@@ -1694,9 +1693,8 @@ def create_app(config_path="config.yaml"):
                 translation_map[idx] = t.get("translation", "")
         for line in lines:
             corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
-            line["translated_text"] = corrected or (
-                translation_map.get(line["index"], "").strip() or line["text"]
-            )
+            raw_translation = translation_map.get(line["index"], "").strip()
+            line["translated_text"] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation or line["text"]
 
         push_history("日语翻译")
         state["script"] = script_text.strip() or state.get("script", "")
@@ -1847,7 +1845,8 @@ def create_app(config_path="config.yaml"):
             idx = int(t.get("index"))
             d = next((x for x in dialogues if x["index"] == idx), None)
             corrected = _exact_pronunciation(d["text"] if d else "", config.get("pronunciation", []))
-            wg["translations"][str(idx)] = corrected or t.get("translation", "")
+            raw_translation = str(t.get("translation") or "")
+            wg["translations"][str(idx)] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation
         return jsonify({"status": "ok", "translations": wg["translations"]})
 
     @app.route("/api/webgal/analyze", methods=["POST"])
@@ -1916,7 +1915,8 @@ def create_app(config_path="config.yaml"):
                     idx = int(t.get("index"))
                     d = next((x for x in dialogues if x["index"] == idx), None)
                     corrected = _exact_pronunciation(d["text"] if d else "", config.get("pronunciation", []))
-                    existing[str(idx)] = corrected or t.get("translation", "")
+                    raw_translation = str(t.get("translation") or "")
+                    existing[str(idx)] = corrected or correct_pronunciation(raw_translation, config.get("pronunciation", [])) or raw_translation
             wg["translations"] = existing
         else:
             wg["translations"] = {}
@@ -2084,9 +2084,8 @@ def create_app(config_path="config.yaml"):
                         if corrected:
                             tts_text = corrected
                         else:
-                            tts_text = (wg.get("translations") or {}).get(str(idx), "") or ""
-                            if not tts_text:
-                                tts_text = correct_pronunciation(d["text"], config.get("pronunciation", [])) or d["text"]
+                            tts_text = (wg.get("translations") or {}).get(str(idx), "") or d["text"]
+                            tts_text = correct_pronunciation(tts_text, config.get("pronunciation", [])) or tts_text
                     ref_prompt = ref.get("prompt_text") or ""
                     output_path = out_dir / f"{idx:04d}_{char}_{emotion}.wav"
                     emo_params = {}
@@ -2423,7 +2422,7 @@ def create_app(config_path="config.yaml"):
                                 )
                                 translated = next((t.get("translation", "") for t in translations if t.get("index") == 0), "").strip()
                                 corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
-                                line["translated_text"] = corrected or translated or line["text"]
+                                line["translated_text"] = corrected or correct_pronunciation(translated, config.get("pronunciation", [])) or translated or line["text"]
                             invalidate_segment()
                             record_event(
                                 {
@@ -3319,6 +3318,8 @@ def create_app(config_path="config.yaml"):
                             corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
                             if corrected:
                                 tts_text = corrected
+                            else:
+                                tts_text = correct_pronunciation(tts_text, config.get("pronunciation", [])) or tts_text
                         jobs.append({
                             "id": idx,
                             "char": char,
