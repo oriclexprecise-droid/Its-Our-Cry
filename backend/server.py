@@ -49,6 +49,11 @@ AUTO_SAVE_INTERVAL_MAX = 120
 DEFAULT_AUTO_SAVE_INTERVAL = 5
 APP_VERSION = "2.2.0"
 
+SAVE_PATH_SUBDIRS = {
+    "srt": {"manual": "srt客户端", "api": "srt api端"},
+    "webgal": {"manual": "webgal客户端", "api": "webgal api端"},
+}
+
 
 def _recent_version_meta(record, limit=DEFAULT_VERSION_LIMIT):
     return [
@@ -111,7 +116,7 @@ def _pick_save_dialog(default_name, filetypes, initial_dir=None):
         return ""
 
 
-def _pick_folder_dialog(initial_dir=None):
+def _pick_folder_dialog(initial_dir=None, title="选择文件夹"):
     """Open a native Windows folder picker; returns chosen path or empty string."""
     try:
         import tkinter as tk
@@ -122,7 +127,7 @@ def _pick_folder_dialog(initial_dir=None):
             root.attributes("-topmost", True)
         except Exception:
             pass
-        kwargs = {"title": "选择音频导出位置", "parent": root}
+        kwargs = {"title": title, "parent": root}
         if initial_dir:
             try:
                 Path(initial_dir).mkdir(parents=True, exist_ok=True)
@@ -484,9 +489,35 @@ def _persist_user_settings(project_root, config):
         settings["emotion_param_presets"] = config.get("emotion_param_presets", {})
         settings["low_perf_mode"] = bool(config.get("low_perf_mode", False))
         settings["client_prompt_segment_size"] = int(config.get("client_prompt_segment_size", 100))
+        settings["save_path"] = config.get("save_path", "")
         settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
+
+
+def _resolve_save_path(raw, project_root):
+    """Return (error, absolute_save_path) for a user-supplied save folder."""
+    text = str(raw or "").strip()
+    if not text:
+        return "请填写作品保存路径", ""
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = project_root / path
+    if path.exists() and not path.is_dir():
+        return "保存路径指向的不是文件夹：" + str(path), ""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return "无法创建保存路径 " + str(path) + "：" + str(e), ""
+    return "", str(path)
+
+
+def _ensure_save_subdirs(save_path):
+    """Create the four mode folders under the save path."""
+    base = Path(save_path)
+    for mapping in SAVE_PATH_SUBDIRS.values():
+        for name in mapping.values():
+            (base / name).mkdir(parents=True, exist_ok=True)
 
 
 def _find_extractor(project_root):
@@ -609,6 +640,7 @@ def create_app(config_path="config.yaml"):
     config.setdefault("webgal_retranslate_on_analyze", True)
     config.setdefault("low_perf_mode", False)
     config.setdefault("client_prompt_segment_size", 100)
+    config.setdefault("save_path", "")
     # 用户本地设置（API Key 等）覆盖，不写回仓库里的 config.yaml
     user_settings = {}
     user_settings_path = project_root / "user_settings.json"
@@ -627,6 +659,8 @@ def create_app(config_path="config.yaml"):
             config["deepseek"][field] = user_settings[key]
     if user_settings.get("gptsovits_path"):
         config["gptsovits_path"] = user_settings["gptsovits_path"]
+    if "save_path" in user_settings:
+        config["save_path"] = str(user_settings.get("save_path") or "").strip()
 
     ai_cache_path = project_root / "ai_cache.json"
     ai_usage_path = project_root / "ai_usage.json"
@@ -1207,6 +1241,7 @@ def create_app(config_path="config.yaml"):
             "narration": config.get("narration", {}),
             "recent": dict(recent_settings),
             "gptsovits_path": config["gptsovits_path"],
+            "save_path": config.get("save_path", ""),
             "dpapi_ok": dpapi_ok,
             "deepseek": {
                 "name": config["deepseek"].get("name", "DeepSeek"),
@@ -1234,6 +1269,15 @@ def create_app(config_path="config.yaml"):
                 config["deepseek"][field] = data[key]
         if "gptsovits_path" in data:
             config["gptsovits_path"] = str(data["gptsovits_path"] or "").strip()
+        if "save_path" in data:
+            save_err, resolved_save_path = _resolve_save_path(data.get("save_path"), project_root)
+            if save_err:
+                return jsonify({"error": save_err}), 400
+            config["save_path"] = resolved_save_path
+            try:
+                _ensure_save_subdirs(resolved_save_path)
+            except Exception as e:
+                return jsonify({"error": "保存路径已设置，但创建四个模式文件夹失败: " + str(e)}), 500
         if "low_perf_mode" in data:
             config["low_perf_mode"] = bool(data["low_perf_mode"])
         if "client_prompt_segment_size" in data:
@@ -2458,10 +2502,24 @@ def create_app(config_path="config.yaml"):
                 return jsonify({"error": "音频文件不存在"}), 404
         return send_file(path, mimetype="audio/wav")
 
+    @app.route("/api/pick-folder", methods=["POST"])
+    def pick_folder():
+        data = request.get_json(silent=True) or {}
+        try:
+            picked = _pick_folder_dialog(
+                initial_dir=str(data.get("initial_dir") or "").strip() or None,
+                title=str(data.get("title") or "选择文件夹"),
+            )
+        except Exception as e:
+            return jsonify({"error": "选择文件夹失败: " + str(e)}), 500
+        if not picked:
+            return jsonify({"status": "cancelled", "path": ""})
+        return jsonify({"status": "ok", "path": picked})
+
     @app.route("/api/webgal/pick-export-dir", methods=["POST"])
     def webgal_pick_export_dir():
         try:
-            picked = _pick_folder_dialog()
+            picked = _pick_folder_dialog(title="选择 WebGaL 游戏音频导出位置")
         except Exception as e:
             return jsonify({"error": "选择导出位置失败: " + str(e)}), 500
         if not picked:
@@ -2471,16 +2529,46 @@ def create_app(config_path="config.yaml"):
     def _export_folder_name(raw):
         text = str(raw or "").strip()
         if not text:
-            return "", "请输入导出文件夹名称"
+            return "", "请输入作品名称"
         if "/" in text or "\\" in text:
-            text = Path(text.rstrip("/\\")).name
+            try:
+                pasted = Path(text.rstrip("/\\"))
+                if pasted.is_absolute() or pasted.exists():
+                    text = pasted.name
+                else:
+                    return "", "作品名称不能包含斜杠 / 或反斜杠 \\；如需粘贴完整路径，请粘贴电脑上的绝对路径（只会使用最后一级目录名）"
+            except Exception:
+                return "", "作品名称包含无法识别的路径，请直接输入作品名称"
         if not text or text in (".", ".."):
-            return "", "文件夹名称包含非法字符"
-        if re.search(r'[\\/:*?"<>|\r\n]', text) or text in (".", ".."):
-            return "", "文件夹名称包含非法字符"
+            return "", "作品名称不能是 . 或 .."
+        for ch, label in (
+            ("/", "斜杠 /"),
+            ("\\", "反斜杠 \\"),
+            (":", "冒号 :"),
+            ("*", "星号 *"),
+            ("?", "问号 ?"),
+            ('"', "双引号"),
+            ("<", "尖括号 <"),
+            (">", "尖括号 >"),
+            ("|", "竖线 |"),
+        ):
+            if ch in text:
+                return "", "作品名称不能包含" + label
+        if text.endswith(".") or text.endswith(" "):
+            return "", "作品名称不能以 . 或空格结尾"
+        if re.search(r"[\x00-\x1f]", text):
+            return "", "作品名称包含无法显示的字符"
         if len(text) > 64:
-            return "", "文件夹名称过长"
+            return "", "作品名称过长（最多 64 个字符）"
+        base = text.split(".", 1)[0].strip().upper()
+        if base in ("CON", "PRN", "AUX", "NUL") or re.match(r"^(COM[1-9]|LPT[1-9])$", base):
+            return "", "作品名称「" + text + "」是 Windows 保留名称，请换一个"
         return text, ""
+
+    def _save_mode_subdir(project_type, ai_mode):
+        ptype = str(project_type or "srt").strip().lower()
+        amode = "manual" if str(ai_mode or "").strip().lower() == "manual" else "api"
+        return SAVE_PATH_SUBDIRS.get(ptype, SAVE_PATH_SUBDIRS["srt"])[amode]
 
     def _find_segment_file(index, subdir):
         base = Path(config["output_dir"]) / subdir
@@ -2509,14 +2597,34 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": folder_err}), 400
         output_dir = str(data.get("output_dir") or "").strip()
         if output_dir and not Path(output_dir).is_dir():
-            return jsonify({"error": "指定的导出位置不存在，请重新选择"}), 400
-        export_root = project_root / "exports"
+            return jsonify({"error": "指定的游戏音频目录不存在，请重新选择（应指向 public/games/你的游戏名/game/vocal）"}), 400
+        save_path = str(config.get("save_path") or "").strip()
+        if not save_path:
+            return jsonify({"error": "尚未设置作品保存路径，请先到 设置 → 通用设置 → 作品保存路径 里设置"}), 400
+        mode_subdir = _save_mode_subdir("webgal", state.get("ai_mode", "api"))
+        export_root = Path(save_path) / mode_subdir
         export_root.mkdir(parents=True, exist_ok=True)
         export_dir = export_root / folder_name
         if export_dir.exists():
             return jsonify({
-                "error": f"文件夹「{folder_name}」已存在，请换一个名称或手动删除旧文件夹",
+                "error": f"「{mode_subdir}」里已有同名作品文件夹「{folder_name}」，请换一个名称或删除旧文件夹",
                 "code": "folder_exists",
+            }), 409
+        conflicts = []
+        if output_dir:
+            for d in dialogues:
+                gen = (wg.get("generated") or {}).get(str(d["index"]))
+                if not gen or not Path(gen["path"]).exists():
+                    continue
+                game_target = Path(output_dir) / short_name_for(gen.get("character") or d["character"]) / Path(gen["path"]).name
+                if game_target.exists():
+                    conflicts.append(str(game_target))
+        if conflicts:
+            shown = "；".join(conflicts[:5])
+            more = " 等 " + str(len(conflicts)) + " 个" if len(conflicts) > 5 else ""
+            return jsonify({
+                "error": "游戏音频目录已存在同名文件：" + shown + more + "，请先删除旧文件或换一个导出位置",
+                "code": "file_exists",
             }), 409
         export_dir.mkdir(parents=True)
         try:
@@ -4096,12 +4204,16 @@ def create_app(config_path="config.yaml"):
         if folder_err:
             return jsonify({"error": folder_err}), 400
 
-        export_root = project_root / "exports"
+        save_path = str(config.get("save_path") or "").strip()
+        if not save_path:
+            return jsonify({"error": "尚未设置作品保存路径，请先到 设置 → 通用设置 → 作品保存路径 里设置"}), 400
+        mode_subdir = _save_mode_subdir("srt", state.get("ai_mode", "api"))
+        export_root = Path(save_path) / mode_subdir
         export_root.mkdir(parents=True, exist_ok=True)
         export_dir = export_root / folder_name
         if export_dir.exists():
             return jsonify({
-                "error": f"文件夹「{folder_name}」已存在，请换一个名称或手动删除旧文件夹",
+                "error": f"「{mode_subdir}」里已有同名作品文件夹「{folder_name}」，请换一个名称或删除旧文件夹",
                 "code": "folder_exists",
             }), 409
         export_dir.mkdir(parents=True)
@@ -4216,14 +4328,22 @@ def create_app(config_path="config.yaml"):
         try:
             resolved = Path(folder).resolve()
             project_resolved = project_root.resolve()
-            try:
-                common = os.path.commonpath([str(resolved), str(project_resolved)])
-            except ValueError:
-                return jsonify({"error": "只能打开项目内的文件夹"}), 400
+            allowed_roots = [project_resolved]
+            sp = str(config.get("save_path") or "").strip()
+            if sp:
+                try:
+                    allowed_roots.append(Path(sp).resolve())
+                except Exception:
+                    pass
             def _norm(p):
                 return str(p).lower() if os.name == "nt" else str(p)
-            if _norm(common) != _norm(str(project_resolved)):
-                return jsonify({"error": "只能打开项目内的文件夹"}), 400
+            def _is_within(child, parent):
+                try:
+                    return os.path.commonpath([str(child), str(parent)]) == str(parent)
+                except ValueError:
+                    return False
+            if not any(_is_within(resolved, root) for root in allowed_roots):
+                return jsonify({"error": "只能打开程序目录或作品保存路径内的文件夹"}), 400
             if not resolved.exists() or not resolved.is_dir():
                 return jsonify({"error": "文件夹不存在"}), 400
             os.startfile(str(resolved))

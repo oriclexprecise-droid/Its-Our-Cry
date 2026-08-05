@@ -118,6 +118,8 @@ async function loadConfig() {
   loadDeployPath(cfg);
   loadCleanPath(cfg);
   updateDeployBanner(cfg.gptsovits_path);
+  const savePathEl = document.getElementById("save-path-input");
+  if (savePathEl) savePathEl.value = cfg.save_path || "";
   loadPronunciation();
   loadWebgalMap(cfg);
   loadWebgalRetranslate(cfg);
@@ -3406,8 +3408,10 @@ async function pickWebGalExportDir() {
     const res = await api("/api/webgal/pick-export-dir", { method: "POST" });
     if (!res.path) return;
     state.webgal.exportDir = res.path;
+    const dirInput = document.getElementById("webgal-export-dir-input");
+    if (dirInput) dirInput.value = res.path;
     const label = document.getElementById("webgal-export-dir-label");
-    if (label) label.textContent = "已选游戏音频目录：" + res.path + "（完整导出仍存程序 exports）";
+    if (label) label.textContent = "已选游戏音频目录：" + res.path;
     if (statusEl) { statusEl.textContent = ""; statusEl.className = "status-text"; }
   } catch (e) {
     if (statusEl) { statusEl.textContent = "选择导出位置失败: " + e.message; statusEl.className = "status-text error"; }
@@ -3424,7 +3428,9 @@ async function exportWebGal() {
   const btn = document.getElementById("btn-webgal-export");
   if (btn) btn.disabled = true;
   try {
-    const data = await api("/api/webgal/export", { method: "POST", body: JSON.stringify({ folder_name: folderName, output_dir: state.webgal.exportDir || "" }) });
+    const dirInput = document.getElementById("webgal-export-dir-input");
+    const dir = dirInput ? dirInput.value.trim() : "";
+    const data = await api("/api/webgal/export", { method: "POST", body: JSON.stringify({ folder_name: folderName, output_dir: dir || state.webgal.exportDir || "" }) });
     state.webgal.lastExport = data.folder;
     const openBtn = document.getElementById("btn-webgal-open-export");
     if (openBtn) openBtn.classList.remove("hidden");
@@ -3970,6 +3976,43 @@ function initClientSegmentConfig() {
         status.textContent = "保存失败: " + e.message;
         status.className = "status-text error";
       }
+    }
+  });
+}
+
+function initSavePathConfig() {
+  const pickBtn = document.getElementById("btn-pick-save-path");
+  if (pickBtn) pickBtn.addEventListener("click", async () => {
+    const status = document.getElementById("save-path-status");
+    const input = document.getElementById("save-path-input");
+    try {
+      const res = await api("/api/pick-folder", { method: "POST", body: JSON.stringify({ title: "选择作品保存路径" }) });
+      if (!res.path) return;
+      if (input) input.value = res.path;
+      if (status) { status.textContent = "已选择：" + res.path + "，点击「保存路径」生效"; status.className = "status-text success"; }
+    } catch (e) {
+      if (status) { status.textContent = "选择文件夹失败: " + e.message; status.className = "status-text error"; }
+    }
+  });
+  const saveBtn = document.getElementById("btn-save-save-path");
+  if (!saveBtn) return;
+  saveBtn.addEventListener("click", async () => {
+    const status = document.getElementById("save-path-status");
+    const input = document.getElementById("save-path-input");
+    const path = input ? input.value.trim() : "";
+    if (!path) {
+      if (status) { status.textContent = "请先填写保存路径"; status.className = "status-text error"; }
+      return;
+    }
+    if (status) { status.textContent = "正在保存并创建模式文件夹..."; status.className = "status-text"; }
+    try {
+      await api("/api/config", { method: "POST", body: JSON.stringify({ save_path: path }) });
+      if (status) {
+        status.textContent = "已保存。导出时会自动进入保存路径下的 srt客户端 / srt api端 / webgal客户端 / webgal api端";
+        status.className = "status-text success";
+      }
+    } catch (e) {
+      if (status) { status.textContent = "保存失败: " + e.message; status.className = "status-text error"; }
     }
   });
 }
@@ -4914,6 +4957,7 @@ function initShareImportExport() {
 
 initLowPerfConfig();
 initClientSegmentConfig();
+initSavePathConfig();
 initAiUsagePanel();
 initAIConfig();
 initNarrationConfig();
