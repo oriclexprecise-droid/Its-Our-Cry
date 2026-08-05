@@ -28,6 +28,7 @@ from .emotion_analyzer import analyze_emotions, suggest_params
 from .tts_engine import get_engine
 from .audio_merger import merge_wav_files, generate_srt, convert_channels
 from .translator import translate_lines
+from .manual_ai import build_client_prompt, parse_client_result
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download
 from .feedback import read_events, record_event
 from .cleanup import clean_items, scan_cleanable
@@ -697,6 +698,7 @@ def create_app(config_path="config.yaml"):
         "history_limit": 50,
         "current_record_id": None,
         "project_type": "srt",
+        "ai_mode": "api",
         "webgal": {
             "source": "",
             "entries": [],
@@ -729,6 +731,7 @@ def create_app(config_path="config.yaml"):
             "time_info": copy.deepcopy(state.get("time_info", [])),
             "current_record_id": state.get("current_record_id"),
             "lang": state.get("lang", "zh"),
+            "ai_mode": state.get("ai_mode", "api"),
         }
 
     def push_history(label):
@@ -748,6 +751,7 @@ def create_app(config_path="config.yaml"):
         state["srt_path"] = snap.get("srt_path")
         state["time_info"] = copy.deepcopy(snap.get("time_info", []))
         state["lang"] = snap.get("lang", "zh")
+        state["ai_mode"] = snap.get("ai_mode", "api")
         state["current_record_id"] = snap.get("current_record_id")
         state["progress"] = {"current": 0, "total": 0}
         state["srt_only"] = False
@@ -762,6 +766,7 @@ def create_app(config_path="config.yaml"):
             "srt_path": state.get("srt_path"),
             "time_info": copy.deepcopy(state.get("time_info", [])),
             "lang": state.get("lang", "zh"),
+            "ai_mode": state.get("ai_mode", "api"),
             "project_type": state.get("project_type", "srt"),
             "config": record_config_snapshot(),
             "webgal": copy.deepcopy(state.get("webgal") or {}),
@@ -1039,6 +1044,7 @@ def create_app(config_path="config.yaml"):
         state["srt_only"] = False
         state["current_record_id"] = record.get("id")
         state["project_type"] = record.get("project_type") or "srt"
+        state["ai_mode"] = version.get("ai_mode") or record.get("ai_mode") or "api"
         wg = version.get("webgal")
         if isinstance(wg, dict):
             state["webgal"] = copy.deepcopy(wg)
@@ -1522,6 +1528,91 @@ def create_app(config_path="config.yaml"):
 
         return jsonify({"lines": lines, "proofread": proofread, "skipped": skipped, "reused": reused, "emotions_reused": emotions_reused})
 
+    @app.route("/api/analyze/prompt", methods=["POST"])
+    def analyze_prompt():
+        data = request.get_json(silent=True) or {}
+        script_text = str(data.get("text") or "")
+        lang = str(data.get("lang") or "zh")
+        if lang not in ("zh", "ja"):
+            lang = "zh"
+        lines = parse_script(script_text)
+        if not lines:
+            return jsonify({"error": "no valid lines found"}), 400
+        prompt = build_client_prompt(lines, config["emotions"], lang=lang, mode="analyze")
+        return jsonify({"prompt": prompt})
+
+    @app.route("/api/analyze/import", methods=["POST"])
+    def analyze_import():
+        data = request.get_json(silent=True) or {}
+        script_text = str(data.get("text") or "")
+        lang = str(data.get("lang") or "zh")
+        if lang not in ("zh", "ja"):
+            lang = "zh"
+        result_text = str(data.get("result") or "")
+        if not script_text.strip():
+            return jsonify({"error": "script is empty"}), 400
+        if not result_text.strip():
+            return jsonify({"error": "请先粘贴 AI 客户端返回的 JSON 结果"}), 400
+        lines = parse_script(script_text)
+        if not lines:
+            return jsonify({"error": "no valid lines found"}), 400
+        for line in lines:
+            line.setdefault("interval", DEFAULT_INTERVAL)
+        try:
+            items = parse_client_result(result_text)
+        except Exception as e:
+            return jsonify({"error": "结果解析失败：" + str(e)}), 400
+        emotion_map = {}
+        translation_map = {}
+        for item in items:
+            idx = item.get("index")
+            if not isinstance(idx, int) or isinstance(idx, bool):
+                continue
+            if item.get("emotion"):
+                emotion_map[idx] = item["emotion"]
+            if item.get("translation"):
+                translation_map[idx] = item["translation"]
+        existing_emotions = {l.get("index"): l.get("emotion") for l in (state.get("lines") or [])}
+        for line in lines:
+            line["emotion"] = emotion_map.get(line["index"]) or existing_emotions.get(line["index"]) or "思考"
+            if lang == "ja":
+                corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
+                line["translated_text"] = corrected or translation_map.get(line["index"], "").strip() or line["text"]
+            else:
+                line.setdefault("translated_text", "")
+        valid_chars = list(config["characters"].keys()) + ["旁白"]
+        proofread = find_character_issues(lines, valid_chars)
+        skipped = []
+        raw_lines = script_text.strip().split("\n")
+        parsed_line_nos = {line["line_no"] for line in lines}
+        for skipped_no, raw in enumerate(raw_lines, start=1):
+            if raw.strip() and skipped_no not in parsed_line_nos:
+                skipped.append({"line_no": skipped_no, "text": raw.strip()[:100]})
+        push_history("粘贴 AI 分析结果")
+        state["generated"] = {}
+        state["time_info"] = []
+        state["merged_path"] = None
+        state["srt_path"] = None
+        state["failures"] = {}
+        state["progress"] = {"current": 0, "total": 0}
+        state["srt_only"] = False
+        state["current_record_id"] = None
+        state["script"] = script_text
+        state["lines"] = lines
+        state["emotions"] = [{"index": l["index"], "emotion": l["emotion"]} for l in lines]
+        state["lang"] = lang
+        record_event(
+            {"type": "analyze", "message": "客户端 AI 结果已应用：" + str(len(lines)) + " 条台词", "payload": {"count": len(lines), "manual": True}},
+            project_root=project_root,
+        )
+        return jsonify({
+            "lines": lines,
+            "proofread": proofread,
+            "skipped": skipped,
+            "reused": False,
+            "emotions_reused": False,
+            "manual": True,
+        })
     @app.route("/api/translate", methods=["POST"])
     def translate_only():
         data = request.get_json(silent=True) or {}
@@ -1817,6 +1908,72 @@ def create_app(config_path="config.yaml"):
             return jsonify({"status": "cancelled"}), 200
         return jsonify({"status": "ok", "emotions": wg["emotions"], "translations": wg.get("translations", {})})
 
+    @app.route("/api/webgal/analyze/prompt", methods=["POST"])
+    def webgal_analyze_prompt():
+        wg = state.get("webgal") or {}
+        dialogues = wg.get("dialogues") or []
+        if not dialogues:
+            return jsonify({"error": "请先解析脚本"}), 400
+        data = request.get_json(silent=True) or {}
+        lang = str(data.get("lang") or wg.get("lang") or state.get("lang") or "zh")
+        if lang not in ("zh", "ja"):
+            lang = "zh"
+        mode = str(data.get("mode") or "analyze")
+        if mode not in ("analyze", "translate"):
+            mode = "analyze"
+        lines = [{"index": d["index"], "character": d["character"], "text": d["text"]} for d in dialogues]
+        prompt = build_client_prompt(lines, config["emotions"], lang=lang, mode=mode)
+        return jsonify({"prompt": prompt})
+
+    @app.route("/api/webgal/analyze/import", methods=["POST"])
+    def webgal_analyze_import():
+        wg = state.get("webgal") or {}
+        dialogues = wg.get("dialogues") or []
+        if not dialogues:
+            return jsonify({"error": "请先解析脚本"}), 400
+        data = request.get_json(silent=True) or {}
+        lang = str(data.get("lang") or wg.get("lang") or state.get("lang") or "zh")
+        if lang not in ("zh", "ja"):
+            lang = "zh"
+        result_text = str(data.get("result") or "")
+        if not result_text.strip():
+            return jsonify({"error": "请先粘贴 AI 客户端返回的 JSON 结果"}), 400
+        lines = [{"index": d["index"], "character": d["character"], "text": d["text"]} for d in dialogues]
+        try:
+            items = parse_client_result(result_text)
+        except Exception as e:
+            return jsonify({"error": "结果解析失败：" + str(e)}), 400
+        emotion_map = {}
+        translation_map = {}
+        for item in items:
+            idx = item.get("index")
+            if not isinstance(idx, int) or isinstance(idx, bool):
+                continue
+            if item.get("emotion"):
+                emotion_map[idx] = item["emotion"]
+            if item.get("translation"):
+                translation_map[idx] = item["translation"]
+        current_emotions = wg.get("emotions") or {}
+        for d in dialogues:
+            idx = d["index"]
+            current_emotions[str(idx)] = emotion_map.get(idx) or current_emotions.get(str(idx)) or "思考"
+        wg["emotions"] = current_emotions
+        if lang == "ja":
+            current_translations = wg.get("translations") or {}
+            for d in dialogues:
+                idx = d["index"]
+                corrected = _exact_pronunciation(d["text"], config.get("pronunciation", []))
+                current_translations[str(idx)] = corrected or translation_map.get(idx, "").strip() or current_translations.get(str(idx), "") or d["text"]
+            wg["translations"] = current_translations
+        else:
+            wg["translations"] = {}
+        wg["lang"] = lang
+        state["lang"] = lang
+        record_event(
+            {"type": "analyze", "message": "WebGaL 客户端 AI 结果已应用：" + str(len(dialogues)) + " 条对话", "payload": {"count": len(dialogues), "manual": True}},
+            project_root=project_root,
+        )
+        return jsonify({"status": "ok", "emotions": wg["emotions"], "translations": wg.get("translations", {})})
     @app.route("/api/webgal/generate", methods=["POST"])
     def webgal_generate():
         wg = state.get("webgal") or {}
@@ -3283,11 +3440,15 @@ def create_app(config_path="config.yaml"):
         project_type = str(data.get("project_type") or "srt").strip().lower()
         if project_type not in ("srt", "webgal"):
             project_type = "srt"
+        ai_mode = str(data.get("ai_mode") or "api").strip().lower()
+        if ai_mode not in ("api", "manual"):
+            ai_mode = "api"
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         record = {
             "id": uuid.uuid4().hex,
             "name": name,
             "project_type": project_type,
+            "ai_mode": ai_mode,
             "saved_at": now,
             "created_at": now,
             "updated_at": now,
@@ -3309,6 +3470,7 @@ def create_app(config_path="config.yaml"):
             persist_recent_records(records)
         state["current_record_id"] = record["id"]
         state["project_type"] = project_type
+        state["ai_mode"] = ai_mode
         state["lang"] = "zh"
         state["script"] = ""
         state["lines"] = []

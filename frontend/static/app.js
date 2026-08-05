@@ -1,4 +1,4 @@
-const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [], projectType: "srt", webgal: { source: "", dialogues: [], emotions: {}, translations: {}, generated: {}, failures: {}, generating: false, lastExport: "", psyVoice: false, psyCharacter: "", lang: "zh", analyzing: false, progress: { current: 0, total: 0 }, exportDir: "" } };
+const state = { lines: [], chars: [], emotions: [], generating: false, hasGenerated: false, selectMode: false, selected: new Set(), failures: {}, pronunciation: [], projectType: "srt", aiMode: "api", webgal: { source: "", dialogues: [], emotions: {}, translations: {}, generated: {}, failures: {}, generating: false, lastExport: "", psyVoice: false, psyCharacter: "", lang: "zh", analyzing: false, progress: { current: 0, total: 0 }, exportDir: "" } };
 let audioPlayer = null;
 let analysisController = null;
 let webgalParseController = null;
@@ -146,25 +146,7 @@ async function loadConfig() {
   }
 }
 
-async function runAnalyze() {
-  const text = document.getElementById("script-input").value.trim();
-  state.script = text;
-  const apiKey = document.getElementById("api-key").value.trim();
-  const lang = document.getElementById("script-lang").value;
-  const status = document.getElementById("analyze-status");
-  if (!text) { status.textContent = "请粘贴剧本内容"; status.className = "status-text error"; return; }
-  status.textContent = "正在分析情绪...";
-  status.className = "status-text";
-  document.getElementById("btn-analyze").disabled = true;
-  if (analysisController) analysisController.abort();
-  const controller = new AbortController();
-  analysisController = controller;
-  refreshHistoryButtons();
-  const stopBtn = document.getElementById("btn-stop-analyze");
-  stopBtn.classList.remove("hidden");
-  syncScriptDraft();
-  try {
-    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }), signal: controller.signal });
+function handleAnalyzeSuccess(data) {
     if (data.status === "cancelled") {
       status.textContent = "已停止分析";
       status.className = "status-text";
@@ -205,9 +187,137 @@ async function runAnalyze() {
     if (cancelBtnReset) cancelBtnReset.classList.add("hidden");
     document.getElementById("progress-text").classList.add("hidden");
     refreshHistory();
-    if (!data.reused && !data.emotions_reused && emotionParamsEnabled) suggestEmotionParams();
+    if (!data.reused && !data.emotions_reused && emotionParamsEnabled && state.aiMode !== "manual") suggestEmotionParams();
     const issues = data.proofread || [];
     if (issues.length) showProofreadModal(issues);
+}
+
+function updateAiModeUI() {
+  const analyzeBtn = document.getElementById("btn-analyze");
+  if (analyzeBtn) analyzeBtn.textContent = state.aiMode === "manual" ? "客户端生成" : "分析情绪";
+  const wgBtn = document.getElementById("btn-webgal-analyze");
+  if (wgBtn) wgBtn.textContent = state.aiMode === "manual" ? "客户端生成" : "可选：AI 分析情绪";
+  if (state.aiMode !== "manual") {
+    const srtBox = document.getElementById("client-ai-box");
+    if (srtBox) srtBox.classList.add("hidden");
+    const wgBox = document.getElementById("wg-client-ai-box");
+    if (wgBox) wgBox.classList.add("hidden");
+  }
+}
+
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch (e) { /* fall through to legacy copy */ }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); } catch (e2) {}
+  document.body.removeChild(ta);
+}
+
+async function openClientAi() {
+  const status = document.getElementById("analyze-status");
+  const box = document.getElementById("client-ai-box");
+  const text = document.getElementById("script-input").value.trim();
+  if (!text) {
+    if (status) { status.textContent = "请先粘贴剧本内容"; status.className = "status-text error"; }
+    return;
+  }
+  const lang = document.getElementById("script-lang").value;
+  if (box) box.classList.remove("hidden");
+  const out = document.getElementById("client-prompt-output");
+  if (out) out.value = "正在生成提示词...";
+  try {
+    const data = await api("/api/analyze/prompt", { method: "POST", body: JSON.stringify({ text, lang }) });
+    if (out) out.value = data.prompt;
+    await copyTextToClipboard(data.prompt);
+    if (status) { status.textContent = "提示词已生成并复制，请粘贴到你的 AI 客户端"; status.className = "status-text success"; }
+    const resultInput = document.getElementById("client-result-input");
+    if (resultInput) resultInput.focus();
+  } catch (e) {
+    if (status) { status.textContent = e.message; status.className = "status-text error"; }
+  }
+}
+
+async function applyClientResult() {
+  const status = document.getElementById("analyze-status");
+  const resultInput = document.getElementById("client-result-input");
+  const result = resultInput ? resultInput.value.trim() : "";
+  if (!result) {
+    if (status) { status.textContent = "请先粘贴 AI 返回的 JSON 结果"; status.className = "status-text error"; }
+    return;
+  }
+  const text = document.getElementById("script-input").value.trim();
+  const lang = document.getElementById("script-lang").value;
+  if (status) { status.textContent = "正在应用 AI 结果..."; status.className = "status-text"; }
+  try {
+    const data = await api("/api/analyze/import", { method: "POST", body: JSON.stringify({ text, lang, result }) });
+    handleAnalyzeSuccess(data);
+  } catch (e) {
+    if (status) { status.textContent = e.message; status.className = "status-text error"; }
+  }
+}
+
+async function openWgClientAi(mode) {
+  const box = document.getElementById("wg-client-ai-box");
+  if (!state.webgal.dialogues.length) { setWebGalStatus("请先解析脚本", "error"); return; }
+  if (box) box.classList.remove("hidden");
+  const out = document.getElementById("wg-client-prompt-output");
+  if (out) out.value = "正在生成提示词...";
+  try {
+    const data = await api("/api/webgal/analyze/prompt", { method: "POST", body: JSON.stringify({ lang: wgCurrentLang(), mode: mode || "analyze" }) });
+    if (out) out.value = data.prompt;
+    await copyTextToClipboard(data.prompt);
+    setWebGalStatus("提示词已生成并复制，请粘贴到你的 AI 客户端", "success");
+  } catch (e) {
+    setWebGalStatus(e.message, "error");
+  }
+}
+
+async function applyWgClientResult() {
+  const resultInput = document.getElementById("wg-client-result-input");
+  const result = resultInput ? resultInput.value.trim() : "";
+  if (!result) { setWebGalStatus("请先粘贴 AI 返回的 JSON 结果", "error"); return; }
+  try {
+    const data = await api("/api/webgal/analyze/import", { method: "POST", body: JSON.stringify({ lang: wgCurrentLang(), result }) });
+    state.webgal.emotions = data.emotions || {};
+    state.webgal.translations = data.translations || {};
+    renderWebGalLines();
+    pushWebGalHistory();
+    setWebGalStatus("AI 结果已应用", "success");
+    updateWebGalTranslateButton();
+    refreshHistoryButtons();
+  } catch (e) {
+    setWebGalStatus(e.message, "error");
+  }
+}
+
+async function runAnalyze() {
+  const text = document.getElementById("script-input").value.trim();
+  state.script = text;
+  const apiKey = document.getElementById("api-key").value.trim();
+  const lang = document.getElementById("script-lang").value;
+  const status = document.getElementById("analyze-status");
+  if (state.aiMode === "manual") { openClientAi(); return; }
+  if (!text) { status.textContent = "请粘贴剧本内容"; status.className = "status-text error"; return; }
+  status.textContent = "正在分析情绪...";
+  status.className = "status-text";
+  document.getElementById("btn-analyze").disabled = true;
+  if (analysisController) analysisController.abort();
+  const controller = new AbortController();
+  analysisController = controller;
+  refreshHistoryButtons();
+  const stopBtn = document.getElementById("btn-stop-analyze");
+  stopBtn.classList.remove("hidden");
+  syncScriptDraft();
+  try {
+    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }), signal: controller.signal });
+    handleAnalyzeSuccess(data);
   } catch (e) {
     if (e.name === "AbortError") {
       status.textContent = "已停止分析";
@@ -231,6 +341,16 @@ document.getElementById("btn-stop-line-analyze").addEventListener("click", () =>
   if (analysisController) analysisController.abort();
   api("/api/analyze/cancel", { method: "POST" }).catch(() => {});
 });
+const btnClientPrompt = document.getElementById("btn-client-prompt");
+if (btnClientPrompt) btnClientPrompt.addEventListener("click", openClientAi);
+const btnClientApply = document.getElementById("btn-client-apply");
+if (btnClientApply) btnClientApply.addEventListener("click", applyClientResult);
+const btnWgClientPrompt = document.getElementById("btn-wg-client-prompt");
+if (btnWgClientPrompt) btnWgClientPrompt.addEventListener("click", () => openWgClientAi("analyze"));
+const btnWgClientTranslate = document.getElementById("btn-wg-client-translate");
+if (btnWgClientTranslate) btnWgClientTranslate.addEventListener("click", () => openWgClientAi("translate"));
+const btnWgClientApply = document.getElementById("btn-wg-client-apply");
+if (btnWgClientApply) btnWgClientApply.addEventListener("click", applyWgClientResult);
 
 const btnUndoEl = document.getElementById("btn-undo");
 const btnRedoEl = document.getElementById("btn-redo");
@@ -741,6 +861,11 @@ function createNewProject() {
   if (!modal || !input) return;
   input.value = "";
   document.querySelectorAll('input[name="new-project-type"]').forEach(r => { r.checked = (r.value === "srt"); });
+  document.querySelectorAll('input[name="new-project-ai-mode"]').forEach(r => { r.checked = (r.value === "api"); });
+  const freshSrtBox = document.getElementById("client-ai-box");
+  if (freshSrtBox) freshSrtBox.classList.add("hidden");
+  const freshWgBox = document.getElementById("wg-client-ai-box");
+  if (freshWgBox) freshWgBox.classList.add("hidden");
   if (status) { status.textContent = ""; status.className = "status-text"; }
   modal.classList.remove("hidden");
   setTimeout(() => input.focus(), 30);
@@ -768,8 +893,11 @@ async function confirmNewProject() {
   try {
     const typeEl = document.querySelector('input[name="new-project-type"]:checked');
     const projectType = typeEl ? typeEl.value : "srt";
-    await api("/api/recent/create", { method: "POST", body: JSON.stringify({ name, project_type: projectType }) });
+    const aiModeEl = document.querySelector('input[name="new-project-ai-mode"]:checked');
+    const aiMode = aiModeEl ? aiModeEl.value : "api";
+    await api("/api/recent/create", { method: "POST", body: JSON.stringify({ name, project_type: projectType, ai_mode: aiMode }) });
     state.projectType = projectType;
+    state.aiMode = aiMode;
     const typeName = projectType === "webgal" ? "WebGaL 板块" : "SRT 工作台";
     if (projectType === "webgal") {
       resetWebGalProject();
@@ -1020,6 +1148,7 @@ async function loadRecentRecord(id) {
     const s = res.state || {};
     if (s.config && s.config.narration) setNarrationInputs(s.config.narration);
     state.projectType = (res.record && res.record.project_type) || s.project_type || "srt";
+    state.aiMode = s.ai_mode || (res.record && res.record.ai_mode) || "api";
     if (state.projectType === "webgal") {
       resetWebGalProject();
       const wgSnap = (s.webgal && Array.isArray(s.webgal.dialogues) && s.webgal.dialogues.length) ? s.webgal : null;
@@ -1219,6 +1348,7 @@ async function loadRecentVersion(recordId, versionId) {
     const s = res.state || {};
     if (s.config && s.config.narration) setNarrationInputs(s.config.narration);
     state.projectType = s.project_type || "srt";
+    state.aiMode = s.ai_mode || "api";
     if (state.projectType === "webgal") {
       resetWebGalProject();
       const wgSnap = (s.webgal && Array.isArray(s.webgal.dialogues) && s.webgal.dialogues.length) ? s.webgal : null;
@@ -2688,6 +2818,10 @@ async function translateWebGal(silent) {
     renderWebGalLines();
     return { ok: true };
   }
+  if (state.aiMode === "manual") {
+    setWebGalStatus("客户端生成模式下请点击“客户端生成”生成提示词并应用结果", "error");
+    return { ok: false, error: new Error("manual mode") };
+  }
   const statusEl = document.getElementById("webgal-status");
   const analyzeBtn = document.getElementById("btn-webgal-analyze");
   if (!silent && statusEl) { statusEl.textContent = "正在日语翻译..."; statusEl.className = "status-text"; }
@@ -2799,9 +2933,13 @@ async function parseWebGal() {
     renderWebGalLines();
     pushWebGalHistory();
     if (lang === "ja") {
-      const tr = await translateWebGal(false);
-      if (tr.ok) {
-        setWebGalStatus("已解析 " + data.count + " 条对话，日语翻译完成", "success");
+      if (state.aiMode === "manual") {
+        setWebGalStatus("已解析 " + data.count + " 条对话；客户端生成模式下请生成翻译提示词并应用结果", "success");
+      } else {
+        const tr = await translateWebGal(false);
+        if (tr.ok) {
+          setWebGalStatus("已解析 " + data.count + " 条对话，日语翻译完成", "success");
+        }
       }
     } else {
       setWebGalStatus("已解析 " + data.count + " 条对话，可以校对或让 AI 分析情绪", "success");
@@ -2889,6 +3027,7 @@ async function analyzeWebGal() {
   if (!state.webgal.dialogues.length) { setWebGalStatus("请先解析脚本", "error"); return; }
   if (state.webgal.generating) { setWebGalStatus("生成中，请稍后再分析", "error"); return; }
   if (state.webgal.analyzing) return;
+  if (state.aiMode === "manual") { openWgClientAi("analyze"); return; }
   setWebGalStatus("正在分析情绪...", "");
   const btn = document.getElementById("btn-webgal-analyze");
   if (btn) btn.disabled = true;
@@ -2945,7 +3084,7 @@ async function generateWebGal(indices) {
     const missing = state.webgal.dialogues.some(d => !state.webgal.translations[d.index]);
     if (missing) {
       const tr = await translateWebGal(true);
-      if (!tr.ok) { setWebGalStatus("日语翻译失败，已取消生成", "error"); return; }
+      if (!tr.ok) { setWebGalStatus("缺少日语翻译，已取消生成", "error"); return; }
     }
   }
   state.webgal.psyVoice = document.getElementById("webgal-psy-voice").checked;
@@ -3269,6 +3408,7 @@ function showWorkbench() {
     const el = document.getElementById(id);
     if (el) el.classList.remove("hidden");
   });
+  updateAiModeUI();
   updateDeployBanner();
 }
 

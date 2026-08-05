@@ -116,6 +116,15 @@
           <button id="btn-analyze" class="btn-primary">分析情绪</button>
           <button id="btn-stop-analyze" class="btn-secondary btn-small hidden">停止分析</button>
         </div>
+        <div id="client-ai-box" class="client-ai-box hidden">
+          <div class="client-ai-toolbar">
+            <button type="button" id="btn-client-prompt" class="btn-secondary btn-small">生成提示词</button>
+            <span class="client-ai-hint">把提示词发给你的 AI 客户端，再把返回的 JSON 粘贴回来</span>
+          </div>
+          <textarea id="client-prompt-output" class="client-prompt-output" readonly placeholder="提示词会在这里生成并自动复制..."></textarea>
+          <textarea id="client-result-input" class="client-result-input" placeholder="粘贴 AI 返回的 JSON 结果..."></textarea>
+          <button type="button" id="btn-client-apply" class="btn-primary btn-small">应用 AI 结果</button>
+        </div>
         <div id="analyze-status" class="status-text"></div>
       </div>
     </section>
@@ -187,6 +196,16 @@
           <button id="btn-webgal-parse" class="btn-primary">解析脚本</button>
           <button id="btn-webgal-analyze" class="btn-secondary">可选：AI 分析情绪</button>
           <button id="btn-webgal-stop-analyze" class="btn-secondary btn-small hidden">停止分析</button>
+        </div>
+        <div id="wg-client-ai-box" class="client-ai-box hidden">
+          <div class="client-ai-toolbar">
+            <button type="button" id="btn-wg-client-prompt" class="btn-secondary btn-small">生成分析提示词</button>
+            <button type="button" id="btn-wg-client-translate" class="btn-secondary btn-small">生成翻译提示词</button>
+            <span class="client-ai-hint">把提示词发给你的 AI 客户端，再把返回的 JSON 粘贴回来</span>
+          </div>
+          <textarea id="wg-client-prompt-output" class="client-prompt-output" readonly placeholder="提示词会在这里生成并自动复制..."></textarea>
+          <textarea id="wg-client-result-input" class="client-result-input" placeholder="粘贴 AI 返回的 JSON 结果..."></textarea>
+          <button type="button" id="btn-wg-client-apply" class="btn-primary btn-small">应用 AI 结果</button>
         </div>
         <div id="webgal-status" class="status-text"></div>
       </div>
@@ -667,11 +686,19 @@
           <input type="radio" name="new-project-type" value="srt" checked>
           <span class="project-type-card-title">SRT 工作台</span>
           <span class="project-type-card-desc">适配 AE / Pr 剪辑工作流</span>
+          <span class="project-ai-mode-options">
+            <label class="project-ai-mode" onclick="event.stopPropagation()"><input type="radio" name="new-project-ai-mode" value="api" checked> API 生成</label>
+            <label class="project-ai-mode" onclick="event.stopPropagation()"><input type="radio" name="new-project-ai-mode" value="manual"> 客户端生成</label>
+          </span>
         </label>
         <label class="project-type-card">
           <input type="radio" name="new-project-type" value="webgal">
           <span class="project-type-card-title">WebGaL 板块</span>
           <span class="project-type-card-desc">适配 WebGaL 剧本工作流</span>
+          <span class="project-ai-mode-options">
+            <label class="project-ai-mode" onclick="event.stopPropagation()"><input type="radio" name="new-project-ai-mode" value="api" checked> API 生成</label>
+            <label class="project-ai-mode" onclick="event.stopPropagation()"><input type="radio" name="new-project-ai-mode" value="manual"> 客户端生成</label>
+          </span>
         </label>
       </div>
     </div>
