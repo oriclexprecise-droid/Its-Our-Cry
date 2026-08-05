@@ -3,34 +3,11 @@
 import json
 from .ai_client import MAX_AI_ATTEMPTS, create_ai_client
 
-
-SYSTEM_PROMPT = """你是一个专业的中文到日语翻译助手，专门翻译 MyGO!!!!! 同人剧本中的台词。
-
-请把每句台词翻译成自然、口语化、符合角色语气的日语。无论文本多长多短，都要在能力范围内完整翻译，不得省略、截断或拒绝。要求：
-1. 保留原句的完整含义、语气和标点风格
-2. 不要翻译角色名，只翻译台词文本
-3. 不要添加解释、注音或额外内容
-4. 严格按以下 JSON 格式返回，不要返回其他内容：
-[
-  {"index": 0, "translation": "おはよう"},
-  {"index": 1, "translation": "..."}
-]
-"""
-
 BATCH_SIZE = 40
-
-
-def build_translate_prompt(lines: list[dict]) -> str:
-    script_lines = []
-    for line in lines:
-        script_lines.append(f"[{line['index']}] {line['character']}：{line['text']}")
-    return "\n".join(script_lines)
-
 
 def _chunks(items, size):
     for i in range(0, len(items), size):
         yield items[i:i + size]
-
 
 def _extract_json_array(content):
     """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
@@ -62,7 +39,6 @@ def _extract_json_array(content):
         if "translation" in obj:
             return [obj]
     raise ValueError("AI returned no JSON array")
-
 
 def _translate_batch(batch, client, model, name_readings=None):
     # 与客户端模式共用同一套提示词，保证角色名单、纠音参考与翻译要求一致
@@ -96,7 +72,6 @@ def _translate_batch(batch, client, model, name_readings=None):
         except Exception as e:
             last_error = e
     raise RuntimeError("日语翻译调用已连续失败 2 次，已停止调用 API: " + str(last_error or "unknown error"))
-
 
 def translate_lines(
     lines: list[dict],

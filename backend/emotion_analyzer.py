@@ -4,7 +4,6 @@ import json
 import re
 from .ai_client import MAX_AI_ATTEMPTS, create_ai_client
 
-
 DEFAULT_EMOTIONS = [
     "生气", "告别", "哭泣", "感动", "决心",
     "悲伤", "认真", "害羞", "微笑", "惊讶", "思考",
@@ -23,38 +22,6 @@ DEFAULT_EMOTION_DESC = {
     "惊讶": "震惊、意外、没想到",
     "思考": "思索、犹豫、自言自语式思考",
 }
-
-
-def build_system_prompt(emotions):
-    """根据当前情绪列表动态生成 AI 分析准则。"""
-    emotions = [str(e).strip() for e in emotions if str(e).strip()]
-    lines = [
-        "你是一个情绪分析助手，专门分析 MyGO!!!!! 同人剧本中的台词情绪。",
-        "给定剧本台词列表（每行包含角色和台词），请你为每句台词标注一种最合适的情绪。",
-        "无论剧本多长多短，都必须逐句在能力范围内判断情绪；文本过短或缺少上下文时按字面语气正常分析，不得拒绝处理或跳过。",
-        "可选情绪类别（请只从下面选一个）：" + "、".join(emotions),
-    ]
-    desc_lines = []
-    for e in emotions:
-        desc = DEFAULT_EMOTION_DESC.get(e)
-        if desc:
-            desc_lines.append(f"- {e}：{desc}")
-    if desc_lines:
-        lines.append("情绪说明：")
-        lines.extend(desc_lines)
-    lines.extend([
-        "请严格按以下 JSON 格式返回，不要返回其他内容：",
-        "[",
-        f'  {{"index": 0, "emotion": "{emotions[0] if emotions else "思考"}"}},',
-        "  ...",
-        "]",
-        "注意：",
-        "1. index 从 0 开始，与输入的台词顺序一致",
-        "2. 旁白通常选择最中性、最平稳的情绪",
-        "3. 如果一句话包含多种情绪，选择最主要的那一种",
-    ])
-    return "\n".join(lines)
-
 
 PARAM_KEYS = ("temperature", "top_k", "top_p", "speed_factor")
 
@@ -82,7 +49,6 @@ DEFAULT_EMOTION_PARAMS = {
 
 _FALLBACK_PARAMS = {"temperature": 0.8, "top_k": 12, "top_p": 0.9, "speed_factor": 1.0, "seed": -1}
 
-
 def _merge_param_suggestion(name, ai_params):
     """Curated base overlaid only by AI values that differ from generic defaults."""
     base = dict(DEFAULT_EMOTION_PARAMS.get(name) or _FALLBACK_PARAMS)
@@ -91,7 +57,6 @@ def _merge_param_suggestion(name, ai_params):
         if v is not None and v != GENERIC_DEFAULTS.get(key):
             base[key] = v
     return base
-
 
 def build_param_prompt(emotions, lines=None):
     """构建让 AI 推荐 SoVITS 情绪参数的提示词。"""
@@ -133,7 +98,6 @@ def build_param_prompt(emotions, lines=None):
     parts.append("情绪列表：" + "、".join(emotions))
     return "\n".join(parts)
 
-
 def _params_are_degenerate(data, emotions):
     """AI 偷懒检测：缺失情绪、全部相同或全部等于默认值。"""
     names = [str(e).strip() for e in emotions if str(e).strip()]
@@ -162,7 +126,6 @@ def _params_are_degenerate(data, emotions):
         return "所有情绪的 temperature/speed_factor 完全相同"
     return None
 
-
 def _extract_json_object(content):
     """从 AI 返回文本中提取第一个 JSON 对象，容忍代码块和前后多余文字。"""
     text = (content or "").strip()
@@ -179,7 +142,6 @@ def _extract_json_object(content):
     if not isinstance(obj, dict):
         raise ValueError("AI 返回的不是 JSON 对象")
     return obj
-
 
 def _extract_result_list(content):
     """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
@@ -211,7 +173,6 @@ def _extract_result_list(content):
         if "emotion" in obj:
             return [obj]
     raise ValueError("AI 返回的不是列表格式")
-
 
 def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None):
     """调用 DeepSeek API 为情绪列表推荐 SoVITS 合成参数。"""
@@ -258,7 +219,6 @@ def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model
             last_error = e
     raise RuntimeError("参数建议调用已连续失败 2 次，已停止调用 API: " + str(last_error))
 
-
 def _param_float(value, lo, hi, default):
     try:
         v = float(value)
@@ -266,22 +226,12 @@ def _param_float(value, lo, hi, default):
         return default
     return max(lo, min(hi, v))
 
-
 def _param_int(value, lo, hi, default):
     try:
         v = int(float(value))
     except (TypeError, ValueError):
         return default
     return max(lo, min(hi, v))
-
-
-def build_analysis_prompt(lines):
-    """构建发给 AI 的分析 prompt。"""
-    script_lines = []
-    for line in lines:
-        script_lines.append(f"[{line['index']}] {line['character']}：{line['text']}")
-    return "\n".join(script_lines)
-
 
 def analyze_emotions(
     lines,
