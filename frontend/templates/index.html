@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260805b">
+<link rel="stylesheet" href="/static/style.css?v=20260805d">
 <style>
 .creator-tip {
   position: fixed;
@@ -688,8 +688,8 @@
           <span class="project-type-card-title">SRT 工作台</span>
           <span class="project-type-card-desc">适配 AE / Pr 剪辑工作流</span>
           <span class="project-ai-mode-options">
-            <span class="project-ai-mode" onclick="event.stopPropagation(); selectProjectAiMode('api')"><input type="radio" name="new-project-ai-mode-srt" value="api" checked> API 生成</span>
-            <span class="project-ai-mode" onclick="event.stopPropagation(); selectProjectAiMode('manual')"><input type="radio" name="new-project-ai-mode-srt" value="manual"> 客户端生成</span>
+            <span class="project-ai-mode" onclick="event.stopPropagation(); selectProjectAiMode('api', event)"><input type="radio" name="new-project-ai-mode-srt" value="api" checked> API 生成</span>
+            <span class="project-ai-mode" onclick="event.stopPropagation(); selectProjectAiMode('manual', event)"><input type="radio" name="new-project-ai-mode-srt" value="manual"> 客户端生成</span>
           </span>
         </div>
         <div class="project-type-card" onclick="selectProjectType('webgal')">
@@ -697,8 +697,8 @@
           <span class="project-type-card-title">WebGaL 板块</span>
           <span class="project-type-card-desc">适配 WebGaL 剧本工作流</span>
           <span class="project-ai-mode-options">
-            <span class="project-ai-mode" onclick="event.stopPropagation(); selectProjectAiMode('api')"><input type="radio" name="new-project-ai-mode-webgal" value="api" checked> API 生成</span>
-            <span class="project-ai-mode" onclick="event.stopPropagation(); selectProjectAiMode('manual')"><input type="radio" name="new-project-ai-mode-webgal" value="manual"> 客户端生成</span>
+            <span class="project-ai-mode" onclick="event.stopPropagation(); selectProjectAiMode('api', event)"><input type="radio" name="new-project-ai-mode-webgal" value="api" checked> API 生成</span>
+            <span class="project-ai-mode" onclick="event.stopPropagation(); selectProjectAiMode('manual', event)"><input type="radio" name="new-project-ai-mode-webgal" value="manual"> 客户端生成</span>
           </span>
         </div>
       </div>
@@ -736,7 +736,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260805b"></script>
+<script src="/static/app.js?v=20260805d"></script>
 <script>
 (function () {
   var tips = [

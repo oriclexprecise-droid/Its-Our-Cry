@@ -333,6 +333,7 @@ async function runAnalyze() {
     refreshHistoryButtons();
   }
 }
+document.getElementById("btn-analyze").addEventListener("click", runAnalyze);
 document.getElementById("btn-stop-analyze").addEventListener("click", () => {
   if (analysisController) analysisController.abort();
   api("/api/analyze/cancel", { method: "POST" }).catch(() => {});
@@ -869,7 +870,14 @@ function selectProjectType(type) {
   refreshProjectTypeUI();
 }
 
-function selectProjectAiMode(mode) {
+function selectProjectAiMode(mode, ev) {
+  if (ev && ev.currentTarget) {
+    const card = ev.currentTarget.closest('.project-type-card');
+    const typeRadio = card && card.querySelector('input[name="new-project-type"]');
+    if (typeRadio) {
+      document.querySelectorAll('input[name="new-project-type"]').forEach(r => { r.checked = (r.value === typeRadio.value); });
+    }
+  }
   document.querySelectorAll('input[name^="new-project-ai-mode"]').forEach(r => { r.checked = (r.value === mode); });
   refreshProjectTypeUI();
 }
