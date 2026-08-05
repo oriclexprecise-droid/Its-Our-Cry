@@ -5,7 +5,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from .ai_client import MAX_AI_ATTEMPTS, MAX_SINGLE_RETRIES_PER_RUN, EmptyAIResponseError, create_ai_client
-from .ai_ops import estimate_tokens, estimate_tokens_from_usage, extract_json_array, make_cache_key
+from .ai_ops import estimate_tokens, estimate_tokens_from_usage, extract_json_array, extract_single_emotion, extract_text_results, make_cache_key
 
 DEFAULT_EMOTIONS = [
     "生气", "告别", "哭泣", "感动", "决心",
@@ -149,8 +149,12 @@ def _extract_json_object(content):
         raise ValueError("AI 返回的不是 JSON 对象")
     return obj
 
-def _extract_result_list(content):
-    """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
+def _extract_result_list(content, emotions=None):
+    """优先解析纯文本行式结果，兼容旧 JSON 缓存返回。"""
+    if emotions:
+        plain = extract_text_results(content, emotions=emotions)
+        if plain:
+            return plain
     return extract_json_array(content)
 
 def suggest_params(emotions, api_key, base_url="https://api.deepseek.com", model="deepseek-v4-flash", lines=None, cache=None, usage=None, prices=None):
@@ -270,8 +274,9 @@ def _analyze_batch(batch, client, model, lang, emotions, name_readings, usage=No
         lang=lang,
         mode="analyze",
         name_readings=name_readings,
+        output_format="text",
     )
-    user_message = "请直接输出 JSON 数组，不要输出其他内容。"
+    user_message = "请严格按上面的格式逐行输出，不要输出其他内容。"
     last_error = None
     for attempt in range(attempts):
         try:
@@ -307,7 +312,12 @@ def _analyze_batch(batch, client, model, lang, emotions, name_readings, usage=No
                 )
             if not content:
                 raise EmptyAIResponseError("模型返回内容为空，输出额度可能被思考过程耗尽，请检查模型设置或改用非思考模型")
-            return _extract_result_list(content)
+            try:
+                return _extract_result_list(content, emotions=emotions)
+            except Exception:
+                if len(batch) == 1:
+                    return [{"index": batch[0].get("index"), "emotion": extract_single_emotion(content, emotions)}]
+                raise
         except EmptyAIResponseError:
             raise
         except Exception as e:

@@ -3,7 +3,7 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 from .ai_client import MAX_AI_ATTEMPTS, MAX_SINGLE_RETRIES_PER_RUN, EmptyAIResponseError, create_ai_client
-from .ai_ops import estimate_tokens, estimate_tokens_from_usage, extract_json_array, make_cache_key
+from .ai_ops import estimate_tokens, estimate_tokens_from_usage, extract_json_array, extract_single_translation, extract_text_results, make_cache_key
 
 BATCH_SIZE = 80
 
@@ -24,7 +24,10 @@ def _is_soft_parse_error(exc):
 
 
 def _extract_json_array(content):
-    """兼容代码块、数组、对象包裹数组、单条对象四种返回。"""
+    """优先解析纯文本行式结果，兼容旧 JSON 缓存返回。"""
+    plain = extract_text_results(content)
+    if plain:
+        return plain
     return extract_json_array(content)
 
 def _translate_batch(batch, client, model, name_readings=None, usage=None, prices=None, attempts=None):
@@ -38,8 +41,9 @@ def _translate_batch(batch, client, model, name_readings=None, usage=None, price
         lang="ja",
         mode="translate",
         name_readings=name_readings,
+        output_format="text",
     )
-    user_message = "请直接输出 JSON 数组，不要输出其他内容。"
+    user_message = "请严格按上面的格式逐行输出，不要输出其他内容。"
     last_error = None
     for attempt in range(attempts):
         kwargs = {
@@ -75,7 +79,12 @@ def _translate_batch(batch, client, model, name_readings=None, usage=None, price
                 )
             if not content:
                 raise EmptyAIResponseError("模型返回内容为空，输出额度可能被思考过程耗尽，请检查模型设置或改用非思考模型")
-            return _extract_json_array(content)
+            try:
+                return _extract_json_array(content)
+            except Exception:
+                if len(batch) == 1:
+                    return [{"index": batch[0].get("index"), "translation": extract_single_translation(content)}]
+                raise
         except EmptyAIResponseError:
             raise
         except Exception as e:

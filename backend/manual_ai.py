@@ -47,7 +47,7 @@ def _collect_name_readings(chars, lines, name_readings=None):
     return readings
 
 
-def _prompt_parts(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None):
+def _prompt_parts(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None, output_format="json"):
     """构建提示词公共部分（不含台词列表），供整本与分段共用。"""
     emotions = [str(e).strip() for e in emotions if str(e).strip()]
     chars = _collect_characters(lines, characters)
@@ -82,13 +82,25 @@ def _prompt_parts(lines, emotions, lang="zh", mode="analyze", characters=None, n
             "2. 严格按上面的角色名单识别角色名，一律保留，不得意译、不得拆改",
             "3. 不要添加解释、注音或额外内容",
         ])
-    parts.append("输出格式：只输出严格 JSON 数组，不要输出其他内容：")
-    if mode == "translate":
-        parts.append('[{"index": 0, "translation": "やあ"}, ...]')
-    elif lang == "ja":
-        parts.append('[{"index": 0, "emotion": "微笑", "translation": "やあ"}, ...]')
+    if output_format == "text":
+        if mode == "translate":
+            parts.append("输出格式：每句一行，格式为 `index|译文`，例如：")
+            parts.append("0|やあ")
+        elif lang == "ja":
+            parts.append("输出格式：每句一行，格式为 `index|情绪|译文`，例如：")
+            parts.append("0|微笑|やあ")
+        else:
+            parts.append("输出格式：每句一行，格式为 `index|情绪`，例如：")
+            parts.append("0|微笑")
+        parts.append("只用英文竖线 `|` 分隔，不要输出 JSON、代码块、解释或任何其他内容。")
     else:
-        parts.append('[{"index": 0, "emotion": "微笑"}, ...]')
+        parts.append("输出格式：只输出严格 JSON 数组，不要输出其他内容：")
+        if mode == "translate":
+            parts.append('[{"index": 0, "translation": "やあ"}, ...]')
+        elif lang == "ja":
+            parts.append('[{"index": 0, "emotion": "微笑", "translation": "やあ"}, ...]')
+        else:
+            parts.append('[{"index": 0, "emotion": "微笑"}, ...]')
     parts.extend([
         "注意：",
         "1. index 从 0 开始，与输入台词顺序一一对应",
@@ -100,9 +112,9 @@ def _prompt_parts(lines, emotions, lang="zh", mode="analyze", characters=None, n
     return parts
 
 
-def build_client_prompt(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None):
-    """构造可粘贴到任意 AI 客户端的整本提示词，返回严格 JSON 数组。"""
-    parts = _prompt_parts(lines, emotions, lang=lang, mode=mode, characters=characters, name_readings=name_readings)
+def build_client_prompt(lines, emotions, lang="zh", mode="analyze", characters=None, name_readings=None, output_format="json"):
+    """构造整本提示词；默认 JSON 供客户端粘贴，output_format="text" 供 API 直调。"""
+    parts = _prompt_parts(lines, emotions, lang=lang, mode=mode, characters=characters, name_readings=name_readings, output_format=output_format)
     parts.append("台词：")
     parts.append(build_script_lines(lines))
     return "\n".join(parts)

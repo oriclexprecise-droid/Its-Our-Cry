@@ -86,7 +86,7 @@ def run():
     )
     prompt = system_prompt_of(captured)
     expected = build_client_prompt(
-        LINES, EMOTIONS, lang="zh", mode="analyze", name_readings=READINGS
+        LINES, EMOTIONS, lang="zh", mode="analyze", name_readings=READINGS, output_format="text"
     )
     assert prompt == expected, "analyze-zh prompt diverged from build_client_prompt"
 
@@ -102,7 +102,7 @@ def run():
     )
     prompt = system_prompt_of(captured)
     expected = build_client_prompt(
-        LINES, EMOTIONS, lang="ja", mode="analyze", name_readings=READINGS
+        LINES, EMOTIONS, lang="ja", mode="analyze", name_readings=READINGS, output_format="text"
     )
     assert prompt == expected, "analyze-ja prompt diverged from build_client_prompt"
 
@@ -117,7 +117,7 @@ def run():
     )
     prompt = system_prompt_of(captured)
     expected = build_client_prompt(
-        LINES, [], lang="ja", mode="translate", name_readings=READINGS
+        LINES, [], lang="ja", mode="translate", name_readings=READINGS, output_format="text"
     )
     assert prompt == expected, "translate prompt diverged from build_client_prompt"
 

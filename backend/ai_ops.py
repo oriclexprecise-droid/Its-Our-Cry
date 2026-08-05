@@ -219,6 +219,114 @@ def extract_json_array(content):
     raise ValueError("AI returned no JSON array")
 
 
+
+
+def _strip_code_fence(text):
+    text = (text or "").strip()
+    text = re.sub(r"^```[A-Za-z0-9_]*\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def _find_named_emotion(text, emotions):
+    """在自由文本里找第一个出现的合法情绪名，长词优先。"""
+    text = str(text or "")
+    for e in sorted(
+        (str(x).strip() for x in emotions if str(x).strip()),
+        key=len,
+        reverse=True,
+    ):
+        if e and e in text:
+            return e
+    return None
+
+
+def _clean_quoted_text(text):
+    """去掉译文/情绪回复里的引号、说明前缀与编号前缀。"""
+    text = (text or "").strip().strip("\"'“”‘’")
+    text = re.sub(r"^\s*(?:翻译|译文|日语|日文|情绪|情绪名)?\s*[:：]\s*", "", text)
+    text = re.sub(r"^\s*(?:\[\s*\d+\s*\]|\d+\s*[.、:：|\-_,，])\s*", "", text)
+    return text.strip()
+
+
+def extract_text_results(content, emotions=None):
+    """解析纯文本行式结果：`0|情绪`、`0|情绪|译文`、`0|译文`；无法解析的行会跳过。"""
+    text = _strip_code_fence(content)
+    results = []
+    for raw in text.splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        m = re.match(r"^\s*\[?\s*(\d+)\s*\]?\s*[|:：,，]\s*(.+)$", raw)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        rest = m.group(2).strip().strip("\"'“”‘’")
+        if not rest:
+            continue
+        if emotions:
+            emo = _find_named_emotion(rest, emotions)
+            if emo is None:
+                continue
+            row = {"index": idx, "emotion": emo}
+            tail = rest[len(emo):].lstrip("|").strip()
+            if tail:
+                row["translation"] = _clean_quoted_text(tail)
+            results.append(row)
+        else:
+            results.append({"index": idx, "translation": _clean_quoted_text(rest)})
+    return results
+
+
+def extract_single_emotion(content, emotions):
+    """从单句情绪回复提取情绪名：支持 `0|情绪`、JSON 或直接输出情绪名；无结果时抛错。"""
+    text = _strip_code_fence(content)
+    if not text:
+        raise ValueError("AI returned empty content")
+    try:
+        rows = extract_text_results(text, emotions=emotions)
+        if rows:
+            return rows[0]["emotion"]
+    except Exception:
+        pass
+    try:
+        arr = extract_json_array(text)
+        if arr and isinstance(arr[0], dict):
+            emo = str(arr[0].get("emotion") or "").strip()
+            if emo and any(emo == str(e).strip() for e in emotions):
+                return emo
+    except Exception:
+        pass
+    emo = _find_named_emotion(text, emotions)
+    if emo is not None:
+        return emo
+    raise ValueError("AI returned no usable emotion: " + text[:80])
+
+
+def extract_single_translation(content):
+    """从单句翻译回复提取译文：支持 `0|译文`、JSON 或直接输出译文；无结果时抛错。"""
+    text = _strip_code_fence(content)
+    if not text:
+        raise ValueError("AI returned empty content")
+    try:
+        rows = extract_text_results(text)
+        if rows:
+            return rows[0]["translation"]
+    except Exception:
+        pass
+    try:
+        arr = extract_json_array(text)
+        if arr and isinstance(arr[0], dict):
+            tr = str(arr[0].get("translation") or "").strip()
+            if tr:
+                return tr
+    except Exception:
+        pass
+    cleaned = _clean_quoted_text(text)
+    if cleaned:
+        return cleaned
+    raise ValueError("AI returned no usable translation: " + text[:80])
+
 def make_cache_key(kind, model, lang, emotions, name_readings, items):
     """生成缓存键：提示词版本 + 任务 + 模型 + 输入，任何变化都会重新请求。"""
     payload = {
