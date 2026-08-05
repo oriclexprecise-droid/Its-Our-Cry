@@ -180,6 +180,14 @@ function handleAnalyzeSuccess(data) {
       status.textContent = "已分析 " + data.lines.length + " 条台词";
       status.className = "status-text success";
     }
+    const aiInfo = aiUsageSummary(data);
+    if (aiInfo) status.textContent += aiInfo;
+    if ((data.ai_failed_lines || []).length) {
+      status.textContent += "，失败句：" + data.ai_failed_lines.map(i => "#" + (Number(i) + 1)).join("、");
+      status.className = "status-text error";
+    }
+    loadAiUsage();
+
     document.getElementById("step-review").classList.remove("hidden");
     document.getElementById("step-download").classList.add("hidden");
     document.getElementById("btn-merge").classList.add("hidden");
@@ -220,6 +228,86 @@ async function copyTextToClipboard(text) {
   ta.select();
   try { document.execCommand("copy"); } catch (e2) {}
   document.body.removeChild(ta);
+}
+
+let aiUsageData = null;
+async function loadAiUsage() {
+  try {
+    aiUsageData = await api("/api/ai_usage", { timeout: 8000 });
+  } catch (e) { return; }
+  renderAiUsage();
+}
+
+function renderAiUsage() {
+  const d = aiUsageData || {};
+  const s = d.session || {};
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set("usage-api-calls", String(s.api_calls || 0));
+  set("usage-cache-hits", String(s.cache_hits || 0));
+  set("usage-failed-lines", String(s.failed_lines || 0));
+  set("usage-input-tokens", String(s.input_tokens || 0));
+  set("usage-output-tokens", String(s.output_tokens || 0));
+  set("usage-cost", "¥" + Number(s.cost || 0).toFixed(3));
+  const badge = document.getElementById("btn-ai-usage-count");
+  if (badge) badge.textContent = String(s.api_calls || 0);
+}
+
+function aiUsageSummary(data) {
+  if (!data || !data.ai_usage) return "";
+  const s = data.ai_usage.session || {};
+  const parts = ["API " + (s.api_calls || 0) + " 次"];
+  if (s.cache_hits) parts.push("缓存 " + (s.cache_hits || 0) + " 次");
+  parts.push("失败 " + ((data.ai_failed_lines || []).length) + " 句");
+  parts.push("约 ¥" + Number(s.cost || 0).toFixed(3));
+  return " · " + parts.join(" / ");
+}
+
+function initAiUsagePanel() {
+  const refreshBtn = document.getElementById("btn-usage-refresh");
+  const resetBtn = document.getElementById("btn-usage-reset");
+  const clearBtn = document.getElementById("btn-ai-cache-clear");
+  const st = () => document.getElementById("usage-status");
+  if (refreshBtn) refreshBtn.addEventListener("click", async () => {
+    await loadAiUsage();
+    if (st()) { st().textContent = "已刷新"; st().className = "status-text success"; }
+  });
+  if (resetBtn) resetBtn.addEventListener("click", async () => {
+    if (!(await showConfirmModal("确定重置本次会话的 AI 用量统计吗？累计数据保留。"))) return;
+    try {
+      await api("/api/ai_usage/reset", { method: "POST" });
+      await loadAiUsage();
+      if (st()) { st().textContent = "已重置会话统计"; st().className = "status-text success"; }
+    } catch (e) { if (st()) { st().textContent = "重置失败: " + e.message; st().className = "status-text error"; } }
+  });
+  if (clearBtn) clearBtn.addEventListener("click", async () => {
+    if (!(await showConfirmModal("确定清空 AI 结果缓存吗？下次相同内容会重新调用 API。"))) return;
+    try {
+      await api("/api/ai_cache/clear", { method: "POST" });
+      if (st()) { st().textContent = "已清空缓存"; st().className = "status-text success"; }
+    } catch (e) { if (st()) { st().textContent = "清空失败: " + e.message; st().className = "status-text error"; } }
+  });
+  const usageBtn = document.getElementById("btn-ai-usage");
+  const usageDropdown = document.getElementById("ai-usage-dropdown");
+  if (usageBtn && usageDropdown) {
+    usageBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = usageDropdown.classList.contains("hidden");
+      const recentDropdown = document.getElementById("recent-dropdown");
+      if (recentDropdown) recentDropdown.classList.add("hidden");
+      if (willOpen) {
+        usageDropdown.classList.remove("hidden");
+        loadAiUsage();
+      } else {
+        usageDropdown.classList.add("hidden");
+      }
+    });
+    document.addEventListener("click", (e) => {
+      if (usageDropdown.classList.contains("hidden")) return;
+      if (usageDropdown.contains(e.target) || usageBtn.contains(e.target)) return;
+      usageDropdown.classList.add("hidden");
+    });
+  }
+  loadAiUsage();
 }
 
 async function openClientAi() {
@@ -639,6 +727,7 @@ function renderLines() {
         state.lines[idx] = res.line;
         delete state.failures[idx];
         refreshHistory();
+        if (res.ai_usage) loadAiUsage();
         if (res.reanalyze_error) {
           state.failures[idx] = "文本已修改，情绪重新分析失败：" + res.reanalyze_error;
         }
@@ -663,7 +752,7 @@ function renderLines() {
             status.className = "status-text error";
           }
         } else {
-          status.textContent = "文本与情绪已更新";
+          status.textContent = "文本与情绪已更新" + (res.ai_usage ? aiUsageSummary(res) : "");
           status.className = "status-text success";
         }
       } catch (err) {
@@ -842,11 +931,13 @@ function showProjectPicker() {
   const settings = document.getElementById("view-settings");
   const dropdown = document.getElementById("recent-dropdown");
   if (dropdown) dropdown.classList.add("hidden");
+  const usageDropdown = document.getElementById("ai-usage-dropdown");
+  if (usageDropdown) usageDropdown.classList.add("hidden");
   if (projects) projects.classList.remove("hidden");
   if (workbench) workbench.classList.add("hidden");
   if (webgal) webgal.classList.add("hidden");
   if (settings) settings.classList.add("hidden");
-  ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-recent", "btn-exit-home"].forEach(id => {
+  ["btn-back-workbench", "btn-undo", "btn-redo", "btn-refresh", "btn-ai-usage", "btn-recent", "btn-exit-home"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add("hidden");
   });
@@ -1589,6 +1680,8 @@ function initRecentRecords() {
   if (recentBtn && dropdown) {
     recentBtn.addEventListener("click", (e) => {
       e.stopPropagation();
+      const usageDropdown = document.getElementById("ai-usage-dropdown");
+      if (usageDropdown) usageDropdown.classList.add("hidden");
       dropdown.classList.toggle("hidden");
       if (!dropdown.classList.contains("hidden")) refreshRecentList();
     });
@@ -2901,6 +2994,9 @@ async function translateWebGal(silent) {
     state.webgal.translations = data.translations || {};
     renderWebGalLines();
     pushWebGalHistory();
+    const failedWgTr = data.ai_failed_lines || [];
+    if (!silent) setWebGalStatus("日语翻译完成" + aiUsageSummary(data) + (failedWgTr.length ? "，失败 " + failedWgTr.length + " 句" : ""), "success");
+    loadAiUsage();
     return { ok: true };
   } catch (e) {
     if (e.name === "AbortError") {
@@ -3114,7 +3210,9 @@ async function analyzeWebGal() {
     state.webgal.translations = data.translations || {};
     renderWebGalLines();
     pushWebGalHistory();
-    setWebGalStatus("情绪分析完成，已填充 " + Object.keys(state.webgal.emotions).length + " 条", "success");
+    const failedWgAn = data.ai_failed_lines || [];
+    setWebGalStatus("情绪分析完成，已填充 " + Object.keys(state.webgal.emotions).length + " 条" + aiUsageSummary(data) + (failedWgAn.length ? "，失败 " + failedWgAn.length + " 句" : ""), "success");
+    loadAiUsage();
   } catch (e) {
     if (e.name === "AbortError") {
       setWebGalStatus("已停止分析", "");
@@ -3504,6 +3602,10 @@ function showSettings(tab) {
   if (recentDropdown) recentDropdown.classList.add("hidden");
   const recentBtn = document.getElementById("btn-recent");
   if (recentBtn) recentBtn.classList.add("hidden");
+  const usageDropdown = document.getElementById("ai-usage-dropdown");
+  if (usageDropdown) usageDropdown.classList.add("hidden");
+  const usageBtn = document.getElementById("btn-ai-usage");
+  if (usageBtn) usageBtn.classList.add("hidden");
   workbench.classList.add("hidden");
   if (webgal) webgal.classList.add("hidden");
   settings.classList.remove("hidden");
@@ -3532,7 +3634,7 @@ function showWorkbench() {
   if (webgal) webgal.classList.toggle("hidden", !isWebGal);
   settings.classList.add("hidden");
   document.getElementById("btn-back-workbench").classList.add("hidden");
-  ["btn-undo", "btn-redo", "btn-refresh", "btn-settings", "btn-recent", "btn-exit-home"].forEach(id => {
+  ["btn-undo", "btn-redo", "btn-refresh", "btn-settings", "btn-ai-usage", "btn-recent", "btn-exit-home"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.remove("hidden");
   });
@@ -4493,7 +4595,8 @@ async function suggestEmotionParams() {
     const toggleEl = document.getElementById("cb-enable-emotion-params");
     if (toggleEl) toggleEl.checked = emotionParamsEnabled;
     renderEmotionParams();
-    if (statusEl) { statusEl.textContent = "已填入并应用 AI 情绪参数建议"; statusEl.className = "status-text success"; }
+    if (statusEl) { statusEl.textContent = "已填入并应用 AI 情绪参数建议" + aiUsageSummary(res); statusEl.className = "status-text success"; }
+    loadAiUsage();
   } catch (e) {
     if (statusEl) { statusEl.textContent = "生成建议失败: " + e.message; statusEl.className = "status-text error"; }
   }
@@ -4728,6 +4831,7 @@ function initShareImportExport() {
 }
 
 initLowPerfConfig();
+initAiUsagePanel();
 initAIConfig();
 initNarrationConfig();
 initPronunciationConfig();

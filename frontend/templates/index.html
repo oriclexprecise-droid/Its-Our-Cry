@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>It 's Our Cry！！！！！</title>
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-<link rel="stylesheet" href="/static/style.css?v=20260805e">
+<link rel="stylesheet" href="/static/style.css?v=20260805g">
 <style>
 .creator-tip {
   position: fixed;
@@ -80,6 +80,12 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
     设置
   </button>
+  <button type="button" id="btn-ai-usage" class="ai-usage-float hidden" title="AI 用量">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+    AI 用量
+    <span id="btn-ai-usage-count" class="ai-usage-count">0</span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+  </button>
   <button type="button" id="btn-recent" class="recent-float hidden" title="版本历史">
     版本历史
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
@@ -94,6 +100,27 @@
     <span id="recent-status" class="status-text"></span>
   </div>
 
+  <div id="ai-usage-dropdown" class="ai-usage-dropdown hidden">
+    <div class="ai-usage-head">
+      <span class="ai-usage-title">AI 用量</span>
+      <span class="ai-usage-sub">会话统计</span>
+    </div>
+    <div class="usage-grid">
+      <div class="usage-item"><span>API 调用</span><strong id="usage-api-calls">0</strong></div>
+      <div class="usage-item"><span>缓存命中</span><strong id="usage-cache-hits">0</strong></div>
+      <div class="usage-item"><span>失败句</span><strong id="usage-failed-lines">0</strong></div>
+      <div class="usage-item"><span>输入 tokens</span><strong id="usage-input-tokens">0</strong></div>
+      <div class="usage-item"><span>输出 tokens</span><strong id="usage-output-tokens">0</strong></div>
+      <div class="usage-item"><span>估算费用</span><strong id="usage-cost">¥0.000</strong></div>
+    </div>
+    <p class="usage-note">本次会话统计；费用按默认价格估算，实际以 API 账单为准。</p>
+    <div class="btn-row">
+      <button type="button" id="btn-usage-refresh" class="btn-secondary btn-small btn-flex">刷新统计</button>
+      <button type="button" id="btn-usage-reset" class="btn-secondary btn-small">重置会话</button>
+      <button type="button" id="btn-ai-cache-clear" class="btn-secondary btn-small">清空缓存</button>
+    </div>
+    <span id="usage-status" class="status-text"></span>
+  </div>
   <div id="deploy-banner" class="deploy-banner hidden">
     <span>还没配置 GPT-SoVITS，配音前需要先完成部署</span>
     <button type="button" id="btn-go-deploy" class="btn-secondary btn-small">去部署</button>
@@ -764,7 +791,7 @@
     </div>
   </div>
 </div>
-<script src="/static/app.js?v=20260805e"></script>
+<script src="/static/app.js?v=20260805f"></script>
 <script>
 (function () {
   var tips = [
