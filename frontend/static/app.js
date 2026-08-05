@@ -447,7 +447,7 @@ async function runAnalyze() {
   stopBtn.classList.remove("hidden");
   syncScriptDraft();
   try {
-    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim() }), signal: controller.signal });
+    const data = await api("/api/analyze", { method: "POST", body: JSON.stringify({ text, api_key: apiKey, lang, base_url: document.getElementById("ai-base-url").value.trim(), model: document.getElementById("ai-model").value.trim(), force: document.getElementById("force-reanalyze").checked }), signal: controller.signal });
     handleAnalyzeSuccess(data);
   } catch (e) {
     if (e.name === "AbortError") {

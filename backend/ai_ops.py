@@ -144,6 +144,8 @@ class AiCache:
             self.data = {"entries": {}}
 
     def lookup(self, key):
+        if getattr(self, "bypass", False):
+            return None
         with self._lock:
             entry = self.data["entries"].get(key)
             if isinstance(entry, dict) and "result" in entry:

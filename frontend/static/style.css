@@ -186,6 +186,7 @@ textarea { min-height: 240px; line-height: 1.6; }
 #line-count { font-size: 13px; color: #888; }
 .input-row { display: flex; align-items: flex-end; gap: 16px; margin-top: 12px; }
 .input-row .btn-primary { margin-top: 0; }
+.force-reanalyze { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #aaa; white-space: nowrap; cursor: pointer; margin-bottom: 10px; }
 .lang-select-row { display: flex; flex-direction: column; gap: 4px; }
 .lang-select-row label { font-size: 13px; color: #aaa; }
 .lang-select-row select {

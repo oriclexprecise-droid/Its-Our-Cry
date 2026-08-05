@@ -1483,6 +1483,7 @@ def create_app(config_path="config.yaml"):
         lang = data.get("lang", "zh")
         base_url = data.get("base_url") or config["deepseek"].get("base_url", "https://api.deepseek.com")
         model = data.get("model") or config["deepseek"].get("model", "deepseek-chat")
+        force = bool(data.get("force"))
 
         if not script_text.strip():
             return jsonify({"error": "script is empty"}), 400
@@ -1497,7 +1498,7 @@ def create_app(config_path="config.yaml"):
 
         # 智能补齐：相同行直接复用旧结果，只对新增/改动行做增量分析
         existing = state.get("lines") or []
-        same_script = state.get("script") == script_text and len(existing) == len(lines)
+        same_script = not force and state.get("script") == script_text and len(existing) == len(lines)
         if same_script:
             for new_line, old_line in zip(lines, existing):
                 if new_line.get("text") != old_line.get("text") or new_line.get("character") != old_line.get("character"):
@@ -1507,10 +1508,11 @@ def create_app(config_path="config.yaml"):
         for line in lines:
             old = old_by_index.get(line.get("index"))
             if old and old.get("character") == line.get("character") and old.get("text") == line.get("text"):
-                if old.get("emotion"):
-                    line["emotion"] = old["emotion"]
-                if old.get("translated_text"):
-                    line["translated_text"] = old["translated_text"]
+                if not force:
+                    if old.get("emotion"):
+                        line["emotion"] = old["emotion"]
+                    if old.get("translated_text"):
+                        line["translated_text"] = old["translated_text"]
                 if old.get("interval") is not None:
                     line["interval"] = old["interval"]
         need_emotion = [line for line in lines if not (line.get("emotion") or "")]
@@ -1522,6 +1524,7 @@ def create_app(config_path="config.yaml"):
         seq = state.get("analysis_seq", 0) + 1
         state["analysis_seq"] = seq
         cache = AiCache(str(ai_cache_path))
+        cache.bypass = force
         usage = AiUsage(str(ai_usage_path))
         failed = []
 
