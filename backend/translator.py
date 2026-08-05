@@ -2,7 +2,7 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from .ai_client import MAX_AI_ATTEMPTS, MAX_SINGLE_RETRIES_PER_RUN, create_ai_client
+from .ai_client import MAX_AI_ATTEMPTS, MAX_SINGLE_RETRIES_PER_RUN, EmptyAIResponseError, create_ai_client
 from .ai_ops import estimate_tokens, estimate_tokens_from_usage, extract_json_array, make_cache_key
 
 BATCH_SIZE = 80
@@ -53,7 +53,10 @@ def _translate_batch(batch, client, model, name_readings=None, usage=None, price
         }
         try:
             response = client.chat.completions.create(**kwargs)
+            finish_reason = str(getattr(response.choices[0], "finish_reason", "") or "").lower()
             content = (response.choices[0].message.content or "").strip()
+            if not content and finish_reason == "stop":
+                content = str(getattr(response.choices[0].message, "reasoning_content", "") or "").strip()
             if usage:
                 in_tokens, out_tokens = estimate_tokens_from_usage(
                     getattr(response, "usage", None),
@@ -68,7 +71,11 @@ def _translate_batch(batch, client, model, name_readings=None, usage=None, price
                     output_tokens=out_tokens,
                     prices=prices,
                 )
+            if not content:
+                raise EmptyAIResponseError("模型返回内容为空，输出额度可能被思考过程耗尽，请检查模型设置或改用非思考模型")
             return _extract_json_array(content)
+        except EmptyAIResponseError:
+            raise
         except Exception as e:
             last_error = e
     raise RuntimeError("日语翻译调用已连续失败 " + str(attempts) + " 次，已停止调用 API: " + str(last_error)) from last_error
