@@ -1,6 +1,6 @@
-﻿; 增量更新安装包：与完整包共用 AppId，只覆盖程序文件，权重等大文件保留
+; 增量更新安装包：与完整包共用 AppId，只覆盖程序文件，权重等大文件保留
 #define MyAppName "It's Our Cry!!!!!"
-#define MyAppVersion "2.1.2"
+#define MyAppVersion "2.2.0"
 #define MyAppExeName "ItsOurCry.exe"
 
 [Setup]
