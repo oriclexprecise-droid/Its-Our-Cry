@@ -81,7 +81,8 @@ def _translate_batch(batch, client, model, name_readings=None, usage=None, price
                 raise EmptyAIResponseError("模型返回内容为空，输出额度可能被思考过程耗尽，请检查模型设置或改用非思考模型")
             try:
                 return _extract_json_array(content)
-            except Exception:
+            except Exception as parse_err:
+                print("[translate] parse failed: " + str(parse_err)[:120] + " | content head: " + content[:300].replace("\n", "\\n"))
                 if len(batch) == 1:
                     return [{"index": batch[0].get("index"), "translation": extract_single_translation(content)}]
                 raise

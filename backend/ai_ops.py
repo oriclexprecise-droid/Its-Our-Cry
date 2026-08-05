@@ -245,36 +245,59 @@ def _clean_quoted_text(text):
     """去掉译文/情绪回复里的引号、说明前缀与编号前缀。"""
     text = (text or "").strip().strip("\"'“”‘’")
     text = re.sub(r"^\s*(?:翻译|译文|日语|日文|情绪|情绪名)?\s*[:：]\s*", "", text)
-    text = re.sub(r"^\s*(?:\[\s*\d+\s*\]|\d+\s*[.、:：|\-_,，])\s*", "", text)
+    text = re.sub(r"^\s*(?:\[\s*\d+\s*\]|\d+\s*[.、:：|\-_,，｜])\s*", "", text)
     return text.strip()
 
 
+_ENTRY_PATTERN = re.compile(r"^\s*\[?\s*(\d+)\s*\]?\s*(?:[|｜:：,，.。、\-\t ]+)(.+)$")
+_MULTI_ENTRY_SPLIT = re.compile(r"\[?\s*\d+\s*\]?\s*(?:[|｜:：,，.。、\-\t ]+)")
+
+
+def _split_multi_entries(line):
+    """兼容模型把多条结果挤在同一行，如 `0|微笑, 1|悲伤`。"""
+    matches = list(_MULTI_ENTRY_SPLIT.finditer(line))
+    if len(matches) < 2:
+        return [line]
+    pieces = []
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(line)
+        piece = line[m.start():end].strip().rstrip(",，")
+        if piece:
+            pieces.append(piece)
+    return pieces or [line]
+
+
 def extract_text_results(content, emotions=None):
-    """解析纯文本行式结果：`0|情绪`、`0|情绪|译文`、`0|译文`；无法解析的行会跳过。"""
+    """解析纯文本行式结果，容忍 `0|情绪`、`0. 情绪`、`[0] 情绪`、全角竖线及一行多条。"""
     text = _strip_code_fence(content)
     results = []
     for raw in text.splitlines():
         raw = raw.strip()
         if not raw:
             continue
-        m = re.match(r"^\s*\[?\s*(\d+)\s*\]?\s*[|:：,，]\s*(.+)$", raw)
-        if not m:
-            continue
-        idx = int(m.group(1))
-        rest = m.group(2).strip().strip("\"'“”‘’")
-        if not rest:
-            continue
-        if emotions:
-            emo = _find_named_emotion(rest, emotions)
-            if emo is None:
+        candidates = _split_multi_entries(raw) if emotions else [raw]
+        for entry in candidates:
+            entry = entry.strip()
+            if not entry:
                 continue
-            row = {"index": idx, "emotion": emo}
-            tail = rest[len(emo):].lstrip("|").strip()
-            if tail:
-                row["translation"] = _clean_quoted_text(tail)
-            results.append(row)
-        else:
-            results.append({"index": idx, "translation": _clean_quoted_text(rest)})
+            m = _ENTRY_PATTERN.match(entry)
+            if not m:
+                continue
+            idx = int(m.group(1))
+            rest = m.group(2).strip().strip("\"'“”‘’")
+            if not rest:
+                continue
+            if emotions:
+                emo = _find_named_emotion(rest, emotions)
+                if emo is None:
+                    continue
+                row = {"index": idx, "emotion": emo}
+                tail = rest[len(emo):].lstrip("|｜").strip()
+                if tail:
+                    row["translation"] = _clean_quoted_text(tail)
+                results.append(row)
+            else:
+                results.append({"index": idx, "translation": _clean_quoted_text(rest)})
     return results
 
 

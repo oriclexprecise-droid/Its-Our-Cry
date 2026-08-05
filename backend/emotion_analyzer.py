@@ -314,7 +314,8 @@ def _analyze_batch(batch, client, model, lang, emotions, name_readings, usage=No
                 raise EmptyAIResponseError("模型返回内容为空，输出额度可能被思考过程耗尽，请检查模型设置或改用非思考模型")
             try:
                 return _extract_result_list(content, emotions=emotions)
-            except Exception:
+            except Exception as parse_err:
+                print("[analyze] parse failed: " + str(parse_err)[:120] + " | content head: " + content[:300].replace("\n", "\\n"))
                 if len(batch) == 1:
                     return [{"index": batch[0].get("index"), "emotion": extract_single_emotion(content, emotions)}]
                 raise

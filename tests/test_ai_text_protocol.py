@@ -64,8 +64,58 @@ def test_extract_text_results_translate():
     assert rows == [{"index": 0, "translation": "こんにちは"}, {"index": 1, "translation": "さようなら"}], rows
 
 
+def test_extract_text_results_tolerant_variants():
+    rows = extract_text_results("0. 微笑\n1. 悲伤", emotions=EMOTIONS)
+    assert [r["emotion"] for r in rows] == ["微笑", "悲伤"], rows
+
+    rows = extract_text_results("[0] 微笑\n[1] 悲伤", emotions=EMOTIONS)
+    assert [r["emotion"] for r in rows] == ["微笑", "悲伤"], rows
+
+    rows = extract_text_results("0｜微笑\n1｜悲伤", emotions=EMOTIONS)
+    assert [r["emotion"] for r in rows] == ["微笑", "悲伤"], rows
+
+    rows = extract_text_results("0|微笑, 1|悲伤", emotions=EMOTIONS)
+    assert [r["emotion"] for r in rows] == ["微笑", "悲伤"], rows
+
+    rows = extract_text_results("0. こんにちは\n1. さようなら")
+    assert [r["translation"] for r in rows] == ["こんにちは", "さようなら"], rows
+
+
+def test_analyze_tolerant_single_line():
+    emotion_analyzer.create_ai_client = lambda api_key, base_url: make_scripted_client(
+        ["[0] 微笑"]
+    )
+    failed = []
+    out = emotion_analyzer.analyze_emotions(
+        lines=[{"index": 0, "character": "千早爱音", "text": "你好"}],
+        api_key="test",
+        model="deepseek-v4-flash",
+        lang="zh",
+        emotions=EMOTIONS,
+        failed_out=failed,
+    )
+    assert out == [{"index": 0, "emotion": "微笑"}], out
+    assert failed == [], failed
+
+
+def test_translate_tolerant_single_line():
+    translator.create_ai_client = lambda api_key, base_url: make_scripted_client(
+        ["0. こんにちは"]
+    )
+    out = translator.translate_lines(
+        lines=[{"index": 0, "character": "千早爱音", "text": "你好"}],
+        api_key="test",
+        model="deepseek-v4-flash",
+        name_readings=[],
+        failed_out=[],
+    )
+    assert out == [{"index": 0, "translation": "こんにちは"}], out
+
+
 def test_extract_single_helpers():
     assert extract_single_emotion("这句话的情绪是微笑", EMOTIONS) == "微笑"
+    assert extract_single_emotion("[0] 微笑", EMOTIONS) == "微笑"
+    assert extract_single_translation("0. こんにちは") == "こんにちは"
     assert extract_single_translation("こんにちは") == "こんにちは"
     assert extract_single_translation("0|こんにちは") == "こんにちは"
     try:
@@ -202,7 +252,10 @@ def main():
     tests = [
         test_extract_text_results_emotions,
         test_extract_text_results_translate,
+        test_extract_text_results_tolerant_variants,
         test_extract_single_helpers,
+        test_analyze_tolerant_single_line,
+        test_translate_tolerant_single_line,
         test_analyze_zh_text_protocol,
         test_analyze_ja_emotion_only,
         test_translate_text_protocol,

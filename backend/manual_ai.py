@@ -92,7 +92,7 @@ def _prompt_parts(lines, emotions, lang="zh", mode="analyze", characters=None, n
         else:
             parts.append("输出格式：每句一行，格式为 `index|情绪`，例如：")
             parts.append("0|微笑")
-        parts.append("只用英文竖线 `|` 分隔，不要输出 JSON、代码块、解释或任何其他内容。")
+        parts.append("严格要求：一行一条，index 必须是最前面的数字；情绪名/译文用英文竖线 `|` 分隔，不要加方括号、点号、逗号、解释或任何其他内容；输出中不要空行。")
     else:
         parts.append("输出格式：只输出严格 JSON 数组，不要输出其他内容：")
         if mode == "translate":
