@@ -64,15 +64,24 @@ def _extract_json_array(content):
     raise ValueError("AI returned no JSON array")
 
 
-def _translate_batch(batch, client, model):
-    user_prompt = build_translate_prompt(batch)
+def _translate_batch(batch, client, model, name_readings=None):
+    # 与客户端模式共用同一套提示词，保证角色名单、纠音参考与翻译要求一致
+    from .manual_ai import build_client_prompt
+
+    system_prompt = build_client_prompt(
+        batch,
+        [],
+        lang="ja",
+        mode="translate",
+        name_readings=name_readings,
+    )
     last_error = None
     for attempt in range(MAX_AI_ATTEMPTS):
         kwargs = {
             "model": model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "请直接输出 JSON 数组，不要输出其他内容。"},
             ],
             "temperature": 0.4,
             "max_tokens": 4096,
@@ -94,6 +103,7 @@ def translate_lines(
     api_key: str,
     base_url: str = "https://api.deepseek.com",
     model: str = "deepseek-v4-flash",
+    name_readings: list = None,
 ) -> list[dict]:
     """Translate script lines to Japanese via DeepSeek API."""
     if not lines:
@@ -102,7 +112,7 @@ def translate_lines(
     client = create_ai_client(api_key, base_url)
     raw_items = []
     for batch in _chunks(lines, BATCH_SIZE):
-        raw_items.extend(_translate_batch(batch, client, model))
+        raw_items.extend(_translate_batch(batch, client, model, name_readings))
 
     cleaned = []
     for item in raw_items:

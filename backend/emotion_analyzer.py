@@ -290,6 +290,7 @@ def analyze_emotions(
     model="deepseek-v4-flash",
     lang="zh",
     emotions=None,
+    name_readings=None,
 ):
     """调用 DeepSeek API 分析台词情绪。
 
@@ -303,13 +304,16 @@ def analyze_emotions(
 
     client = create_ai_client(api_key, base_url)
 
-    user_prompt = build_analysis_prompt(lines)
+    # 与客户端模式共用同一套提示词，保证角色名单、纠音参考与翻译要求一致
+    from .manual_ai import build_client_prompt
 
-    lang_hint = ""
-    if lang == "ja":
-        lang_hint = "\n注意：本剧本为日语，请根据日语的表达习惯来判断情绪。"
-    elif lang == "auto":
-        lang_hint = "\n注意：剧本可能混合中日文，请根据实际内容来判断。"
+    system_prompt = build_client_prompt(
+        lines,
+        emotions,
+        lang=lang,
+        mode="analyze",
+        name_readings=name_readings,
+    )
 
     results = None
     last_error = None
@@ -318,8 +322,8 @@ def analyze_emotions(
             kwargs = {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": build_system_prompt(emotions) + lang_hint},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "请直接输出 JSON 数组，不要输出其他内容。"},
                 ],
                 "temperature": 0.3,
                 "max_tokens": 4096,

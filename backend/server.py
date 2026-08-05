@@ -1450,6 +1450,7 @@ def create_app(config_path="config.yaml"):
                     model=model,
                     lang=lang,
                     emotions=config["emotions"],
+                    name_readings=config.get("pronunciation", []),
                 )
             except Exception as e:
                 traceback.print_exc()
@@ -1479,6 +1480,7 @@ def create_app(config_path="config.yaml"):
                         api_key=api_key,
                         base_url=base_url,
                         model=model,
+                        name_readings=config.get("pronunciation", []),
                     )
                 except Exception as e:
                     traceback.print_exc()
@@ -1678,6 +1680,7 @@ def create_app(config_path="config.yaml"):
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
+                name_readings=config.get("pronunciation", []),
             )
         except Exception as e:
             traceback.print_exc()
@@ -1834,6 +1837,7 @@ def create_app(config_path="config.yaml"):
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
+                name_readings=config.get("pronunciation", []),
             )
         except Exception as e:
             traceback.print_exc()
@@ -1880,6 +1884,7 @@ def create_app(config_path="config.yaml"):
                 model=model,
                 lang=lang,
                 emotions=config["emotions"],
+                name_readings=config.get("pronunciation", []),
             )
         except Exception as e:
             traceback.print_exc()
@@ -1905,6 +1910,7 @@ def create_app(config_path="config.yaml"):
                         api_key=api_key,
                         base_url=base_url,
                         model=model,
+                        name_readings=config.get("pronunciation", []),
                     )
                 except Exception as e:
                     traceback.print_exc()
@@ -2393,6 +2399,7 @@ def create_app(config_path="config.yaml"):
                             model=model,
                             lang=state.get("lang", "zh"),
                             emotions=config["emotions"],
+                            name_readings=config.get("pronunciation", []),
                         )
                         if state.get("analysis_cancel_seq", -1) >= seq:
                             invalidate_segment()
@@ -2419,6 +2426,7 @@ def create_app(config_path="config.yaml"):
                                     api_key=api_key,
                                     base_url=base_url,
                                     model=model,
+                                    name_readings=config.get("pronunciation", []),
                                 )
                                 translated = next((t.get("translation", "") for t in translations if t.get("index") == 0), "").strip()
                                 corrected = _exact_pronunciation(line["text"], config.get("pronunciation", []))
