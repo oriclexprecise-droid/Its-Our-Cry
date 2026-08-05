@@ -31,7 +31,19 @@ app = create_app("config.yaml")
 app.run(host="127.0.0.1", port=$Port, debug=False)
 "@ | Set-Content -Path $serverPy -Encoding ASCII
 
-$proc = Start-Process -FilePath $RuntimePython -ArgumentList @($serverPy) -WindowStyle Hidden -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr -PassThru
+$psi = [System.Diagnostics.ProcessStartInfo]::new()
+$psi.FileName = $RuntimePython
+$psi.Arguments = '"' + $serverPy + '"'
+$psi.WorkingDirectory = $root
+$psi.UseShellExecute = $false
+$psi.CreateNoWindow = $true
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
+$proc = [System.Diagnostics.Process]::new()
+$proc.StartInfo = $psi
+$proc.Start() | Out-Null
+$outTask = $proc.StandardOutput.ReadToEndAsync()
+$errTask = $proc.StandardError.ReadToEndAsync()
 $failed = $false
 try {
   Start-Sleep -Seconds 5
@@ -46,6 +58,10 @@ try {
 } finally {
   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
   Start-Sleep -Milliseconds 500
+  $outTask.Wait(1000) | Out-Null
+  $errTask.Wait(1000) | Out-Null
+  [System.IO.File]::WriteAllText($serverOut, $outTask.Result)
+  [System.IO.File]::WriteAllText($serverErr, $errTask.Result)
   Remove-Item $serverPy, $serverOut, $serverErr -Force -ErrorAction SilentlyContinue
   if ($hadRecent) {
     if (Test-Path $recentBak) { Copy-Item $recentBak $recent -Force }
