@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import platform
 import random
 import re
 import shutil
@@ -31,7 +32,7 @@ from .audio_merger import merge_wav_files, generate_srt, convert_channels
 from .translator import translate_lines
 from .manual_ai import build_client_prompt_segments, parse_client_result
 from .deploy_check import scan_environment, get_download_options, GPT_SOVITS_DOWNLOADS, recommend_download, PIP_INDEX_MIRROR, PIP_INDEX_OFFICIAL
-from .feedback import read_events, record_event
+from .feedback import get_anon_id, read_events, record_event
 from .cleanup import clean_items, scan_cleanable
 from .webgal import DEFAULT_EMOTION_MAP, dialogue_name_issues, dialogue_summary, dir_component_error, parse_script as parse_webgal_script, render_script, safe_dir_component, short_name_for
 
@@ -3067,14 +3068,36 @@ def create_app(config_path="config.yaml"):
 
     @app.route("/api/logs/export", methods=["GET"])
     def export_logs():
-        events_path = Path(project_root) / "feedback" / "events.jsonl"
-        if not events_path.exists():
-            return jsonify({"error": "暂无日志"}), 404
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            def _add_log(name, path):
+                p = Path(path)
+                try:
+                    if p.is_file() and p.stat().st_size > 0:
+                        zf.write(str(p), arcname=name)
+                except OSError:
+                    pass
+            _add_log("feedback/events.jsonl", Path(project_root) / "feedback" / "events.jsonl")
+            _add_log("launcher.log", Path(project_root) / "launcher.log")
+            _add_log("logs/server.err.log", Path(project_root) / "logs" / "server.err.log")
+            _add_log("logs/server.out.log", Path(project_root) / "logs" / "server.out.log")
+            _add_log("server.err.log", Path(project_root) / "server.err.log")
+            _add_log("server.out.log", Path(project_root) / "server.out.log")
+            info = "\n".join([
+                "timestamp: " + time.strftime("%Y-%m-%d %H:%M:%S"),
+                "os: " + platform.platform(),
+                "machine: " + platform.machine(),
+                "python: " + platform.python_version(),
+                "app_version: " + APP_VERSION,
+                "anonymous_id: " + get_anon_id(project_root),
+            ]) + "\n"
+            zf.writestr("system.txt", info)
+        buf.seek(0)
         return send_file(
-            str(events_path),
+            buf,
             as_attachment=True,
-            download_name="feedback-events.jsonl",
-            mimetype="application/json",
+            download_name="its-our-cry-logs.zip",
+            mimetype="application/zip",
         )
     @app.route("/api/logs/reset", methods=["POST"])
     def reset_logs():
@@ -4028,6 +4051,10 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "WebGaL 生成中，请取消后再撤销"}), 409
         undo = state.get("history_undo", [])
         if not undo:
+            record_event(
+                {"type": "undo_failed", "message": "撤销失败：没有可撤销的操作", "payload": {}},
+                project_root=project_root,
+            )
             return jsonify({"error": "没有可撤销的操作"}), 400
         entry = undo.pop()
         state.setdefault("history_redo", []).append({"label": entry["label"], "snapshot": take_snapshot()})
@@ -4046,6 +4073,10 @@ def create_app(config_path="config.yaml"):
             return jsonify({"error": "WebGaL 生成中，请取消后再重做"}), 409
         redo = state.get("history_redo", [])
         if not redo:
+            record_event(
+                {"type": "redo_failed", "message": "重做失败：没有可重做的操作", "payload": {}},
+                project_root=project_root,
+            )
             return jsonify({"error": "没有可重做的操作"}), 400
         entry = redo.pop()
         state.setdefault("history_undo", []).append({"label": entry["label"], "snapshot": take_snapshot()})
