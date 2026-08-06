@@ -38,6 +38,29 @@ async function api(url, opts = {}) {
   }
 }
 
+function reportLocalEvent(type, message, payload) {
+  try {
+    fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: type, message: message, payload: payload || {} }),
+    }).catch(() => {});
+  } catch (e) {}
+}
+
+window.addEventListener("error", (e) => {
+  reportLocalEvent("frontend_error", "前端错误：" + (e.message || "unknown"), {
+    file: e.filename || "",
+    line: e.lineno || 0,
+    col: e.colno || 0,
+  });
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const reason = e.reason;
+  const msg = reason && reason.message ? reason.message : String(reason || "unknown");
+  reportLocalEvent("frontend_error", "未处理 Promise 错误：" + msg, {});
+});
+
 async function settleAiBackend() {
   try { await api("/api/analyze/cancel", { method: "POST", timeout: 8000 }); } catch (e) {}
   for (let i = 0; i < 120; i++) {
@@ -1818,6 +1841,11 @@ async function runHistory(dir) {
       toast(dir === "undo" ? "已撤销 WebGaL 操作" : "已重做 WebGaL 操作", "success");
     } else {
       toast(dir === "undo" ? "没有可撤销的操作" : "没有可重做的操作", "error");
+      reportLocalEvent("webgal_" + dir + "_failed", dir === "undo" ? "WebGaL 没有可撤销的操作" : "WebGaL 没有可重做的操作", {
+        projectType: state.projectType,
+        historyIndex: webgalHistoryIndex,
+        historyLength: webgalHistory.length,
+      });
     }
     return;
   }
@@ -1858,6 +1886,13 @@ async function runHistory(dir) {
         return;
       }
     }
+    reportLocalEvent(dir + "_failed", (dir === "undo" ? "撤销失败：" : "重做失败：") + msg, {
+      projectType: state.projectType,
+      serverUndo: (lastHistoryPayload || {}).undo_count || 0,
+      serverRedo: (lastHistoryPayload || {}).redo_count || 0,
+      localUndo: scriptTextUndo.length,
+      localRedo: scriptTextRedo.length,
+    });
     toast((dir === "undo" ? "撤销失败：" : "重做失败：") + msg, "error");
   }
 }
