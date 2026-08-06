@@ -334,6 +334,7 @@ textarea { min-height: 240px; line-height: 1.6; }
 .webgal-map-del { flex: 0 0 auto; background: none; border: none; color: #ff6b9d; font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 6px; }
 .webgal-map-del:hover { color: #fff; }
 .side-hint { font-size: 12px; color: #aaa; margin: -4px 0 10px; line-height: 1.5; }
+.model-config-hint { margin: 8px 0 10px; }
 .panel { border: 1px solid #1a3350; }
 .side-panel > .panel-body { padding: 16px; }
 .lines-table { overflow-x: auto; border: 1px solid #1a3350; border-radius: 6px; }
