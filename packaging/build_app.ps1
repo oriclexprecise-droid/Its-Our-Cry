@@ -57,7 +57,7 @@ Copy-Item (Join-Path $root 'frontend') $releaseApp -Recurse -Force
 if ($LASTEXITCODE -ne 0) { throw 'tts_worker embed failed' }
 Copy-Item (Join-Path $root 'GPT_weights_v2ProPlus') $releaseApp -Recurse -Force
 Copy-Item (Join-Path $root 'SoVITS_weights_v2ProPlus') $releaseApp -Recurse -Force
-Copy-Item (Join-Path $root 'reference_audio') $releaseApp -Recurse -Force
+# 参考音频/用户预设不随安装包发布，由用户自行导入
 Copy-Item (Join-Path $root 'picture') $releaseApp -Recurse -Force
 Copy-Item (Join-Path $PSScriptRoot 'tools\7z') (Join-Path $releaseApp 'tools\7z') -Recurse -Force
 Copy-Item (Join-Path $PSScriptRoot 'release_config.yaml') (Join-Path $releaseApp 'config.yaml') -Force
