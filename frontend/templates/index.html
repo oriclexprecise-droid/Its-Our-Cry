@@ -468,8 +468,6 @@
           <h3 class="side-section-title">角色模型（激活词可增删）</h3>
           <div class="btn-row">
             <button type="button" id="btn-add-model" class="btn-secondary btn-small">添加角色/模型</button>
-            <button type="button" id="btn-import-model" class="btn-secondary btn-small">导入角色包</button>
-            <input type="file" id="model-import-file" class="hidden" accept=".zip">
           </div>
           <div id="add-model-panel" class="add-model-panel hidden">
             <div class="add-model-row">
@@ -600,6 +598,17 @@
             <button type="button" id="btn-export-ref-audio" class="btn-secondary btn-small">导出</button>
             <button type="button" id="btn-import-ref-audio" class="btn-secondary btn-small">导入</button>
           </div>
+        </div>
+        <div class="side-section">
+          <h3 class="side-section-title">非原生角色包（ZIP）</h3>
+          <p class="side-hint">导出所选非原生角色的模型、参考音频、参考文本、激活词与情绪，默认全选。导入时若角色已存在，整个包会被拒绝。</p>
+          <div id="model-package-list" class="model-package-list"><div class="model-empty">加载中...</div></div>
+          <div class="share-row">
+            <button type="button" id="btn-export-model-package" class="btn-secondary btn-small">导出所选</button>
+            <button type="button" id="btn-import-model-package" class="btn-secondary btn-small">导入角色包</button>
+            <input type="file" id="model-package-import-file" class="hidden" accept=".zip">
+          </div>
+          <span id="model-package-status" class="status-text"></span>
         </div>
         <input type="file" id="share-import-file" class="hidden" accept=".json,.zip">
         <span id="share-status" class="status-text"></span>

@@ -1659,11 +1659,10 @@ def create_app(config_path="config.yaml"):
         }, project_root)
         return jsonify({"status": "ok", "removed_files": removed_files})
 
-    def _build_model_zip(key, now):
+    def _add_character_zip_files(zf, key, folder):
         m = models[key]
         gpt_file = Path(m["gpt"])
         sovits_file = Path(m["sovits"])
-        tmp = Path(tempfile.gettempdir()) / ("its_our_cry_model_" + uuid.uuid4().hex + ".zip")
         ref_base = _ref_audio_base(key)
         name = DEFAULT_MODEL_ALIASES.get(key, key)
         manifest = {
@@ -1679,22 +1678,68 @@ def create_app(config_path="config.yaml"):
             "ref_dir": ref_base.name if ref_base else "",
             "emotions": list(config["emotions"]),
         }
+        prefix = (folder.rstrip("/") + "/") if folder else ""
+        zf.writestr(prefix + "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        if gpt_file.is_file():
+            zf.write(str(gpt_file), prefix + "GPT/" + gpt_file.name)
+        if sovits_file.is_file():
+            zf.write(str(sovits_file), prefix + "SoVITS/" + sovits_file.name)
+        if ref_base and ref_base.is_dir():
+            rel_dir = ref_base.name
+            for emo_dir in sorted(p for p in ref_base.iterdir() if p.is_dir()):
+                for f in sorted(emo_dir.iterdir()):
+                    if not f.is_file():
+                        continue
+                    if f.suffix.lower() in AUDIO_EXTS or f.name.endswith(".txt"):
+                        arc = prefix + "reference_audio/" + rel_dir + "/" + emo_dir.name + "/" + f.name
+                        zf.write(str(f), arc)
+
+    def _bundle_folder_name(key, used):
+        base = str(key or "").strip().replace("/", "_").replace("\\", "_")
+        if not base or base in (".", ".."):
+            base = "role_" + uuid.uuid4().hex[:8]
+        folder = "characters/" + base
+        n = 2
+        while folder in used:
+            folder = "characters/" + base + "_" + str(n)
+            n += 1
+        used.add(folder)
+        return folder
+
+    def _build_model_zip(key, now):
+        tmp = Path(tempfile.gettempdir()) / ("its_our_cry_model_" + uuid.uuid4().hex + ".zip")
         try:
             with zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-                if gpt_file.is_file():
-                    zf.write(str(gpt_file), "GPT/" + gpt_file.name)
-                if sovits_file.is_file():
-                    zf.write(str(sovits_file), "SoVITS/" + sovits_file.name)
-                if ref_base and ref_base.is_dir():
-                    rel_dir = ref_base.name
-                    for emo_dir in sorted(p for p in ref_base.iterdir() if p.is_dir()):
-                        for f in sorted(emo_dir.iterdir()):
-                            if not f.is_file():
-                                continue
-                            if f.suffix.lower() in AUDIO_EXTS or f.name.endswith(".txt"):
-                                arc = "reference_audio/" + rel_dir + "/" + emo_dir.name + "/" + f.name
-                                zf.write(str(f), arc)
+                _add_character_zip_files(zf, key, "")
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise
+        return tmp
+
+    def _build_models_bundle_zip(keys, now):
+        tmp = Path(tempfile.gettempdir()) / ("its_our_cry_models_bundle_" + uuid.uuid4().hex + ".zip")
+        used = set()
+        characters = []
+        try:
+            with zipfile.ZipFile(str(tmp), "w", zipfile.ZIP_DEFLATED) as zf:
+                for key in keys:
+                    folder = _bundle_folder_name(key, used)
+                    characters.append({
+                        "key": key,
+                        "name": DEFAULT_MODEL_ALIASES.get(key, key),
+                        "folder": folder,
+                    })
+                    _add_character_zip_files(zf, key, folder)
+                zf.writestr("manifest.json", json.dumps({
+                    "schema": 2,
+                    "kind": "characters",
+                    "app_version": APP_VERSION,
+                    "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "characters": characters,
+                }, ensure_ascii=False, indent=2))
         except Exception:
             try:
                 tmp.unlink(missing_ok=True)
@@ -1751,6 +1796,174 @@ def create_app(config_path="config.yaml"):
 
         return send_file(str(tmp), as_attachment=True, download_name=default_name, mimetype="application/zip")
 
+
+
+    @app.route("/api/models/export_bundle", methods=["POST"])
+    def export_models_bundle():
+        data = request.get_json(silent=True) or {}
+        raw_keys = data.get("keys") or []
+        if not isinstance(raw_keys, list):
+            return jsonify({"error": "请选择要导出的角色"}), 400
+        refresh_model_scan()
+        keys = []
+        seen = set()
+        invalid = []
+        for k in raw_keys:
+            k = str(k or "").strip()
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            if k not in models:
+                invalid.append(k)
+            elif k in DEFAULT_MODEL_ALIASES:
+                invalid.append(k + "（原生角色）")
+            else:
+                keys.append(k)
+        if invalid:
+            return jsonify({"error": "以下角色无法导出：" + "、".join(invalid)}), 400
+        if not keys:
+            return jsonify({"error": "请至少选择一个非原生角色"}), 400
+        now = time.strftime("%Y%m%d_%H%M%S")
+        default_name = "its_our_cry_角色包_非原生_" + now + ".zip"
+        save_path = str(data.get("save_path") or "").strip()
+        if not save_path:
+            picked = _pick_save_dialog(default_name, {"desc": "ZIP 压缩包", "pattern": "*.zip", "ext": ".zip"}, project_root / "exports")
+            if not picked:
+                return jsonify({"status": "cancelled", "message": "已取消导出"})
+            save_path = picked
+        try:
+            tmp = _build_models_bundle_zip(keys, now)
+            try:
+                shutil.copyfile(str(tmp), str(Path(save_path)))
+            finally:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        except Exception as e:
+            return jsonify({"error": "导出失败: " + str(e)}), 500
+        names = [DEFAULT_MODEL_ALIASES.get(k, k) for k in keys]
+        record_event({
+            "type": "model_export",
+            "message": "导出非原生角色包：" + "、".join(names),
+            "payload": {"characters": names, "path": save_path},
+        }, project_root)
+        return jsonify({
+            "status": "ok",
+            "path": str(Path(save_path)),
+            "dir": str(Path(save_path).parent),
+            "characters": names,
+            "message": "导出完成：" + str(Path(save_path)) + "（共 " + str(len(names)) + " 个角色）",
+        })
+
+    def _sanitize_manifest_alias(alias):
+        alias = str(alias or "").strip()
+        if not alias or alias == "旁白" or alias in (".", "..") or "/" in alias or "\\" in alias:
+            return None
+        return alias
+
+    def _read_sub_manifest(zf, folder):
+        path = (folder.rstrip("/") + "/manifest.json") if folder else "manifest.json"
+        try:
+            raw = zf.read(path)
+            manifest = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return None
+        return manifest if isinstance(manifest, dict) else None
+
+    def _parse_character_package(zf, manifest, folder):
+        if not isinstance(manifest, dict) or manifest.get("schema") != 2 or manifest.get("kind") != "character":
+            raise ValueError("不是有效的角色包文件")
+        name = _safe_model_name(manifest.get("name") or manifest.get("key"))
+        if not name or name == "旁白":
+            raise ValueError("角色包内角色名无效")
+        gpt_name = Path(str(manifest.get("gpt_file") or "")).name
+        sovits_name = Path(str(manifest.get("sovits_file") or "")).name
+        if not gpt_name.lower().endswith(".ckpt") or not sovits_name.lower().endswith(".pth"):
+            raise ValueError("角色包内模型文件名无效")
+        prefix = (folder.rstrip("/") + "/") if folder else ""
+        names = zf.namelist()
+        if (prefix + "GPT/" + gpt_name) not in names or (prefix + "SoVITS/" + sovits_name) not in names:
+            raise ValueError("角色包缺少模型文件：" + name)
+        aliases = []
+        for a in manifest.get("aliases") or []:
+            clean = _sanitize_manifest_alias(a)
+            if clean and clean not in aliases:
+                aliases.append(clean)
+        if name not in aliases:
+            aliases.insert(0, name)
+        return name, gpt_name, sovits_name, aliases
+
+    def _write_character_import(zf, entry):
+        name = entry["name"]
+        gpt_name = entry["gpt_name"]
+        sovits_name = entry["sovits_name"]
+        folder = entry.get("folder") or ""
+        prefix = (folder.rstrip("/") + "/") if folder else ""
+        gpt_dest = project_root / "GPT_weights_v2ProPlus" / gpt_name
+        sovits_dest = project_root / "SoVITS_weights_v2ProPlus" / sovits_name
+        gpt_dest.parent.mkdir(parents=True, exist_ok=True)
+        sovits_dest.parent.mkdir(parents=True, exist_ok=True)
+        ref_base = project_root / "reference_audio" / name
+        ref_base.mkdir(parents=True, exist_ok=True)
+        ref_resolved = str(ref_base.resolve())
+        found_gpt = found_sovits = False
+        imported_audio = 0
+        added_emotions = []
+        for info in zf.infolist():
+            arc = str(info.filename).replace("\\", "/")
+            if info.is_dir() or not arc:
+                continue
+            if prefix:
+                if not arc.startswith(prefix):
+                    continue
+                rel = arc[len(prefix):]
+            else:
+                rel = arc
+            parts = rel.split("/")
+            if len(parts) == 2 and parts[0] == "GPT" and parts[1] == gpt_name:
+                gpt_dest.write_bytes(zf.read(info))
+                found_gpt = True
+            elif len(parts) == 2 and parts[0] == "SoVITS" and parts[1] == sovits_name:
+                sovits_dest.write_bytes(zf.read(info))
+                found_sovits = True
+            elif rel.startswith("reference_audio/") and len(parts) == 4:
+                _, _, emotion, filename = parts
+                if not emotion or emotion in (".", "..") or "/" in emotion:
+                    continue
+                filename = Path(filename).name
+                if not filename:
+                    continue
+                is_prompt = filename.endswith(".txt")
+                if is_prompt:
+                    if filename == ".txt" or Path(filename[:-4]).suffix.lower() not in AUDIO_EXTS:
+                        continue
+                else:
+                    if Path(filename).suffix.lower() not in AUDIO_EXTS:
+                        continue
+                target = ref_base / emotion / filename
+                try:
+                    if not str(target.resolve()).startswith(ref_resolved):
+                        continue
+                except Exception:
+                    continue
+                if emotion not in config["emotions"]:
+                    config["emotions"].append(emotion)
+                    added_emotions.append(emotion)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(zf.read(info))
+                if not is_prompt:
+                    imported_audio += 1
+        if not found_gpt or not found_sovits:
+            for p in (gpt_dest, sovits_dest):
+                try:
+                    if p.exists():
+                        p.unlink()
+                except Exception:
+                    pass
+            raise ValueError("角色包缺少模型文件：" + name)
+        return {"name": name, "imported_audio": imported_audio, "added_emotions": added_emotions}
+
     @app.route("/api/models/import", methods=["POST"])
     def import_model():
         f = request.files.get("file")
@@ -1776,104 +1989,108 @@ def create_app(config_path="config.yaml"):
                 manifest = json.loads(manifest_raw.decode("utf-8"))
             except Exception:
                 manifest = None
-            if not isinstance(manifest, dict) or manifest.get("schema") != 2 or manifest.get("kind") != "character":
+            if not isinstance(manifest, dict):
                 zf.close()
                 return jsonify({"error": "不是有效的角色包文件"}), 400
-            name = _safe_model_name(manifest.get("name") or manifest.get("key"))
-            if not name or name == "旁白":
+            entries = []
+            try:
+                kind = manifest.get("kind")
+                if kind == "character":
+                    name, gpt_name, sovits_name, aliases = _parse_character_package(zf, manifest, "")
+                    entries.append({
+                        "name": name, "gpt_name": gpt_name, "sovits_name": sovits_name,
+                        "aliases": aliases, "folder": "",
+                    })
+                elif kind == "characters":
+                    char_list = manifest.get("characters")
+                    if not isinstance(char_list, list) or not char_list:
+                        raise ValueError("角色包内角色列表为空")
+                    for item in char_list:
+                        if not isinstance(item, dict):
+                            raise ValueError("角色包内角色列表格式无效")
+                        folder = str(item.get("folder") or item.get("dir") or "").strip()
+                        if not folder or "\\" in folder or ".." in folder.split("/") or any(not seg for seg in folder.split("/")):
+                            raise ValueError("角色包内角色目录无效")
+                        sub = _read_sub_manifest(zf, folder)
+                        if sub is None:
+                            raise ValueError("角色「" + str(item.get("name") or item.get("key") or "") + "」缺少角色清单")
+                        name, gpt_name, sovits_name, aliases = _parse_character_package(zf, sub, folder)
+                        entries.append({
+                            "name": name, "gpt_name": gpt_name, "sovits_name": sovits_name,
+                            "aliases": aliases, "folder": folder,
+                        })
+                else:
+                    raise ValueError("不是有效的角色包文件")
+                name_set = set()
+                for e in entries:
+                    if e["name"] in name_set:
+                        raise ValueError("角色包内出现重复角色：" + e["name"])
+                    name_set.add(e["name"])
+                refresh_model_scan()
+                taken = []
+                for e in entries:
+                    if _model_name_taken(e["name"]):
+                        taken.append(e["name"])
+                    elif (project_root / "GPT_weights_v2ProPlus" / e["gpt_name"]).exists() or (project_root / "SoVITS_weights_v2ProPlus" / e["sovits_name"]).exists():
+                        taken.append(e["name"] + "（模型文件已存在）")
+                if taken:
+                    zf.close()
+                    return jsonify({"error": "以下角色已存在，整个包拒绝导入，请先删除旧角色后再导入：" + "、".join(taken)}), 400
+            except ValueError as e:
                 zf.close()
-                return jsonify({"error": "角色包内角色名无效"}), 400
-            gpt_name = Path(str(manifest.get("gpt_file") or "")).name
-            sovits_name = Path(str(manifest.get("sovits_file") or "")).name
-            if not gpt_name.lower().endswith(".ckpt") or not sovits_name.lower().endswith(".pth"):
+                return jsonify({"error": str(e)}), 400
+            results = []
+            try:
+                for e in entries:
+                    results.append(_write_character_import(zf, e))
+            except ValueError as e:
                 zf.close()
-                return jsonify({"error": "角色包内模型文件名无效"}), 400
-            refresh_model_scan()
-            if _model_name_taken(name):
-                zf.close()
-                return jsonify({"error": "角色「" + name + "」已存在，请先删除或改名后再导入"}), 400
-            gpt_dest = project_root / "GPT_weights_v2ProPlus" / gpt_name
-            sovits_dest = project_root / "SoVITS_weights_v2ProPlus" / sovits_name
-            if gpt_dest.exists() or sovits_dest.exists():
-                zf.close()
-                return jsonify({"error": "同名模型文件已存在，请先删除后再导入"}), 400
-            gpt_dest.parent.mkdir(parents=True, exist_ok=True)
-            sovits_dest.parent.mkdir(parents=True, exist_ok=True)
-            ref_base = project_root / "reference_audio" / name
-            ref_base.mkdir(parents=True, exist_ok=True)
-            ref_resolved = str(ref_base.resolve())
-            found_gpt = found_sovits = False
-            imported_audio = 0
-            added_emotions = []
-            for info in zf.infolist():
-                arc = str(info.filename).replace("\\", "/")
-                if info.is_dir() or not arc:
-                    continue
-                parts = arc.split("/")
-                if len(parts) == 2 and parts[0] == "GPT" and parts[1] == gpt_name:
-                    gpt_dest.write_bytes(zf.read(info))
-                    found_gpt = True
-                elif len(parts) == 2 and parts[0] == "SoVITS" and parts[1] == sovits_name:
-                    sovits_dest.write_bytes(zf.read(info))
-                    found_sovits = True
-                elif arc.startswith("reference_audio/") and len(parts) == 4:
-                    _, _, emotion, filename = parts
-                    if not emotion or emotion in (".", "..") or "/" in emotion:
-                        continue
-                    filename = Path(filename).name
-                    if not filename:
-                        continue
-                    is_prompt = filename.endswith(".txt")
-                    if is_prompt:
-                        if filename == ".txt" or Path(filename[:-4]).suffix.lower() not in AUDIO_EXTS:
-                            continue
-                    else:
-                        if Path(filename).suffix.lower() not in AUDIO_EXTS:
-                            continue
-                    target = ref_base / emotion / filename
-                    try:
-                        if not str(target.resolve()).startswith(ref_resolved):
-                            continue
-                    except Exception:
-                        continue
-                    if emotion not in config["emotions"]:
-                        config["emotions"].append(emotion)
-                        added_emotions.append(emotion)
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(zf.read(info))
-                    if not is_prompt:
-                        imported_audio += 1
+                return jsonify({"error": str(e)}), 400
             zf.close()
-            if not found_gpt or not found_sovits:
-                for p in (gpt_dest, sovits_dest):
-                    try:
-                        if p.exists():
-                            p.unlink()
-                    except Exception:
-                        pass
-                return jsonify({"error": "角色包缺少模型文件"}), 400
-            if imported_audio or added_emotions:
+            total_audio = sum(r["imported_audio"] for r in results)
+            added_emotions = []
+            for r in results:
+                for emo in r["added_emotions"]:
+                    if emo not in added_emotions:
+                        added_emotions.append(emo)
+            if total_audio or added_emotions:
                 _persist_user_settings(project_root, config)
             refresh_model_scan()
-            if name not in models:
-                models[name] = {
-                    "gpt": str(gpt_dest),
-                    "sovits": str(sovits_dest),
-                    "ref_audio_dir": "reference_audio/" + name,
-                    "aliases": [name],
-                }
-            m = models[name]
-            if name not in m["aliases"]:
-                m["aliases"].append(name)
-            m["ref_audio_dir"] = "reference_audio/" + name
+            for e in entries:
+                name = e["name"]
+                if name not in models:
+                    models[name] = {
+                        "gpt": str(project_root / "GPT_weights_v2ProPlus" / e["gpt_name"]),
+                        "sovits": str(project_root / "SoVITS_weights_v2ProPlus" / e["sovits_name"]),
+                        "ref_audio_dir": "reference_audio/" + name,
+                        "aliases": [],
+                    }
+                m = models[name]
+                for alias in e["aliases"]:
+                    if alias not in m["aliases"]:
+                        m["aliases"].append(alias)
+                m["ref_audio_dir"] = "reference_audio/" + name
             persist_model_aliases()
             rebuild_characters()
-            record_event({
-                "type": "model_import",
-                "message": "导入角色包：" + name,
-                "payload": {"character": name, "audio": imported_audio},
-            }, project_root)
-            return jsonify({"status": "ok", "key": name, "aliases": list(m["aliases"]), "imported_audio": imported_audio, "message": "角色「" + name + "」导入完成"})
+            for r, e in zip(results, entries):
+                record_event({
+                    "type": "model_import",
+                    "message": "导入角色包：" + e["name"],
+                    "payload": {"character": e["name"], "audio": r["imported_audio"]},
+                }, project_root)
+            name_list = [e["name"] for e in entries]
+            if len(entries) == 1:
+                message = "角色「" + name_list[0] + "」导入完成"
+            else:
+                message = "已导入 " + str(len(entries)) + " 个角色：" + "、".join(name_list)
+            return jsonify({
+                "status": "ok",
+                "key": name_list[0] if len(entries) == 1 else "",
+                "keys": name_list,
+                "aliases": list(models[name_list[0]]["aliases"]) if len(entries) == 1 else [],
+                "imported_audio": total_audio,
+                "message": message,
+            })
         finally:
             try:
                 tmp_zip.unlink(missing_ok=True)

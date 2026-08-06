@@ -1113,3 +1113,50 @@ textarea { min-height: 240px; line-height: 1.6; }
 .model-item-actions {
   margin-top: 8px;
 }
+.model-package-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.model-package-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  background: rgba(15, 52, 96, 0.45);
+  border: 1px solid #1a4a7a;
+  border-radius: 6px;
+  color: #cfe0f5;
+  font-size: 13px;
+  cursor: pointer;
+}
+.model-package-check {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: #4ecca3;
+}
+.model-package-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.add-model-panel input[type="file"] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  background: #0f3460;
+  border: 1px solid #1a4a7a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.add-model-panel input[type="file"]:focus { border-color: #ff6b9d; }
+.add-model-panel .btn-row { justify-content: flex-end; }

@@ -4379,23 +4379,17 @@ async function loadModels() {
       addRow.appendChild(input);
       addRow.appendChild(btn);
       item.appendChild(addRow);
-      const actionRow = document.createElement("div");
-      actionRow.className = "btn-row model-item-actions";
-      const exportBtn = document.createElement("button");
-      exportBtn.type = "button";
-      exportBtn.className = "btn-secondary btn-small";
-      exportBtn.textContent = "导出角色包";
-      exportBtn.addEventListener("click", () => exportModel(m.key));
-      actionRow.appendChild(exportBtn);
       if (!m.native) {
+        const actionRow = document.createElement("div");
+        actionRow.className = "btn-row model-item-actions";
         const delBtn = document.createElement("button");
         delBtn.type = "button";
         delBtn.className = "btn-secondary btn-small";
         delBtn.textContent = "删除角色";
         delBtn.addEventListener("click", () => deleteModel(m.key, m.name));
         actionRow.appendChild(delBtn);
+        item.appendChild(actionRow);
       }
-      item.appendChild(actionRow);
       listEl.appendChild(item);
     });
   } catch (e) {
@@ -5083,8 +5077,6 @@ function initModelConfig() {
   const panel = document.getElementById("add-model-panel");
   const cancelBtn = document.getElementById("btn-model-cancel");
   const submitBtn = document.getElementById("btn-model-submit");
-  const importBtn = document.getElementById("btn-import-model");
-  const importInput = document.getElementById("model-import-file");
   if (addBtn && panel) {
     addBtn.addEventListener("click", () => {
       panel.classList.toggle("hidden");
@@ -5098,13 +5090,6 @@ function initModelConfig() {
     cancelBtn.addEventListener("click", () => panel.classList.add("hidden"));
   }
   if (submitBtn) submitBtn.addEventListener("click", submitAddModel);
-  if (importBtn && importInput) {
-    importBtn.addEventListener("click", () => {
-      importInput.value = "";
-      importInput.click();
-    });
-  }
-  if (importInput) importInput.addEventListener("change", importModelPackage);
 }
 
 function setAddModelStatus(text, ok) {
@@ -5155,42 +5140,6 @@ async function submitAddModel() {
   }
 }
 
-async function importModelPackage() {
-  const input = document.getElementById("model-import-file");
-  const file = input && input.files && input.files[0];
-  if (!file) return;
-  if (!(await showConfirmModal("导入角色包会复制模型文件与参考音频到本机。确定继续吗？"))) {
-    input.value = "";
-    return;
-  }
-  setAddModelStatus("正在导入 " + file.name + "...", false);
-  try {
-    const form = new FormData();
-    form.append("file", file);
-    const res = await fetch("/api/models/import", { method: "POST", body: form });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
-    await showAlertModal(data.message || "导入完成");
-    setAddModelStatus("角色「" + (data.key || "") + "」导入完成", true);
-    await loadModels();
-    await loadConfig();
-  } catch (e) {
-    await showAlertModal("导入失败: " + e.message);
-    setAddModelStatus("导入失败: " + e.message, false);
-  } finally {
-    input.value = "";
-  }
-}
-
-async function exportModel(key) {
-  try {
-    const res = await api("/api/models/" + encodeURIComponent(key) + "/export", { method: "POST", timeout: 600000 });
-    if (res.status === "cancelled") return;
-    await showAlertModal(res.message || "导出完成");
-  } catch (e) {
-    await showAlertModal("导出失败: " + e.message);
-  }
-}
 
 async function deleteModel(key, name) {
   if (!(await showConfirmModal("确定删除角色「" + name + "」吗？这会删除它的模型文件，参考音频会保留。系统自带角色不能删除。"))) return;
@@ -5203,6 +5152,37 @@ async function deleteModel(key, name) {
   }
 }
 
+async function loadModelPackageList() {
+  const listEl = document.getElementById("model-package-list");
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="model-empty">加载中...</div>';
+  try {
+    const data = await api("/api/models");
+    const models = (data.models || []).filter(m => !m.native);
+    listEl.innerHTML = "";
+    if (!models.length) {
+      listEl.innerHTML = '<div class="model-empty">暂无非原生角色</div>';
+      return;
+    }
+    models.forEach(m => {
+      const label = document.createElement("label");
+      label.className = "model-package-item";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = m.key;
+      cb.checked = true;
+      cb.className = "model-package-check";
+      const name = document.createElement("span");
+      name.className = "model-package-name";
+      name.textContent = m.name + (m.ref_audio_dir ? "（" + m.ref_audio_dir + "）" : "");
+      label.appendChild(cb);
+      label.appendChild(name);
+      listEl.appendChild(label);
+    });
+  } catch (e) {
+    listEl.innerHTML = '<div class="model-empty">加载失败: ' + e.message + '</div>';
+  }
+}
 function initShareImportExport() {
   const fileInput = document.getElementById("share-import-file");
   if (!fileInput) return;
@@ -5301,6 +5281,68 @@ function initShareImportExport() {
     const btn = document.getElementById(item[0]);
     if (btn) btn.addEventListener("click", () => triggerImport(item[1]));
   });
+  const pkgStatus = () => document.getElementById("model-package-status");
+  const pkgImportInput = document.getElementById("model-package-import-file");
+  const importPkgBtn = document.getElementById("btn-import-model-package");
+  if (importPkgBtn && pkgImportInput) {
+    importPkgBtn.addEventListener("click", () => {
+      pkgImportInput.value = "";
+      pkgImportInput.click();
+    });
+  }
+  if (pkgImportInput) {
+    pkgImportInput.addEventListener("change", async () => {
+      const file = pkgImportInput.files && pkgImportInput.files[0];
+      if (!file) return;
+      if (!(await showConfirmModal("导入角色包会复制模型文件、参考音频与参考文本到本机。若包内角色已存在，整个包会被拒绝。确定继续吗？"))) {
+        pkgImportInput.value = "";
+        return;
+      }
+      const statusEl = pkgStatus();
+      if (statusEl) { statusEl.textContent = "正在导入 " + file.name + "..."; statusEl.className = "status-text"; }
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch("/api/models/import", { method: "POST", body: form });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+        await showAlertModal(data.message || "导入完成");
+        if (statusEl) { statusEl.textContent = data.message || "导入完成"; statusEl.className = "status-text success"; }
+        await Promise.all([loadModelPackageList(), loadModels(), loadReferenceLibrary(), loadEmotions()]);
+        await loadConfig();
+      } catch (e) {
+        await showAlertModal("导入失败: " + e.message);
+        if (statusEl) { statusEl.textContent = "导入失败: " + e.message; statusEl.className = "status-text error"; }
+      }
+      pkgImportInput.value = "";
+    });
+  }
+  const exportPkgBtn = document.getElementById("btn-export-model-package");
+  if (exportPkgBtn) {
+    exportPkgBtn.addEventListener("click", async () => {
+      const statusEl = pkgStatus();
+      const boxes = Array.from(document.querySelectorAll("#model-package-list input[type=checkbox]:checked"));
+      const keys = boxes.map(b => b.value);
+      if (!keys.length) {
+        await showAlertModal("请至少勾选一个非原生角色");
+        return;
+      }
+      if (statusEl) { statusEl.textContent = "正在准备导出，请在弹出窗口中选择保存位置..."; statusEl.className = "status-text"; }
+      try {
+        const res = await api("/api/models/export_bundle", { method: "POST", timeout: 600000, body: JSON.stringify({ keys }) });
+        if (res.status === "cancelled") {
+          if (statusEl) { statusEl.textContent = "已取消导出"; statusEl.className = "status-text"; }
+          return;
+        }
+        lastShareExportPath = res.dir || "";
+        if (statusEl) { statusEl.textContent = "导出完成：" + (res.path || ""); statusEl.className = "status-text success"; }
+        if (openExportBtn) openExportBtn.classList.remove("hidden");
+      } catch (e) {
+        if (statusEl) { statusEl.textContent = "导出失败: " + e.message; statusEl.className = "status-text error"; }
+      }
+    });
+  }
+  loadModelPackageList();
 }
 
 initLowPerfConfig();
