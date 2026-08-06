@@ -466,6 +466,31 @@
       <div class="panel-body">
         <div class="side-section">
           <h3 class="side-section-title">角色模型（激活词可增删）</h3>
+          <div class="btn-row">
+            <button type="button" id="btn-add-model" class="btn-secondary btn-small">添加角色/模型</button>
+            <button type="button" id="btn-import-model" class="btn-secondary btn-small">导入角色包</button>
+            <input type="file" id="model-import-file" class="hidden" accept=".zip">
+          </div>
+          <div id="add-model-panel" class="add-model-panel hidden">
+            <div class="add-model-row">
+              <label class="add-model-label" for="model-name">角色名</label>
+              <input type="text" id="model-name" class="model-name-input" placeholder="例如：丰川祥子" maxlength="30" autocomplete="off">
+            </div>
+            <div class="add-model-row">
+              <label class="add-model-label" for="model-sovits-file">SoVITS 模型（.pth）</label>
+              <input type="file" id="model-sovits-file" accept=".pth">
+            </div>
+            <div class="add-model-row">
+              <label class="add-model-label" for="model-gpt-file">GPT 模型（.ckpt）</label>
+              <input type="file" id="model-gpt-file" accept=".ckpt">
+            </div>
+            <div class="btn-row">
+              <button type="button" id="btn-model-submit" class="btn-secondary btn-small">确定添加</button>
+              <button type="button" id="btn-model-cancel" class="btn-secondary btn-small">取消</button>
+            </div>
+            <span id="add-model-status" class="status-text"></span>
+          </div>
+          <p class="side-hint">自定义角色会复制模型文件到程序目录，与内置角色一样支持参考音频、情绪管理、生成，以及导出导入角色包。</p>
           <div id="model-list" class="model-list"><div class="model-empty">加载中...</div></div>
         </div>
       </div>

@@ -49,4 +49,5 @@
 - 当前待打包：
   1. 日志导出包：设置 → 日志 → “导出日志包”，下载 zip（含 launcher.log、logs/server.*.log、feedback/events.jsonl、system.txt）；提交 b57ddef
   2. 前端错误与撤销/重做失败自动上报（frontend_error / undo_failed / redo_failed 事件）；提交 edae0dc
-  3. 状态：源码已改、已提交，桌面安装包尚未重建（release 仍为旧版）
+  3. 自定义角色功能：设置 → 模型配置 → 添加角色/模型（选择 .pth/.ckpt 并复制入库）、导入/导出角色包（含模型权重+参考音频）、删除自定义角色；提交后待打包
+  4. 状态：以上源码已改、已提交，桌面安装包尚未重建（release 仍为旧版）

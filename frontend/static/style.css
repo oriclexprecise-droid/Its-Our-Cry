@@ -1086,3 +1086,30 @@ textarea { min-height: 240px; line-height: 1.6; }
 .webgal-char-warning .wcw-row input { flex: 0 1 240px; min-width: 120px; }
 .webgal-char-warning .wcw-reason { color: #ffd166; }
 .webgal-char-warning .wcw-manual { color: #ff6b9d; }
+
+.add-model-panel {
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.add-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+.add-model-label {
+  min-width: 150px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+.model-name-input {
+  flex: 1;
+  min-width: 180px;
+}
+.model-item-actions {
+  margin-top: 8px;
+}

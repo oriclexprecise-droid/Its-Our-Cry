@@ -4379,6 +4379,23 @@ async function loadModels() {
       addRow.appendChild(input);
       addRow.appendChild(btn);
       item.appendChild(addRow);
+      const actionRow = document.createElement("div");
+      actionRow.className = "btn-row model-item-actions";
+      const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
+      exportBtn.className = "btn-secondary btn-small";
+      exportBtn.textContent = "导出角色包";
+      exportBtn.addEventListener("click", () => exportModel(m.key));
+      actionRow.appendChild(exportBtn);
+      if (!m.native) {
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn-secondary btn-small";
+        delBtn.textContent = "删除角色";
+        delBtn.addEventListener("click", () => deleteModel(m.key, m.name));
+        actionRow.appendChild(delBtn);
+      }
+      item.appendChild(actionRow);
       listEl.appendChild(item);
     });
   } catch (e) {
@@ -5062,6 +5079,128 @@ function initReferenceLibrary() {
 
 function initModelConfig() {
   loadModels();
+  const addBtn = document.getElementById("btn-add-model");
+  const panel = document.getElementById("add-model-panel");
+  const cancelBtn = document.getElementById("btn-model-cancel");
+  const submitBtn = document.getElementById("btn-model-submit");
+  const importBtn = document.getElementById("btn-import-model");
+  const importInput = document.getElementById("model-import-file");
+  if (addBtn && panel) {
+    addBtn.addEventListener("click", () => {
+      panel.classList.toggle("hidden");
+      if (!panel.classList.contains("hidden")) {
+        const nameInput = document.getElementById("model-name");
+        if (nameInput) nameInput.focus();
+      }
+    });
+  }
+  if (cancelBtn && panel) {
+    cancelBtn.addEventListener("click", () => panel.classList.add("hidden"));
+  }
+  if (submitBtn) submitBtn.addEventListener("click", submitAddModel);
+  if (importBtn && importInput) {
+    importBtn.addEventListener("click", () => {
+      importInput.value = "";
+      importInput.click();
+    });
+  }
+  if (importInput) importInput.addEventListener("change", importModelPackage);
+}
+
+function setAddModelStatus(text, ok) {
+  const el = document.getElementById("add-model-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.className = "status-text" + (ok ? " success" : "");
+}
+
+async function submitAddModel() {
+  const nameInput = document.getElementById("model-name");
+  const sovitsInput = document.getElementById("model-sovits-file");
+  const gptInput = document.getElementById("model-gpt-file");
+  const submitBtn = document.getElementById("btn-model-submit");
+  const name = nameInput ? nameInput.value.trim() : "";
+  const sovits = sovitsInput && sovitsInput.files && sovitsInput.files[0];
+  const gpt = gptInput && gptInput.files && gptInput.files[0];
+  if (!name) {
+    setAddModelStatus("请先填写角色名", false);
+    return;
+  }
+  if (!sovits || !gpt) {
+    setAddModelStatus("请选择 .pth 和 .ckpt 两个模型文件", false);
+    return;
+  }
+  if (submitBtn) submitBtn.disabled = true;
+  setAddModelStatus("正在复制模型文件，文件较大时请稍候...", false);
+  try {
+    const form = new FormData();
+    form.append("name", name);
+    form.append("sovits_file", sovits);
+    form.append("gpt_file", gpt);
+    const res = await fetch("/api/models/upload", { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+    setAddModelStatus("角色「" + name + "」添加完成", true);
+    if (nameInput) nameInput.value = "";
+    if (sovitsInput) sovitsInput.value = "";
+    if (gptInput) gptInput.value = "";
+    const panel = document.getElementById("add-model-panel");
+    if (panel) panel.classList.add("hidden");
+    await loadModels();
+    await loadConfig();
+  } catch (e) {
+    setAddModelStatus("添加失败: " + e.message, false);
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+async function importModelPackage() {
+  const input = document.getElementById("model-import-file");
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  if (!(await showConfirmModal("导入角色包会复制模型文件与参考音频到本机。确定继续吗？"))) {
+    input.value = "";
+    return;
+  }
+  setAddModelStatus("正在导入 " + file.name + "...", false);
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/models/import", { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+    await showAlertModal(data.message || "导入完成");
+    setAddModelStatus("角色「" + (data.key || "") + "」导入完成", true);
+    await loadModels();
+    await loadConfig();
+  } catch (e) {
+    await showAlertModal("导入失败: " + e.message);
+    setAddModelStatus("导入失败: " + e.message, false);
+  } finally {
+    input.value = "";
+  }
+}
+
+async function exportModel(key) {
+  try {
+    const res = await api("/api/models/" + encodeURIComponent(key) + "/export", { method: "POST", timeout: 600000 });
+    if (res.status === "cancelled") return;
+    await showAlertModal(res.message || "导出完成");
+  } catch (e) {
+    await showAlertModal("导出失败: " + e.message);
+  }
+}
+
+async function deleteModel(key, name) {
+  if (!(await showConfirmModal("确定删除角色「" + name + "」吗？这会删除它的模型文件，参考音频会保留。系统自带角色不能删除。"))) return;
+  try {
+    await api("/api/models/" + encodeURIComponent(key), { method: "DELETE" });
+    await loadModels();
+    await loadConfig();
+  } catch (e) {
+    await showAlertModal("删除失败: " + e.message);
+  }
 }
 
 function initShareImportExport() {
