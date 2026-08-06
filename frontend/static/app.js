@@ -5133,6 +5133,7 @@ async function submitAddModel() {
     if (panel) panel.classList.add("hidden");
     await loadModels();
     await loadConfig();
+    await loadModelPackageList();
   } catch (e) {
     setAddModelStatus("添加失败: " + e.message, false);
   } finally {
@@ -5147,6 +5148,7 @@ async function deleteModel(key, name) {
     await api("/api/models/" + encodeURIComponent(key), { method: "DELETE" });
     await loadModels();
     await loadConfig();
+    await loadModelPackageList();
   } catch (e) {
     await showAlertModal("删除失败: " + e.message);
   }
