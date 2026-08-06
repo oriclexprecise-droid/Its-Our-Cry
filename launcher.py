@@ -200,11 +200,8 @@ def main():
     if not acquire_single_instance_mutex():
         _write_log(root, "another instance already running, skip")
         existing = _find_our_server_port()
-        if existing is not None:
-            if os.environ.get("MYGO_NO_BROWSER") == "1":
-                print(f"server url: http://127.0.0.1:{existing}/")
-                return
-            _open_desktop_window(f"http://127.0.0.1:{existing}/")
+        if os.environ.get("MYGO_NO_BROWSER") == "1" and existing is not None:
+            print(f"server url: http://127.0.0.1:{existing}/")
             return
         message = "程序已经在运行，请勿重复启动。"
         try:
